@@ -1,0 +1,155 @@
+/* ============================================================
+   xsplit.css — v4.137 · 🔀 CROSS-TANK GI SPLIT
+   Bảng mở từ nút 🔀 trên thẻ TK-3501 / TK-3502 (tab Scale).
+   Màu quy ước của cả app: TK-3501 xanh · TK-3502 cam.
+
+   ⚠ LINK CỦA FILE NÀY PHẢI NẰM TRÊN KHỐI COMMENT trong <head> của
+     index.html (cạnh bond.css / vessel.css). Nhét vào khối comment là
+     CSS không nạp, giao diện đổ về HTML trần — đúng bẫy v4.82.
+   ============================================================ */
+.xs-modal{width:1060px;max-width:96vw;max-height:90vh;}
+.xs-body{padding:0;display:flex;flex-direction:column;gap:0;overflow:hidden;flex:1;min-height:0;}
+.xs-sec{padding:11px 16px;border-bottom:1px solid var(--line);}
+.xs-sec:last-child{border-bottom:none;}
+.xs-sec-t{font-family:'Oswald',sans-serif;font-size:8.5px;font-weight:700;letter-spacing:1.3px;
+  color:#9bacbd;margin-bottom:7px;display:block;}
+
+/* ── 1. thanh tìm xe ───────────────────────────────────────── */
+.xs-find-tb{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.xs-find-tb .lbl{font-family:'Oswald',sans-serif;font-size:8.5px;font-weight:700;letter-spacing:1.1px;color:#9bacbd;}
+.xs-find-tb input[type=date],.xs-find-tb input[type=text]{border:1.5px solid #dde5ee;border-radius:8px;
+  padding:6px 10px;font-size:12.5px;font-family:'Barlow',sans-serif;color:var(--navy);background:#fff;}
+.xs-find-tb input[type=text]{flex:1;min-width:220px;}
+.xs-find-tb input::placeholder{color:#b4c0cc;}
+.xs-find-tb input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(21,101,192,.10);}
+.xs-find-tb button{border:1.5px solid #dde5ee;background:#fff;border-radius:8px;padding:5px 11px;
+  font-size:11px;font-weight:600;cursor:pointer;color:var(--ink-2);}
+.xs-find-tb button:hover{border-color:var(--blue);color:var(--blue);}
+.xs-find-tb button.clr{margin-left:auto;color:#b06a6a;}
+.xs-find-tb button.clr:hover{border-color:#c62828;color:#c62828;}
+
+/* Danh sách chỉ hiện khi ĐANG GÕ — mặc định biến mất hẳn (v4.137). */
+.xs-res{display:none;}
+.xs-res.on{display:flex;flex-direction:column;gap:3px;margin-top:8px;
+  max-height:212px;overflow-y:auto;}
+.xs-res-empty{font-size:11.5px;color:var(--ink-3);font-style:italic;padding:5px 2px;}
+.xs-res-row{display:grid;grid-template-columns:20px 96px 1fr 62px 132px 82px;gap:9px;align-items:center;
+  border:1.5px solid #e8eef5;border-left-width:3px;background:#fff;border-radius:8px;padding:6px 10px;
+  font-size:12px;cursor:pointer;text-align:left;font-family:'Barlow',sans-serif;}
+.xs-res-row:hover{border-color:var(--blue);background:#f4f9ff;}
+.xs-res-row.s2100{border-left-color:#1565c0;}
+.xs-res-row.s2101{border-left-color:#e76f00;}
+.xs-res-row.notk{border-left-color:#c7ccd3;}
+.xs-res-row .plus{color:var(--blue);font-weight:700;font-size:14px;line-height:1;}
+.xs-res-row .t{font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;}
+.xs-res-row .dr{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.xs-res-row .d{color:var(--ink-3);font-size:10.5px;font-variant-numeric:tabular-nums;}
+.xs-res-row .tk{font-size:10.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.xs-res-row .n{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--navy);}
+
+/* ── 2. hai thẻ bồn (nền COQ) ──────────────────────────────── */
+.xs-tanks{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.xs-tk{border:1px solid #e4eaf1;border-radius:10px;padding:9px 11px;background:#fbfcfe;}
+.xs-tk.p2100{border-top:2.5px solid #1565c0;}
+.xs-tk.p2101{border-top:2.5px solid #e76f00;}
+.xs-tk.gi{background:#fff;box-shadow:0 1px 6px rgba(11,31,66,.07);}
+.xs-tk-hd{display:flex;align-items:center;gap:8px;}
+.xs-tk-hd b{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:.6px;color:var(--navy);}
+.xs-tk-hd .sl{font-size:9.5px;color:#a9b6c4;}
+.xs-gi-btn{margin-left:auto;border:1.5px solid #e2e8ef;background:#fff;border-radius:20px;
+  padding:2px 10px;font-size:9.5px;font-weight:700;cursor:pointer;color:#8d9cab;letter-spacing:.5px;}
+.xs-gi-btn:hover{border-color:#e0a800;color:#8a6100;}
+.xs-gi-btn.on{background:#fff6e0;border-color:#f0c04a;color:#8a6100;}
+.xs-tk-f{display:grid;grid-template-columns:1.15fr .8fr 1fr;gap:7px;margin-top:8px;}
+.xs-tk-f label{display:flex;flex-direction:column;gap:3px;}
+.xs-tk-f label span{font-family:'Oswald',sans-serif;font-size:7.5px;font-weight:700;letter-spacing:1px;color:#9bacbd;}
+.xs-tk-f input{border:1.5px solid #dde5ee;border-radius:7px;padding:5px 8px;font-size:12px;
+  font-family:'JetBrains Mono','Barlow',monospace;width:100%;background:#fff;color:var(--navy);}
+.xs-tk-f input::placeholder{color:#c2ccd6;}
+.xs-tk-f input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(21,101,192,.10);}
+.xs-tk-b{margin-top:7px;font-size:10.5px;color:#7d8d9d;}
+.xs-tk-s{margin-top:7px;padding-top:7px;border-top:1px dashed #e4eaf1;
+  display:flex;flex-wrap:wrap;gap:6px 14px;}
+.xs-tk-s .st{display:flex;flex-direction:column;gap:1px;}
+.xs-tk-s .st i{font-style:normal;font-family:'Oswald',sans-serif;font-size:7px;font-weight:700;
+  letter-spacing:.9px;color:#a9b6c4;}
+.xs-tk-s .st b{font-family:'JetBrains Mono','Barlow',monospace;font-size:11.5px;
+  font-weight:600;color:#22364a;font-variant-numeric:tabular-nums;}
+
+/* ── 3. bảng xe đã chọn ────────────────────────────────────── */
+.xs-tblwrap{border:1px solid #e4eaf1;border-radius:10px;overflow:auto;max-height:29vh;background:#fff;}
+.xs-r{display:grid;
+  grid-template-columns:24px 56px 92px 1fr 96px 104px 78px 116px 82px 82px 84px;
+  gap:5px;align-items:center;padding:4px 9px;border-bottom:1px solid #f0f4f8;font-size:11.5px;}
+.xs-r:last-child{border-bottom:none;}
+.xs-hd,.xs-ft{position:sticky;background:#f6f9fc;font-family:'Oswald',sans-serif;font-size:8px;
+  font-weight:700;letter-spacing:.9px;color:#9bacbd;}
+.xs-hd{top:0;z-index:2;}
+.xs-ft{bottom:0;z-index:2;border-top:1.5px solid #e2e9f0;font-size:11.5px;letter-spacing:.2px;color:var(--navy);}
+.xs-r.bad{background:#fff5f5;}
+.xs-r .c{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.xs-r .c.n{text-align:right;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono','Barlow',monospace;}
+.xs-r .c.n.a{color:#1565c0;}
+.xs-r .c.n.b{color:#e76f00;}
+.xs-r .c.t{font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;}
+.xs-r .c.dr,.xs-r .c.do{color:var(--ink-2);}
+.xs-r .c.tk i{font-style:normal;color:#a9b6c4;margin-left:5px;font-size:10px;}
+.xs-r .c.tk.s2100{color:#1565c0;}
+.xs-r .c.tk.s2101{color:#e76f00;}
+.xs-r .c.x button{border:none;background:transparent;border-radius:5px;width:19px;height:19px;
+  cursor:pointer;color:#c0cad4;font-size:12px;line-height:1;}
+.xs-r .c.x button:hover{background:#ffeaea;color:#c62828;}
+.xs-r .c.in input{width:100%;border:1.5px solid #ead9a8;border-radius:7px;padding:3px 7px;font-size:11.5px;
+  text-align:right;font-family:'JetBrains Mono','Barlow',monospace;background:#fffdf3;color:var(--navy);}
+.xs-r .c.in input::placeholder{color:#cdbf95;font-size:10px;}
+.xs-r .c.in input:focus{outline:none;border-color:#e0a800;background:#fff;box-shadow:0 0 0 3px rgba(224,168,0,.13);}
+.xs-r.bad .c.in input{border-color:#e57373;background:#fff;}
+.xs-r .c.gi{text-align:center;font-weight:700;font-size:10.5px;}
+.xs-r .c.gi.s2100{color:#1565c0;}
+.xs-r .c.gi.s2101{color:#e76f00;}
+.xs-r .c.gi.moved{text-decoration:underline dotted;}
+.xs-empty{padding:16px;font-size:12px;color:#a9b6c4;text-align:center;}
+
+/* ── 4. kết quả / phương án ────────────────────────────────── */
+.xs-out{overflow-y:auto;max-height:34vh;}
+.xs-out-hd{display:flex;flex-wrap:wrap;gap:3px 14px;align-items:baseline;font-size:12px;color:var(--ink-2);
+  padding-bottom:8px;}
+.xs-out-hd b.a{color:#1565c0;}
+.xs-out-hd b.b{color:#e76f00;}
+.xs-note{font-size:10.5px;color:#a07a2a;font-style:italic;}
+.xs-warn{font-size:12px;color:#c62828;background:#fff5f5;border:1px solid #ffd6d6;border-radius:9px;padding:9px 12px;}
+.xs-opts{display:flex;flex-direction:column;gap:7px;}
+.xs-opt{border:1.5px solid #e4eaf1;border-radius:10px;padding:8px 11px;cursor:pointer;background:#fff;}
+.xs-opt:hover{border-color:#b8d3ee;}
+.xs-opt.on{border-color:var(--blue);background:#f7fbff;}
+.xs-opt.over{border-color:#f2c2c2;}
+.xs-opt-hd{display:flex;align-items:center;gap:8px;}
+.xs-opt-hd .tag{font-family:'Oswald',sans-serif;font-size:8.5px;font-weight:700;letter-spacing:1.1px;color:#9bacbd;}
+.xs-opt-hd .tag.best{color:#1b7a3d;}
+.xs-copy{margin-left:auto;border:1.5px solid #e2e8ef;background:#fff;border-radius:7px;padding:2px 9px;
+  font-size:10px;font-weight:600;cursor:pointer;color:#8d9cab;}
+.xs-copy:hover{border-color:var(--blue);color:var(--blue);}
+.xs-opt-mv{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-top:4px;
+  font-family:'JetBrains Mono','Barlow',monospace;}
+.xs-opt-mv b.mv{font-size:12px;color:var(--navy);font-family:'Oswald',sans-serif;letter-spacing:.5px;}
+.xs-opt-mv b.ok{font-size:12px;color:#1b7a3d;font-weight:600;font-family:'Barlow',sans-serif;}
+.xs-opt-mv .amt{font-size:16px;font-weight:700;color:#0b1f42;}
+.xs-opt-mv .c3{font-size:12.5px;font-weight:700;color:#2d8a4e;}
+.xs-opt-mv .c4{font-size:12.5px;font-weight:700;color:#e76f00;}
+.xs-opt-mv .miss{font-size:11px;color:#a07a2a;font-style:italic;font-family:'Barlow',sans-serif;}
+.xs-opt-gi{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:6px;}
+.xs-opt-gi .g{font-size:11.5px;color:var(--ink-2);border-left:2.5px solid #e4eaf1;padding-left:8px;
+  font-family:'JetBrains Mono','Barlow',monospace;}
+.xs-opt-gi .g.a{border-left-color:#1565c0;}
+.xs-opt-gi .g.b{border-left-color:#e76f00;}
+.xs-opt-gi .g i{display:block;font-style:normal;font-family:'Oswald',sans-serif;font-size:7.5px;
+  font-weight:700;letter-spacing:1px;color:#a9b6c4;}
+.xs-opt-gi .g u{display:block;text-decoration:none;font-size:10.5px;color:#9bacbd;
+  font-family:'Barlow',sans-serif;}
+.xs-opt-warn{margin-top:6px;display:flex;flex-direction:column;gap:2px;}
+.xs-over{font-size:11px;color:#c62828;}
+
+/* ── nút 🔀 trên thẻ tank; nút 🔍 WMS check thu hẹp lại lấy chỗ ── */
+.scx2-tkx-acts button.scx2-tkx-xs{border-color:#e0c58a;background:#fffaf0;}
+.scx2-tkx-acts button.scx2-tkx-xs:hover{border-color:#c98c00;background:#fff3d9;}
+.scx2-tkx-acts button.scx2-tkx-wms{flex:0 0 26px;min-width:26px;}

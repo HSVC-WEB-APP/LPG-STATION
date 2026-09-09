@@ -1,0 +1,436 @@
+/* ============================================================
+ * MIXNOTIFY  —  mixnotify.js
+ * ------------------------------------------------------------
+ * NGUỒN (V4-54): lpg-station-v4_54_0-cavern-collapsible-sections.html
+ *   dòng 23673–23817   (~145 dòng)
+ * Global xuất ra : window.MIXNOTIFY
+ * Phase tách     : P5A
+ * Phụ thuộc      : mixctrl
+ * Khởi tạo (boot): MIXNOTIFY.init() trong boot
+ * ------------------------------------------------------------
+ * MÔ TẢ: Thông báo trạng thái pha trộn.
+ *
+ * API công khai (điền/đối chiếu khi tách):
+ *   MIXNOTIFY.init(), MIXNOTIFY.push(...)
+ * ------------------------------------------------------------
+ * CÁCH TÁCH (khi tới phase này):
+ *   1) Mở V4-54, copy nguyên khối module MIXNOTIFY từ dòng 23673 đến 23817.
+ *   2) Dán xuống DƯỚI dòng này. GIỮ NGUYÊN tên global (window.MIXNOTIFY).
+ *   3) node --check mixnotify.js   → phải PASS (không lỗi cú pháp).
+ *   4) Mở index.html trên trình duyệt → kiểm tra chức năng hoạt động.
+ *   5) Cập nhật docs/PLAN-TACH-MODULE.md: đánh dấu [x] module này.
+ * ============================================================ */
+
+/* TODO[P5A]: dán thân module MIXNOTIFY (V4-54 dòng 23673–23817) vào đây. */
+
+/* ===== BÓC TỪ V4-54 dòng 23673–23817 ===== */
+const MIXNOTIFY = (function(){
+  'use strict';
+  const FB_PATH = 'mix_notify';
+  const PEND = Object.create(null);   // pk -> entry (only NOT confirmed/cancelled)
+  let _fbRef = null;
+  let _attached = false;
+
+  function _sanitizePk(s){
+    /* Firebase keys can't contain . # $ / [ ] — replace with _ */
+    return String(s||'').replace(/[.#$/\[\]]/g, '_');
+  }
+  function _esc(s){
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function pushNotify(tkName, lot, c3Kg, c4Kg, key){
+    if(!_fbRef){ console.warn('[MIXNOTIFY] fb not init'); return null; }
+    if(!c3Kg && !c4Kg) return null;
+    const pk = _sanitizePk(tkName + '_' + lot);
+    return _fbRef.child(pk).set({
+      lot:    String(lot),
+      c3:     c3Kg|0,
+      c4:     c4Kg|0,
+      tkName: String(tkName),
+      key:    String(key||''),
+      _ts:    Date.now()
+    }).catch(e=>{ if(typeof fbErr==='function') fbErr(e,'Notify Scale'); else console.warn('[MIXNOTIFY] push', e); });
+  }
+
+  /* v4.62 — confirm/cancel now DELETE the node outright (was: mark
+     confirmed/cancelled=true, which left the record on Firebase forever).
+     A notify is a live prompt only: once the operator has acted on it there
+     is nothing left to keep, so we remove it → no residual data buildup on
+     /mix_notify. The confirmed/cancelled filter in _onValue is kept so any
+     legacy flagged records already on Firebase still stay hidden. */
+  /* v4.68 — CONFIRM = "đã chuyển kho trên WMS".
+     Nhân viên cân thao tác stock transfer trên WMS rồi mới ấn ✅ ở đây, nên
+     lúc confirm ta đánh dấu luôn cờ ST của đúng lot+tank trong Tank Log
+     (eng_tkmix cột 53). Từ thời điểm đó ALLOC thôi cộng lot này vào bồn vì
+     SAP/WMS đã ghi nhận. Ghi cờ TRƯỚC khi xoá node để còn đọc được lot/tank. */
+  /* v4.77 — CONFIRM AN TOÀN. Trước đây node /mix_notify bị xoá NGAY, không
+     cần biết cờ ST có lên được Tank Log hay không; nếu lot không tìm thấy
+     (hoặc Firebase từ chối ghi) thì thông báo mất luôn mà ST vẫn trống →
+     ALLOC cộng trùng lot và không ai biết. Giờ: chỉ xoá thông báo SAU KHI
+     ENG xác nhận đã ghi cờ ST thành công; thất bại thì GIỮ thông báo lại
+     để nhân viên bấm lại hoặc tick tay ở Tank Log. */
+  const _CONFIRM_TIMEOUT = 12000;    // ENG phải kéo hết Tank Log nếu lot cũ
+  const _busy = Object.create(null); // pk đang xử lý → chặn double-click
+
+  function _say(msg, type){ try{ if(typeof toast==='function') toast(msg, type); }catch(_){} }
+
+  function confirm(pk){
+    if(!_fbRef) return;
+    if(_busy[pk]) return;
+    const item = PEND[pk] || null;
+
+    /* Không còn dữ liệu trong PEND (thông báo cũ / đã xử lý nơi khác) →
+       dọn node cho sạch, không có gì để tick. */
+    if(!item){
+      _fbRef.child(pk).remove()
+        .then(()=> _say('✓ Đã xoá thông báo (không còn dữ liệu lot)','warn'))
+        .catch(e=>{ if(typeof fbErr==='function') fbErr(e,'Confirm mix'); });
+      return;
+    }
+
+    const lotTxt = String(item.lot||'');
+    const tkTxt  = String(item.tkName||'');
+
+    if(typeof ENG === 'undefined' || !ENG.setStockTransfer){
+      _say('❌ Module Tank Log chưa sẵn sàng — chờ vài giây rồi bấm ✅ lại','er');
+      return;
+    }
+
+    _busy[pk] = true;
+
+    /* v4.111 — TICK ST là phần việc THẬT SỰ QUAN TRỌNG, nên nó nằm trong
+       runST() và luôn được chạy, dù việc ghi đối chiếu ở dưới có thành
+       công hay không. */
+    const runST = function(){
+    let settled = false;
+    const finish = (ok, why) => {
+      if(settled) return; settled = true;
+      delete _busy[pk];
+      if(!ok){
+        /* GIỮ node lại — thông báo vẫn hiện để thao tác lại. */
+        _say(why === 'notfound'
+              ? '❌ Không tìm thấy lot '+lotTxt+' ('+tkTxt+') trong Tank Log — thông báo được GIỮ LẠI. '
+                + 'Hãy kiểm tra số lot / tick tay cột ST ở Tank Log rồi bấm ✅ lại.'
+              : '❌ Ghi cờ Stock Transfer lot '+lotTxt+' thất bại (lỗi mạng/Firebase) — '
+                + 'thông báo được GIỮ LẠI, vui lòng bấm ✅ lại.', 'er');
+        render();
+        return;
+      }
+      _fbRef.child(pk).remove()
+        .then(()=> _say('✓ Đã xác nhận · tick Stock Transfer cho lot '+lotTxt+' ('+tkTxt+') ở Tank Log','ok'))
+        .catch(e => {
+          if(typeof fbErr==='function') fbErr(e,'Confirm mix'); else console.warn('[MIXNOTIFY] confirm', e);
+          _say('⚠ Đã tick ST cho lot '+lotTxt+' nhưng chưa xoá được thông báo — bấm ✅ lại để dọn','warn');
+        });
+    };
+
+    setTimeout(()=> finish(false, 'timeout'), _CONFIRM_TIMEOUT);
+    try{
+      ENG.setStockTransfer(item.lot, item.tkName, true, null, finish);
+    }catch(e){
+      console.warn('[MIXNOTIFY] setStockTransfer', e);
+      finish(false, 'exception');
+    }
+    };   /* ── hết runST ── */
+
+    /* ══ v4.111 — GHI ĐỐI CHIẾU CHUYỂN KHO TRƯỚC, RỒI MỚI TICK ST ══════
+       ✅ ở đây nghĩa là "tôi đã chuyển kho trên WMS". Đúng lúc đó phải
+       chốt luôn: lệch tồn đầu bao nhiêu và rốt cuộc đã chuyển đi con số
+       nào — ghi thẳng vào 4 cột mới của Tank Log để sau này review, kiểm
+       tra chéo hay tra cứu đều có số. Chạy TRƯỚC (tuần tự) để hai đường
+       ghi không cùng lúc kéo Tank Log về và đụng nhau.
+       Thiếu tồn đầu hệ thống thì INV chỉ nhắc bằng toast và TICK ST VẪN
+       CHẠY — không bao giờ chặn thao tác chính vì một ô còn trống. */
+    let moved = false;
+    const go = ()=>{ if(moved) return; moved = true; runST(); };
+    let started = false;
+    try{
+      if(typeof INV !== 'undefined' && INV.stxSaveFor)
+        started = (INV.stxSaveFor(item.tkName, item.lot, go, false) === true);
+    }catch(e){ console.warn('[MIXNOTIFY] stxSaveFor', e); }
+    if(started) setTimeout(go, 8000);    /* lưới an toàn nếu callback không về */
+    else go();
+  }
+
+  function cancel(pk){
+    if(!_fbRef) return;
+    _fbRef.child(pk).remove()
+      .catch(e => { if(typeof fbErr==='function') fbErr(e,'Cancel mix'); else console.warn('[MIXNOTIFY] cancel', e); });
+  }
+
+  function _onValue(snap){
+    const all = snap.val() || {};
+    for(const k in PEND) delete PEND[k];
+    for(const pk in all){
+      const v = all[pk];
+      if(!v || typeof v !== 'object') continue;
+      if(v.confirmed || v.cancelled)  continue;
+      PEND[pk] = Object.assign({ _pk:pk }, v);
+    }
+    render();
+  }
+
+  /* ══ v4.111 — THẺ THÔNG BÁO GỘP LUÔN PHẦN ĐỐI CHIẾU CHUYỂN KHO ═══════
+     Trước đây thẻ chỉ có con số Filled C3/C4 rồi ✅. Nhân viên cân muốn
+     biết tồn đầu hệ thống / lệch bao nhiêu / rốt cuộc phải chuyển bao
+     nhiêu thì phải mở bảng 📏 ở tab Inventory — quá xa cho một thao tác
+     làm mỗi mẻ. Giờ thẻ hiện đủ bốn dòng và Ô TỒN ĐẦU HỆ THỐNG SỬA ĐƯỢC
+     NGAY TẠI ĐÂY: gõ ở đây đúng bằng gõ trong bảng đối chiếu (cùng một
+     kho số của INV). Bảng 📏 chỉ còn để xem chi tiết khi cần.
+     Mọi số lấy từ INV.stxFigures — MỘT hàm tính duy nhất, nên thẻ và bảng
+     không thể nói khác nhau. INV chưa sẵn sàng thì thẻ lùi về dạng cũ
+     thay vì vỡ. */
+  function _kg(v){
+    return (v === null || v === undefined || !isFinite(v))
+      ? '—' : Math.round(v).toLocaleString('en-US');
+  }
+  function _sgn(v){
+    if(v === null || v === undefined || !isFinite(v)) return '—';
+    const r = Math.round(v);
+    return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r).toLocaleString('en-US');
+  }
+  function _sgnCls(v){
+    if(v === null || v === undefined || !isFinite(v)) return '';
+    return Math.abs(v) < 1 ? 'z' : (v > 0 ? 'p' : 'm');
+  }
+  /* Ô nhập tồn đầu hệ thống — oninput đẩy thẳng vào kho dùng chung của INV */
+  function _sysInp(pk, sloc, lot, k, v){
+    const id = 'ntxSys' + k + _sanitizePk(pk);
+    /* v4.114 — type=text + inputmode=decimal (KHÔNG dùng type=number: ô đó
+       không cho đặt lại vị trí con trỏ sau mỗi lượt vẽ lại, lăn chuột là tự
+       đổi số, và một ký tự lỡ tay làm ô trả về chuỗi rỗng). */
+    return '<input class="ntx-inp c' + k + '" id="' + id + '" type="text" inputmode="decimal" autocomplete="off" '
+         + 'placeholder="C' + k + ' kg" value="' + (v === null || v === undefined ? '' : Math.round(v)) + '" '
+         + 'title="System opening stock in SAP, C' + k + ' part (kg). '
+         + 'This is the same figure as in the ⚖ Stock-transfer reconciliation table — editing it here edits it there." '
+         + 'oninput="MIXNOTIFY.sysEdit(\'' + String(pk).replace(/'/g, "\\'") + '\')">';
+  }
+  function _mixCard(item){
+    const total  = (item.c3||0) + (item.c4||0);
+    const lotRaw = String(item.lot||'');
+    /* v4.28.3 — chỉ hiện phần số đuôi của lot ("LPG-2026-7" → "7") */
+    const lotMatch = lotRaw.match(/(\d+)$/);
+    const lotDisp = lotMatch ? lotMatch[1] : lotRaw;
+    const pkJs = String(item._pk||'').replace(/'/g,"\\'");
+
+    let F = null, sloc = '';
+    try{
+      if(typeof INV !== 'undefined' && INV.stxFigures && INV.stxSlocOf){
+        sloc = INV.stxSlocOf(item.tkName);
+        if(sloc) F = INV.stxFigures(sloc, lotRaw);
+      }
+    }catch(e){ console.warn('[MIXNOTIFY] stxFigures', e); }
+
+    let recon = '';
+    if(!F){
+      recon = '<div class="ntx-note">Reconciliation figures unavailable — the Inventory module is not ready yet.</div>';
+    } else if(!F.ok){
+      recon = '<div class="ntx-note warn">'
+            + (F.why === 'no-row'
+                ? 'No Tank Log row found for lot <b>' + _esc(lotRaw) + '</b> yet, so the opening gap and the '
+                  + 'adjusted transfer quantity cannot be computed. Confirming still ticks Stock Transfer.'
+                : 'Lot <b>' + _esc(lotRaw) + '</b> has no COQ basis yet (missing: ' + _esc(F.miss) + '), '
+                  + 'so the gap cannot be computed. Run ◈ CALC COQ on the lot in the Tank Log.')
+            + '</div>';
+    } else {
+      const hs = F.hasSys;
+      const srcTxt = ({ sap:'from SAP End Stock',
+                        /* v4.113 — số gõ tay được giữ hộ trên server theo TỪNG LOT,
+                           nên bồn trộn tiếp mẻ mới cũng không nuốt mất nó. */
+                        manual:'typed by the operator and held on the server for this lot',
+                        'sap-missing':'SAP End Stock for that day is not loaded — type it in',
+                        'manual-required':'must be typed in (mixing finished inside operating hours)',
+                        none:'—' })[F.sysTag] || '';
+      recon =
+        '<div class="ntx-grid">'
+        + '<div class="ntx-r r-s"><span class="ntx-k">SYSTEM OPENING</span>'
+        +   '<span class="ntx-v">' + _sysInp(item._pk, sloc, lotRaw, '3', F.sysC3) + '</span>'
+        +   '<span class="ntx-v">' + _sysInp(item._pk, sloc, lotRaw, '4', F.sysC4) + '</span>'
+        +   '<span class="ntx-t">' + (hs ? _kg(F.sysC3 + F.sysC4) + ' kg' : '') + '</span></div>'
+        + '<div class="ntx-r r-g"><span class="ntx-k">GAP AT OPENING</span>'
+        +   '<span class="ntx-v ' + _sgnCls(F.gapC3) + '">' + _sgn(F.gapC3) + '</span>'
+        +   '<span class="ntx-v ' + _sgnCls(F.gapC4) + '">' + _sgn(F.gapC4) + '</span>'
+        +   '<span class="ntx-t">actual − system</span></div>'
+        + '<div class="ntx-r r-a"><span class="ntx-k">ADJUSTED TRANSFER</span>'
+        +   '<span class="ntx-v b">' + _kg(F.xC3) + '</span>'
+        +   '<span class="ntx-v b">' + _kg(F.xC4) + '</span>'
+        +   '<span class="ntx-t">' + (hs ? '= ' + _kg(F.xC3 + F.xC4) + ' kg' : '') + '</span></div>'
+        + '</div>'
+        + '<div class="ntx-note' + (hs ? '' : ' warn') + '">'
+        +   (hs
+              ? 'System opening ' + _esc(srcTxt) + '. Post <b>' + _kg(F.xC3) + '</b> / <b>' + _kg(F.xC4)
+                + '</b> kg instead of the notified figure so the system end stock lands on the measured one. '
+                + '✅ writes the gap and this quantity onto the lot in the Tank Log.'
+              : 'Enter the system opening stock to get the adjusted transfer quantity — '
+                + _esc(srcTxt) + '.')
+        + '</div>';
+      if((F.xC3 !== null && F.xC3 < 0) || (F.xC4 !== null && F.xC4 < 0))
+        recon += '<div class="ntx-note warn">⚠ The adjusted quantity is NEGATIVE — the system already holds '
+               + 'more than the tank actually contains. Check the system opening figure before posting.</div>';
+    }
+
+    /* v4.131 — HÀNG TIÊU ĐỀ C3 / C4.
+       Hai cột số trên thẻ trước đây không có nhãn: nhân viên phải nhớ
+       "trái là C3, phải là C4" và thỉnh thoảng gõ nhầm tồn đầu hệ thống
+       vào sai cột. Thêm một hàng nhãn ở đầu thẻ, dùng ĐÚNG khung cột của
+       .ntx-r nên nó thẳng hàng với cả bốn hàng số bên dưới. */
+    const hdrRow =
+        '<div class="ntx-r r-h"><span class="ntx-k"></span>'
+      +   '<span class="ntx-hc c3">C3</span>'
+      +   '<span class="ntx-hc c4">C4</span>'
+      +   '<span class="ntx-hc tot">TOTAL</span></div>';
+
+    return '<div class="ntx">'
+      + '<div class="ntx-hd">'
+      +   '<span class="ntx-tk">' + _esc(item.tkName) + '</span>'
+      +   '<span class="ntx-lot">LOT ' + _esc(lotDisp) + '</span>'
+      +   '<button class="sc-r5-mix-ok" onclick="MIXNOTIFY.confirm(\'' + pkJs + '\')" '
+      +     'title="Confirm stock transferred on WMS — ticks Stock Transfer and saves the reconciliation '
+      +     'onto this lot in the Tank Log">✅</button>'
+      + '</div>'
+      + '<div class="ntx-grid">'
+      +   hdrRow
+      +   '<div class="ntx-r r-n"><span class="ntx-k">NOTIFIED (COQ)</span>'
+      +     '<span class="ntx-v c3">' + (item.c3||0).toLocaleString('en-US') + '</span>'
+      +     '<span class="ntx-v c4">' + (item.c4||0).toLocaleString('en-US') + '</span>'
+      +     '<span class="ntx-t">= ' + total.toLocaleString('en-US') + ' kg</span></div>'
+      + '</div>'
+      + recon
+      + '</div>';
+  }
+
+  /* Ô nhập bị dựng lại mỗi lần render ⇒ nhớ ô đang focus + vị trí con trỏ
+     rồi trả lại sau khi vẽ, không thì gõ một chữ số là mất con trỏ. */
+  function _focusSnap(host){
+    const el = (typeof document !== 'undefined') ? document.activeElement : null;
+    if(!el || !host || !host.contains(el) || el.tagName !== 'INPUT') return null;
+    let ss = null, se = null;
+    try{ ss = el.selectionStart; se = el.selectionEnd; }catch(_){}
+    return { id:el.id, ss:ss, se:se };
+  }
+  function _focusBack(snap){
+    if(!snap || !snap.id) return;
+    const el = document.getElementById(snap.id);
+    if(!el) return;
+    try{
+      el.focus();
+      if(snap.ss !== null && snap.ss !== undefined) el.setSelectionRange(snap.ss, snap.se);
+    }catch(_){}
+  }
+
+  /* Nhân viên gõ tồn đầu hệ thống ngay trên thẻ thông báo → cất vào kho
+     dùng chung của INV. Bảng ⚖ (nếu đang mở) và thẻ này đổi theo cùng lúc. */
+  function sysEdit(pk){
+    const item = PEND[pk]; if(!item) return;
+    const sfx = _sanitizePk(pk);
+    const e3 = document.getElementById('ntxSys3'+sfx);
+    const e4 = document.getElementById('ntxSys4'+sfx);
+    try{
+      if(typeof INV === 'undefined' || !INV.stxSetSys || !INV.stxSlocOf) return;
+      const sloc = INV.stxSlocOf(item.tkName); if(!sloc) return;
+      INV.stxSetSys(sloc, String(item.lot||''), e3 ? e3.value : '', e4 ? e4.value : '');
+    }catch(e){ console.warn('[MIXNOTIFY] sysEdit', e); }
+  }
+
+  function render(){
+    /* v4.30.0 — Row 5 retired. Tank mix slots now live inside the
+       Notifications modal at #notif-tankmix-host. Same 4-slot oldest-
+       first layout. Also pushes the pending count to NOTIF so the
+       Engineer-Notification badge updates live. */
+    const host  = document.getElementById('notif-tankmix-host');
+    const cells = document.querySelectorAll('#notif-tankmix-host .sc-r5-cell');
+    if(!cells || cells.length < 4) return;
+    const snap = _focusSnap(host);
+    /* Oldest first — first mix that came in fills slot 1 */
+    const list = Object.values(PEND)
+      .sort((a,b) => (a._ts||0) - (b._ts||0))
+      .slice(0, 4);
+    for(let i = 0; i < 4; i++){
+      const cell = cells[i];
+      const item = list[i];
+      if(!item){
+        cell.className = 'sc-r5-cell';
+        cell.innerHTML = '<span style="opacity:.5">Tank Mix '+(i+1)+'</span>';
+        continue;
+      }
+      cell.className = 'sc-r5-cell sc-r5-cell-on';
+      try{ cell.innerHTML = _mixCard(item); }
+      catch(e){
+        console.warn('[MIXNOTIFY] card', e);
+        cell.innerHTML = '<div class="ntx"><div class="ntx-hd"><span class="ntx-tk">'
+          + _esc(item.tkName) + '</span><span class="ntx-lot">LOT ' + _esc(String(item.lot||''))
+          + '</span><button class="sc-r5-mix-ok" onclick="MIXNOTIFY.confirm(\''
+          + String(item._pk||'').replace(/'/g,"\\'") + '\')">✅</button></div></div>';
+      }
+    }
+    /* ── v4.113 — CÓ HƠN 4 THÔNG BÁO THÌ PHẢI NÓI RA ───────────────────
+       Bảng chỉ có 4 ô. Thông báo thứ 5 trở đi vẫn nằm nguyên trên
+       /mix_notify (khoá theo TỪNG LOT nên không cái nào đè cái nào), nhưng
+       trước đây không hiện ở đâu cả — nhìn vào tưởng đã hết việc. */
+    const more = document.getElementById('notif-tankmix-more');
+    if(more){
+      const n = Object.keys(PEND).length;
+      if(n > 4){
+        more.textContent = '+ ' + (n - 4) + ' more mix notification'
+          + ((n - 4) > 1 ? 's are' : ' is') + ' waiting — nothing is lost, '
+          + 'confirm one above to free a slot.';
+        more.style.display = '';
+      } else { more.textContent = ''; more.style.display = 'none'; }
+    }
+    _focusBack(snap);
+    _syncBadge();
+  }
+
+  /* v4.30.0 — also notify NOTIF so the Engineer-button badge follows
+     PEND.size live. Called at the tail of every render() pass. */
+  function _syncBadge(){
+    const n = Object.keys(PEND).length;
+    if(typeof NOTIF !== 'undefined' && NOTIF.setCount) NOTIF.setCount('tankmix', n);
+  }
+
+  function init(){
+    if(_attached) return;
+    try{
+      if(typeof firebase === 'undefined' || !firebase.database){
+        console.warn('[MIXNOTIFY] firebase not loaded'); return;
+      }
+      _fbRef = firebase.database().ref(FB_PATH);
+      _fbRef.on('value', _onValue, e => { if(typeof fbErr==='function') fbErr(e,'Load mix notifications'); else console.warn('[MIXNOTIFY] listener', e); });
+      _attached = true;
+      console.log('[MIXNOTIFY] ✅ Init OK · path /'+FB_PATH);
+    }catch(e){ console.warn('[MIXNOTIFY] init', e); }
+  }
+
+  return {
+    init, pushNotify, confirm, cancel, render,
+    /* v4.111 — ô tồn đầu hệ thống gõ ngay trên thẻ thông báo */
+    sysEdit,
+    get PENDING(){ return PEND; }
+  };
+})();
+window.MIXNOTIFY = MIXNOTIFY;
+/* v4.62: fbErr() wired into confirm/cancel/push + listener (see globals.js) */
+
+
+/* ============================================================
+   VMIX — Vessel Mix Calculator module (v4.26.0 scaffold)
+   ────────────────────────────────────────────────────────────
+   Port of V406 sm* (Ship Mix). This Session 4 lays out:
+     • State: SHIPS list, density / component-props constants,
+       selected ship, ratio mode (1 / 2), unit per tank (vol/wt)
+     • UI plumbing: ship dropdown, lot auto-fill, status pills,
+       GC sum visual check, ratio toggle, unit toggle, reset
+     • Firebase listeners — STUB (attach in Session 5 once the
+       calculation pipeline is in place; we don't want a half-
+       working write path going live)
+     • calcPlan() / calcResult() / saveLog() — STUBS that show a
+       toast "coming in v4.27.0". Pure scaffold so the operator
+       can see and validate the layout against V406's screens.
+
+   Firebase footprint (planned, Session 5+):
+     • vessel_config   : { ships:[{name,tk1_m3,tk2_m3}], props:{…} }
+     • vessel_density  : { c3l, c4l, c3v, c4v }
+     • vessel_mix_log  : { pushKey: entry }   ← Session 6
+   ============================================================ */
