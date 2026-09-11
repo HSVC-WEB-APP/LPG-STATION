@@ -114,11 +114,18 @@ document.addEventListener('DOMContentLoaded', function () {
        gọi SALENOTIF.push() được ngay từ sự kiện đồng bộ đầu tiên. RAM-only. */
     step('P0 · SALENOTIF', () => SALENOTIF.init());
 
+    /* v4.141 · MDAY — cờ 📆 MULTI-DAY (cổng ngày bán hàng, node plan_multiday).
+       Phải gắn TRƯỚC SCALE: mọi cửa chặn ngày ở trạm cân và tổng thẻ PLAN đều
+       hỏi MDAY.allows(), nên cờ phải có giá trị thật trước lần vẽ đầu tiên. */
+    step('P0 · MDAY (multi-day gate)', () => MDAY.attach());
+
     step('P0 · navGo(sales)', () => navGo('sales'));
 
     /* P1 · next frame · Sales->Scale subtab dependencies */
     afterPaint(() => {
       step('P1 · SCALE',          () => SCALE.init());
+      /* Nút 📆 phải vẽ SAU SCALE.init (thanh console mới dựng xong). */
+      step('P1 · MDAYUI (📆 button)', () => MDAYUI.init());
       step('P1 · CT (Customers)', () => CT.init());
       step('P1 · PP (Price)',     () => PP.init());   /* PP reads CT */
 

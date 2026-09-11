@@ -77,7 +77,10 @@ window.AUTH = (function () {
     'exportCsv', 'tpExportCsv', 'tmrExportCsv', 'tlExportCsv', 'wgExportCsv',
     'wsExportCsv', 'spExportCsv', 'ctExportCsv', 'ppExportCsv', 'vsExport',
     'rptExecuteExport', 'ENG.exportXlsx', 'BOND.exportXlsx', 'MTHR.exportXlsx',
-    'PLOG.exportXlsx', 'VLOG.exportXlsx', 'VLOG.exportCsv', 'ODOR.exportCsv',
+    'PLOG.exportXlsx', 'VLOG.exportXlsx', 'VLOG.exportCsv',
+    /* v4.142 — ODOR.exportCsv đã bỏ; tab Odorant xuất qua ODORXL (module này CÓ
+       gán window.ODORXL nên _lockFn chạm được thật). */
+    'ODORXL.open', 'ODORXL.run',
     'CAV.exportReport', 'INV.openExport', 'TLXK.run', 'TLXK.open',
     'pfPrint', 'pfPrint3DN', 'pttOvPrint', 'dnOvPrint', 'dnOvPrint3',
     'ktPrint', 'ENG.openPrint', 'ENG.doPrint', 'SCALE.techPrintDone',

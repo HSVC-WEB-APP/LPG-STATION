@@ -38,6 +38,25 @@ const SCX2 = (function(){
     [[1,'2100','3501'],[2,'2101','3502']].forEach(([n, sloc, tk])=>{
       const main = _q('#scTk'+n+'Card .sc-tkc-main');
       if(!main || document.getElementById('scx2Tkx'+n)) return;
+      /* v4.143 — KHỐI DENSITY / %wt C3 DƯỚI HÌNH TRÒN.
+         Khoảng trống dưới quả cầu đo mức trước nay bỏ không. Nay bọc quả
+         cầu + khối số vào MỘT cột dọc để hai thứ dính nhau, không đụng gì
+         tới cột thông tin bên phải. Con số do SFDENS giải — cùng nguồn
+         với Safe Fill Allow, ĐỪNG tính lại ở đây. */
+      try{
+        const body = _q('#scTk'+n+'Card .sc-tkc-body');
+        const ball = body && body.querySelector('.sc-tkc-ball');
+        if(body && ball && !document.getElementById('scx2Dens'+n)){
+          const side = document.createElement('div');
+          side.className = 'scx2-tkside';
+          body.insertBefore(side, ball);
+          side.appendChild(ball);
+          const dn = document.createElement('div');
+          dn.className = 'scx2-tkd';
+          dn.id = 'scx2Dens'+n;
+          side.appendChild(dn);
+        }
+      }catch(_){}
       const box = document.createElement('div');
       box.className = 'scx2-tkx';
       box.id = 'scx2Tkx'+n;
@@ -77,6 +96,7 @@ const SCX2 = (function(){
   /* fill the opening-stock mini-rows from INV (RAM only) */
   function renderTankExtras(){
     if(!_on) return;
+    renderDens();
     if(typeof INV === 'undefined' || !INV.stockFor) return;
     [['2100',1],['2101',2]].forEach(([sloc, n])=>{
       const el = document.getElementById('scx2Open'+n);
@@ -95,6 +115,74 @@ const SCX2 = (function(){
       + '<span class="k">%C3</span><b>'+(isFinite(c.wtC3) ? c.wtC3 : '—')+'</b>';
     });
   }
+
+  /* ⚠ hai con số %C3 trên thẻ KHÁC NHAU, đừng gộp:
+       hàng OPEN · %C3  = %wt C3 của TỒN ĐẦU KỲ (INV, sửa bằng nút 📐)
+       khối dưới hình tròn = %wt C3 theo COQ của CHÍNH LOT đang trong bồn */
+
+  /* vẽ khối density / %wt C3 của MỘT thẻ tank */
+  function _renderDens(n){
+    const el = document.getElementById('scx2Dens'+n);
+    if(!el) return;
+    if(typeof SFDENS==='undefined' || !SFDENS.tankInfo){ el.innerHTML=''; return; }
+
+    let lot = '', type = '';
+    try{
+      const cfg = (typeof SCALE!=='undefined' && SCALE.getTkCfg) ? SCALE.getTkCfg() : null;
+      const c = cfg && cfg['tk'+n];
+      lot = c ? String(c.lot||'').trim() : '';
+    }catch(_){}
+    const tank = n===1 ? 'TK-3501' : 'TK-3502';
+
+    if(!lot){
+      el.className = 'scx2-tkd empty';
+      el.innerHTML = '<span class="scx2-tkd-e">no lot</span>';
+      el.title = 'Type the lot in the LOT box to see its density.';
+      return;
+    }
+
+    let i = null;
+    try{ i = SFDENS.tankInfo(lot, tank, type); }catch(_){ }
+    if(!i){ el.innerHTML=''; return; }
+
+    const d4 = (i.dens!=null && isFinite(i.dens)) ? (Math.round(i.dens*10000)/10000).toFixed(4) : '—';
+    const wt = (i.wt!=null && isFinite(i.wt)) ? (Math.round(i.wt*10)/10) : null;
+
+    /* Nhãn nguồn — phải đọc được trong 1 giây: số này đáng tin tới đâu? */
+    let tag = '', cls = '', tip = '';
+    if(i.densSrc==='coq'){
+      tag = 'COQ'; cls = 'ok';
+      tip = 'Density from the COQ of lot ' + i.lot + '.';
+    } else if(i.densSrc==='pure'){
+      tag = 'PURE ' + i.pure; cls = 'ok';
+      tip = 'Pure ' + i.pure + ' — saturated-liquid density at ' + SFDENS.pureTemp() + '°C.';
+    } else if(i.densSrc==='near'){
+      tag = '≈ ' + String(i.refLot||'').replace(/^LPG-\d{4}-/, '');
+      cls = i.far ? 'far' : 'est';
+      tip = 'Lot ' + i.lot + ' has no COQ density yet, so the closest lot by %C3 is used: '
+          + i.refLot + (i.gap==null ? '' : ' (' + (Math.round(i.gap*10)/10) + ' points apart)')
+          + (i.far ? ' — WARNING: far from this lot\'s target mix, check before trusting it.' : '.');
+    } else if(i.scanning){
+      tag = '…'; cls = 'est';
+      tip = 'Reading the Tank Log to find a lot to take the density from…';
+    } else {
+      tag = 'MANUAL'; cls = 'man';
+      tip = 'No lot data found — falling back to the density typed on the Safe Fill bar.';
+    }
+    if(wt!=null){
+      tip += '  %wt C3 ' + wt + (i.wtSrc==='coq' ? ' from the COQ of lot ' + i.lot
+            : i.wtSrc==='near' ? ' borrowed from lot ' + i.refLot : '') + '.';
+    }
+
+    el.className = 'scx2-tkd ' + cls;
+    el.title = tip;
+    el.innerHTML =
+        '<div class="scx2-tkd-r"><span class="k">ρ</span><b>' + d4 + '</b></div>'
+      + '<div class="scx2-tkd-tag">' + tag + '</div>'
+      + '<div class="scx2-tkd-r"><span class="k">%wt C3</span><b>'
+      +   (wt==null ? '—' : wt) + '</b></div>';
+  }
+  function renderDens(){ _renderDens(1); _renderDens(2); }
 
   function init(){
     try{
@@ -165,6 +253,9 @@ const SCX2 = (function(){
       pane.classList.add('scx2-on');
       _on = true;
       renderTankExtras();
+      /* v4.143 — SFDENS có thể phải đọc cả Tank Log mới biết mượn density
+         của lot nào; đọc xong thì vẽ lại, không để thẻ kẹt ở chữ MANUAL. */
+      try{ if(typeof SFDENS!=='undefined' && SFDENS.onReady) SFDENS.onReady(renderDens); }catch(_){}
       console.log('[SCX2] Operations Console v2.1 layout active');
     }catch(e){
       console.warn('[SCX2] init failed — legacy layout kept', e);
@@ -176,5 +267,5 @@ const SCX2 = (function(){
     if(p) p.classList.toggle('on');
   }
 
-  return { init, renderTankExtras, toggleRpt };
+  return { init, renderTankExtras, renderDens, toggleRpt };
 })();

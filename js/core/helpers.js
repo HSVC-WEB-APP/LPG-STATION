@@ -231,3 +231,125 @@ window.TWAVG = (function(){
   }
   return { find:find, findRow:findRow, key:key };
 })();
+
+/* ══════════════════════════════════════════════════════════════════════════
+   v4.141 · MDAY — CỔNG NGÀY BÁN HÀNG (nguồn DUY NHẤT)
+   --------------------------------------------------------------------------
+   NGHIỆP VỤ: bình thường trạm cân CHỈ được bán đơn có _forDate = hôm nay.
+   Nhưng có ca đêm kéo dài qua nửa đêm: xe của kế hoạch HÔM QUA vẫn đang nạp,
+   mà kế hoạch NGÀY MAI vừa được promote sang cũng phải bán tiếp. Lúc đó nhân
+   viên bật nút 📆 MULTI-DAY để nới cổng ra HÔM QUA → NGÀY MAI.
+
+   ⚠ ĐỪNG CHÉP LUẬT NÀY SANG plan.js / scale.js. Bài học v4.083 (prodtype)
+   và v4.119 (tỉ lệ 50:50): luật bị chép ra ba nơi thì sửa một nơi là lệch.
+   Mọi cửa chặn ngày phải gọi MDAY.allows(_forDate).
+
+   LƯU Ở FIREBASE (node `plan_multiday`) chứ không phải localStorage: mấy máy
+   cân phải thấy CÙNG một trạng thái, và phải sống sót qua F5 giữa ca đêm.
+   { on:true, until:<ms>, by:'<tên>', at:<ms> }
+   `until` = 08:00 ngày KẾ TIẾP tính từ lúc bật ⇒ hết ca đêm là tự về trạng
+   thái an toàn, không ai phải nhớ tắt. Quá hạn thì coi như TẮT (không cần
+   ai ghi lại Firebase — đọc tới đâu tính tới đó).
+   ══════════════════════════════════════════════════════════════════════════ */
+window.MDAY = (function(){
+  var NODE  = 'plan_multiday';
+  var _st   = { on:false, until:0, by:'', at:0 };   /* bản đọc gần nhất */
+  var _subs = [];                                    /* hàm gọi lại khi đổi */
+
+  function iso(d){ var p=function(n){return String(n).padStart(2,'0');};
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+  function today(){ return iso(new Date()); }
+  function shift(n){ var d=new Date(); d.setDate(d.getDate()+n); return iso(d); }
+
+  /* 08:00 của ngày KẾ TIẾP so với lúc bật. */
+  function nextEightAm(){
+    var d = new Date(); d.setDate(d.getDate()+1);
+    d.setHours(8,0,0,0);
+    return d.getTime();
+  }
+
+  /* Đang bật THẬT SỰ hay không (đã trừ hết hạn). */
+  function isOn(){
+    return !!(_st && _st.on && _st.until && Date.now() < _st.until);
+  }
+
+  /* ⭐ HÀM DUY NHẤT mọi cửa chặn phải gọi.
+     Dòng không ghi ngày (_forDate rỗng) LUÔN cho qua — đó là dòng cũ trước
+     khi có cột này, chặn nó chỉ làm nhân viên không bán được hàng thật. */
+  function allows(forDate){
+    var fd = String(forDate||'').trim();
+    if(!fd) return true;
+    if(fd === today()) return true;
+    return isOn() && fd >= shift(-1) && fd <= shift(1);
+  }
+
+  /* Vì sao một dòng bị chặn — để câu thông báo nói đúng việc cần làm. */
+  function why(forDate){
+    var fd = String(forDate||'').trim();
+    if(allows(fd)) return '';
+    var which = fd > today() ? 'future' : 'stale';
+    return isOn()
+      ? 'this row is a ' + which + ' plan (' + fd + ') outside the multi-day window ('
+        + shift(-1) + ' → ' + shift(1) + ')'
+      : 'this row is a ' + which + ' plan (' + fd + '). Turn on 📆 MULTI-DAY at the Scale '
+        + 'console to sell yesterday/tomorrow rows.';
+  }
+
+  /* Danh sách ngày đang bán được — thẻ PLAN / REMAIN cộng theo đúng danh sách
+     này để con số trên trạm khớp với việc thật đang diễn ra. */
+  function activeDates(){
+    return isOn() ? [shift(-1), today(), shift(1)] : [today()];
+  }
+
+  function state(){ return { on:isOn(), until:_st.until||0, by:_st.by||'', at:_st.at||0 }; }
+  function onChange(fn){ if(typeof fn === 'function') _subs.push(fn); }
+  function _fire(){ _subs.forEach(function(f){ try{ f(state()); }catch(_){ } }); }
+
+  /* Bật / tắt. CHỈ được gọi sau khi người dùng đã xác nhận ở tầng UI —
+     hàm này không tự hỏi han gì. */
+  function set(on, cb){
+    if(typeof firebase === 'undefined'){
+      try{ toast('Offline — Firebase not connected','er'); }catch(_){}
+      return;
+    }
+    var u = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER : {};
+    var val = on
+      ? { on:true, until:nextEightAm(), by:(u.name||u.email||'unknown'), at:Date.now() }
+      : { on:false, until:0, by:(u.name||u.email||'unknown'), at:Date.now() };
+    firebase.database().ref(NODE).set(val)
+      .then(function(){
+        try{ if(typeof logAudit==='function')
+          logAudit('scale:multiday','_flag_','on', String(isOn()), String(!!on),
+                   on ? ('until '+new Date(val.until).toLocaleString()) : 'off'); }catch(_){}
+        if(cb) cb(true);
+      })
+      .catch(function(e){
+        console.error('[MDAY] set', e);
+        try{ toast('Cannot save multi-day flag: '+(e.message||e),'er'); }catch(_){}
+        if(cb) cb(false);
+      });
+  }
+
+  /* Nghe Firebase. Gọi một lần lúc khởi động (boot.js / SCALE.init). */
+  var _attached = false;
+  function attach(){
+    if(_attached || typeof firebase === 'undefined') return;
+    _attached = true;
+    firebase.database().ref(NODE).on('value', function(s){
+      var v = s.val() || {};
+      _st = { on:!!v.on, until:Number(v.until||0), by:String(v.by||''), at:Number(v.at||0) };
+      _fire();
+    });
+    /* Cờ hết hạn ĐÚNG 08:00 mà không ai bấm gì thì cũng phải tự rơi xuống —
+       soát mỗi phút, chỉ báo lại khi trạng thái thật sự đổi. */
+    var _last = isOn();
+    setInterval(function(){
+      var now = isOn();
+      if(now !== _last){ _last = now; _fire(); }
+    }, 60000);
+  }
+
+  return { attach:attach, set:set, isOn:isOn, allows:allows, why:why,
+           activeDates:activeDates, state:state, onChange:onChange,
+           today:today, shift:shift, NODE:NODE };
+})();

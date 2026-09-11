@@ -4089,78 +4089,219 @@ function planClearConfirm(){
   planClearClose();
 }
 
-/* ─── PROMOTE TOMORROW → TODAY ──────────────────────────────────
-   Single-batch Firebase write that:
-     1. nulls every key under plan_today/
-     2. nulls every key under plan_tomorrow/
-     3. re-creates each Tomorrow row under plan_today/ preserving
-        the original _forDate (the date picker in Today Plan toolbar
-        lets the operator switch between dates).
-   The whole operation is sent as ONE multi-path update() so other
-   clients see today wipe + new today rows atomically. */
-function tmrOpenPromote(){
-  const today  = Object.keys(TP.PLAN || {}).length;
-  const tmrRow = Object.keys(TMR.PLAN || {}).length;
-  if(!tmrRow){ toast('Tomorrow Plan is empty — nothing to promote','er'); return; }
-  document.getElementById('tmrPromoteCount').textContent    = tmrRow;
-  document.getElementById('tmrPromoteOldCount').textContent = today;
+/* ═══════════════ PROMOTE TOMORROW → TODAY (v4.141) ═══════════════════
+   HAI CHẾ ĐỘ, DỮ LIỆU QUYẾT ĐỊNH chứ không phải người dùng chọn:
+
+   ① REPLACE — Today Plan KHÔNG còn xe nào đang nạp.
+      Một lệnh update NGUYÊN TỬ thay CẢ NODE:
+          plan_today = { …các dòng của Tomorrow… }
+          plan_tomorrow = null
+      ⚠ Vì sao thay cả node chứ không liệt kê từng khoá `null` như bản cũ:
+      bản cũ xoá theo DANH SÁCH TRONG RAM (`Object.keys(TP.PLAN)`). Khoá nào
+      có trên Firebase mà RAM chưa kịp biết (máy vừa mở, vừa rớt mạng, sự
+      kiện bị nuốt) thì KHÔNG bị xoá ⇒ dòng cũ sống sót bên cạnh dòng vừa
+      promote = TRÙNG LẶP. Ghi đè cả node thì RAM đúng hay sai không còn
+      quan trọng nữa — đây là bản vá gốc, không phải vá triệu chứng.
+
+   ② ADD — Today Plan CÒN xe đang nạp (ca đêm kéo qua nửa đêm).
+      KHÔNG xoá gì cả, chỉ THÊM dòng của Tomorrow vào. Nhờ vậy xe của kế
+      hoạch hôm nay nạp xong bình thường, mà xe của ngày mai cũng bán được
+      ngay. Dòng Tomorrow nào trùng _oid với một dòng Today ĐANG NẠP / ĐÃ
+      XONG thì BỎ QUA (không đè lên xe đang cân).
+
+   Cả hai chế độ đều XOÁ SẠCH plan_tomorrow — đã đẩy sang thì Tomorrow Plan
+   trống để sale dán kế hoạch ngày kế tiếp, không nhìn hai nơi cùng một dữ
+   liệu rồi sửa lệch nhau.
+
+   ⚠ NGUỒN DỮ LIỆU LÀ FIREBASE, KHÔNG PHẢI RAM. Cả lúc mở modal lẫn lúc bấm
+   xác nhận đều đọc lại `plan_today` + `plan_tomorrow`. Đọc lỗi thì HUỶ, y
+   như đường dán (_resyncNow('before-paste')) và Clear All đã làm từ v4.139.
+   Đọc bằng RAM là cách 18 dòng trùng ngày 09/09/2026 ra đời.
+
+   ⚠ Dòng của ngày mai sau khi promote MANG NGÀY MAI. Trạm cân vẫn chỉ bán
+   đơn của HÔM NAY cho tới khi ai đó bật 📆 MULTI-DAY (xem window.MDAY trong
+   helpers.js). Đó là chủ ý: promote sớm không đồng nghĩa được bán sớm.  */
+
+let _promoteCtx = null;      /* ảnh chụp Firebase của lần mở modal gần nhất */
+
+/* Đọc một node plan thành mảng dòng sạch (bỏ khoá RÁC, đóng _oid vào dòng). */
+function _promoteRowsOf(snapVal){
+  const out = [];
+  Object.keys(snapVal || {}).forEach(oid=>{
+    const r = snapVal[oid];
+    if(!r || typeof r !== 'object') return;
+    try{ if(TP._isJunkRow && TP._isJunkRow(r)) return; }catch(_){}
+    r._oid = oid;
+    out.push(r);
+  });
+  return out;
+}
+/* Trạng thái hiệu lực của một dòng (RAM: TL.ROWS + DB_SC.stations). */
+function _promoteStatusOf(r){
+  try{
+    if(typeof TP !== 'undefined' && TP.getEffectiveStatus)
+      return String(TP.getEffectiveStatus(r) || '').toLowerCase();
+  }catch(_){}
+  return String(r._status || '').toLowerCase();
+}
+function _promoteIsBusy(r){ return _promoteStatusOf(r) === 'loading'; }
+function _promoteIsSpent(r){ const s=_promoteStatusOf(r); return s==='loading' || s==='done'; }
+
+/* Đọc lại CẢ HAI node và dựng bối cảnh promote. Trả về Promise. */
+function _promoteReadFirebase(){
+  if(typeof firebase === 'undefined') return Promise.reject(new Error('offline'));
+  const FB = firebase.database();
+  return Promise.all([
+    FB.ref('plan_today').once('value'),
+    FB.ref('plan_tomorrow').once('value')
+  ]).then(([ts, ms])=>{
+    const todayRows = _promoteRowsOf(ts.val());
+    const tmrRows   = _promoteRowsOf(ms.val());
+    const busy      = todayRows.filter(_promoteIsBusy);
+    const done      = todayRows.filter(r=>_promoteStatusOf(r)==='done');
+    /* Chế độ do DỮ LIỆU quyết định: còn xe đang nạp ⇒ tuyệt đối không xoá. */
+    const mode = busy.length ? 'add' : 'replace';
+    /* Chế độ ADD: dòng Tomorrow trùng _oid với dòng Today đang nạp/đã xong
+       thì bỏ qua — đè lên là cướp mất trạng thái của xe đang cân. */
+    const spent = new Set(todayRows.filter(_promoteIsSpent).map(r=>String(r._oid)));
+    const skipped = (mode === 'add') ? tmrRows.filter(r=>spent.has(String(r._oid))) : [];
+    const take    = (mode === 'add') ? tmrRows.filter(r=>!spent.has(String(r._oid))) : tmrRows;
+    return { todayRows, tmrRows, busy, done, mode, skipped, take };
+  });
+}
+
+/* Dựng bản sao một dòng Tomorrow để ghi xuống plan_today. */
+function _promoteClone(r){
+  const cloned = {};
+  Object.keys(r).forEach(k => { if(!k.startsWith('__')) cloned[k] = r[k]; });
+  /* _forDate giữ NGUYÊN — nó là thứ nói cho phần mềm biết dòng này của ngày nào. */
+  cloned._status    = '';
+  cloned._actualQty = '';
+  /* v4.59 — dòng promote LUÔN về AUTO. Giữ lại khoá tay là cái bẫy: _status /
+     _actualQty đã bị xoá ở trên, nên dòng promote với _autoSync:false đứng im
+     ở "Pending" cả ngày (không bao giờ nhận Loading/Done từ trạm cân) cho tới
+     khi có người để ý thấy ô chưa tick. */
+  cloned._autoSync  = true;
+  cloned.lastBy   = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER.name) ? CURRENT_USER.name : 'system';
+  cloned.lastAt   = Date.now();
+  cloned.lastRole = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER.role) ? CURRENT_USER.role : '';
+  return cloned;
+}
+
+/* Vẽ modal theo bối cảnh vừa đọc. */
+function _promoteRender(ctx){
+  const isAdd = ctx.mode === 'add';
+  document.getElementById('tmrPromoteReplaceBox').style.display = isAdd ? 'none' : '';
+  document.getElementById('tmrPromoteAddBox').style.display     = isAdd ? '' : 'none';
+  document.getElementById('tmrPromoteTitle').textContent = isAdd
+    ? '➕ Add Tomorrow Plan into Today Plan'
+    : '🚀 Promote Tomorrow Plan → Today Plan';
+  const go = document.getElementById('tmrPromoteGoBtn');
+  go.textContent = isAdd ? '➕ Add into Today (keep current rows)' : '✓ Promote & replace Today';
+  if(isAdd){
+    document.getElementById('tmrPromoteBusyCount').textContent = ctx.busy.length;
+    document.getElementById('tmrPromoteAddCount').textContent  = ctx.take.length;
+    document.getElementById('tmrPromoteKeepCount').textContent = ctx.todayRows.length;
+    document.getElementById('tmrPromoteSkipNote').textContent  = ctx.skipped.length
+      ? ' — ' + ctx.skipped.length + ' row(s) skipped because the same order is already loading or done'
+      : '';
+  } else {
+    document.getElementById('tmrPromoteCount').textContent    = ctx.tmrRows.length;
+    document.getElementById('tmrPromoteOldCount').textContent = ctx.todayRows.length
+      + (ctx.done.length ? ' (incl. ' + ctx.done.length + ' already done)' : '');
+  }
   document.getElementById('tmrPromoteModal').classList.add('on');
+}
+
+function tmrOpenPromote(){
+  if(!canWrite('plan_today') || !canWrite('plan_tomorrow')){
+    toast('You do not have permission to promote','er'); return;
+  }
+  if(typeof firebase === 'undefined'){ toast('Offline — Firebase not connected','er'); return; }
+  _promoteReadFirebase().then(ctx=>{
+    if(!ctx.tmrRows.length){ toast('Tomorrow Plan is empty — nothing to promote','er'); return; }
+    _promoteCtx = ctx;
+    _promoteRender(ctx);
+  }).catch(e=>{
+    console.warn('promote read', e);
+    toast('Cannot read the plan from Firebase — try again in a moment','er');
+  });
 }
 function tmrClosePromote(){
   document.getElementById('tmrPromoteModal').classList.remove('on');
 }
 function tmrPromoteToToday(){ tmrOpenPromote(); }
+
 function tmrConfirmPromote(){
-  tmrClosePromote();
   if(!canWrite('plan_today') || !canWrite('plan_tomorrow')){
     toast('You do not have permission to promote','er'); return;
   }
   if(typeof firebase === 'undefined'){ toast('Offline — Firebase not connected','er'); return; }
-  const FB = firebase.database();
-  const tmrRows = Object.values(TMR.PLAN || {});
-  if(!tmrRows.length){ toast('Tomorrow Plan is empty','er'); return; }
-  const payload = {};
-  /* 1) wipe existing Today Plan (every date inside it) */
-  Object.keys(TP.PLAN || {}).forEach(oid => {
-    payload['plan_today/'+oid] = null;
+  const shownMode = _promoteCtx ? _promoteCtx.mode : '';
+  /* ĐỌC LẠI ngay trước khi ghi. Giữa lúc mở modal và lúc bấm, một xe có thể
+     vừa lên trạm ở máy khác — lúc đó REPLACE trở thành thao tác phá hoại. */
+  _promoteReadFirebase().then(ctx=>{
+    if(!ctx.tmrRows.length){ tmrClosePromote(); toast('Tomorrow Plan is empty','er'); return; }
+    /* Chế độ đổi giữa chừng ⇒ KHÔNG ghi, vẽ lại modal và bắt xác nhận lần nữa. */
+    if(shownMode && ctx.mode !== shownMode){
+      _promoteCtx = ctx;
+      _promoteRender(ctx);
+      toast(ctx.mode === 'add'
+        ? 'A truck started loading just now — switched to ADD mode. Confirm again.'
+        : 'Loading finished just now — switched to REPLACE mode. Confirm again.', 'er');
+      return;
+    }
+    tmrClosePromote();
+    const FB = firebase.database();
+    const ts = Date.now();
+    const payload = {};
+    let n = 0;
+
+    if(ctx.mode === 'replace'){
+      /* ⭐ THAY CẢ NODE. Không liệt kê khoá null, không phụ thuộc RAM. */
+      const node = {};
+      ctx.take.forEach(r=>{ node[r._oid] = _promoteClone(r); n++; });
+      payload['plan_today'] = node;
+    } else {
+      /* ⭐ CHỈ THÊM. Không đụng một dòng Today nào đang có. */
+      ctx.take.forEach(r=>{ payload['plan_today/' + r._oid] = _promoteClone(r); n++; });
+    }
+    payload['plan_tomorrow']         = null;
+    payload['plan_today_version']    = ts;
+    payload['plan_tomorrow_version'] = ts;
+
+    FB.ref().update(payload)
+      .then(()=>{
+        toast(ctx.mode === 'replace'
+          ? 'Promoted ' + n + ' row(s) → Today Plan (' + ctx.todayRows.length + ' old row(s) replaced)'
+          : 'Added ' + n + ' row(s) into Today Plan · ' + ctx.todayRows.length + ' existing row(s) kept'
+            + (ctx.skipped.length ? ' · ' + ctx.skipped.length + ' skipped' : ''), 'ok');
+        /* Dòng vừa thêm mang NGÀY MAI — nhắc đúng lúc, đừng để nhân viên cân
+           đứng trước một bảng đầy đơn mà trạm báo "future plan". */
+        if(ctx.mode === 'add'){
+          try{
+            const t = MDAY.today();
+            if(ctx.take.some(r=>String(r._forDate||'') !== t) && !MDAY.isOn())
+              setTimeout(()=>toast('Turn on 📆 MULTI-DAY at the Scale console to sell the rows just added','er'), 900);
+          }catch(_){}
+        }
+      })
+      .catch(e=>{ console.error('promote', e); toast('Promote failed: '+(e.message||e),'er'); });
+
+    try{ logAudit('plan_today:' + (ctx.mode === 'replace' ? 'promote' : 'promote_add'),
+                  '_bulk_', '_promoteFromTomorrow', ctx.todayRows.length, n,
+                  ctx.mode === 'replace' ? 'replace' : 'add · ' + ctx.busy.length + ' loading'); }catch(_){}
+
+    /* Hàng đợi cân trỏ vào _oid của plan_today. REPLACE thay sạch bảng ⇒ mọi
+       _oid trong hàng đợi thành rác, phải dọn. ADD thì KHÔNG — xe đang chờ là
+       xe thật, dòng của nó vẫn còn nguyên. */
+    if(ctx.mode === 'replace'){
+      try{ if(typeof SCALE!=='undefined' && SCALE.waitClear) SCALE.waitClear(); }catch(_){}
+    }
+  }).catch(e=>{
+    console.warn('promote confirm read', e);
+    toast('Cannot read the plan from Firebase — nothing was changed','er');
   });
-  /* 2) wipe Tomorrow source */
-  Object.keys(TMR.PLAN || {}).forEach(oid => {
-    payload['plan_tomorrow/'+oid] = null;
-  });
-  /* 3) insert each Tomorrow row under plan_today/ PRESERVING _forDate.
-     The timestamp tells the software which day each row is meant for —
-     the date picker on Today Plan toolbar lets the operator switch between
-     dates to view / load each. Rows whose _forDate is not today are still
-     blocked from Scale-assignment until their date arrives. */
-  tmrRows.forEach(r => {
-    const cloned = {};
-    Object.keys(r).forEach(k => { if(!k.startsWith('__')) cloned[k] = r[k]; });
-    /* keep r._forDate untouched */
-    /* drop runtime status — promoted rows start fresh (AUTO will recompute) */
-    cloned._status    = '';
-    cloned._actualQty = '';
-    /* v4.59 — promoted rows are ALWAYS reset to AUTO. Preserving a manual lock
-       here was a trap: _status/_actualQty are wiped above, so a row promoted
-       with _autoSync:false stayed frozen on "Pending" all day (never synced
-       Loading/Done from the scale) until someone noticed the unchecked box. */
-    cloned._autoSync  = true;
-    cloned.lastBy   = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER.name) ? CURRENT_USER.name : 'system';
-    cloned.lastAt   = Date.now();
-    cloned.lastRole = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER.role) ? CURRENT_USER.role : '';
-    payload['plan_today/'+r._oid] = cloned;
-  });
-  /* bump both version counters so all listeners refresh */
-  payload['plan_today_version']    = Date.now();
-  payload['plan_tomorrow_version'] = Date.now();
-  FB.ref().update(payload)
-    .then(()=> toast('Promoted '+tmrRows.length+' row(s) → Today Plan','ok'))
-    .catch(e=>{ console.error('promote', e); toast('Promote failed: '+(e.message||e),'er'); });
-  try{ logAudit('plan_today:promote', '_bulk_', '_promoteFromTomorrow', Object.keys(TP.PLAN||{}).length, tmrRows.length, 'promote'); }catch(_){}
-  /* v4.21.0 — wipe the wait-queue: queue items reference _oid into TP.PLAN
-     (and possibly TMR.PLAN) which is fully replaced by this promote, so
-     stored _oids would be stale. Single-shot Firebase delete via SCALE. */
-  try{ if(typeof SCALE!=='undefined' && SCALE.waitClear) SCALE.waitClear(); }catch(_){}
 }
 
 function switchSalesTab(t){

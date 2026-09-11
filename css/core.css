@@ -3496,6 +3496,35 @@ body{font-family:'Barlow',system-ui,sans-serif;background:var(--bg);color:var(--
 .scx2-tanks .sc-inv-stat{display:flex;align-items:baseline;gap:6px;min-width:0;}
 .scx2-tanks .sc-inv-k{font-family:'Oswald',sans-serif;font-size:8.5px;font-weight:700;letter-spacing:1.2px;color:#7b8a99;}
 .scx2-tanks .sc-inv-v{font-family:'JetBrains Mono',monospace;font-size:13.5px;font-weight:600;white-space:nowrap;}
+/* ═══ v4.143 — DENSITY / %wt C3 DƯỚI HÌNH TRÒN ĐO MỨC ════════════
+   Quả cầu cao 96px trong khi cột thông tin bên phải cao hơn nhiều ⇒ dưới
+   quả cầu bỏ trống một mảng. .scx2-tkside bọc cả hai thành một cột dọc,
+   bề ngang KHOÁ 96px để cột phải không bị đẩy.
+   Màu nhãn nguồn nói độ tin cậy: xanh = COQ của chính lot · vàng = mượn
+   của lot khác · đỏ = mượn nhưng lệch xa · xám = số gõ tay. */
+.scx2-tkside{display:flex;flex-direction:column;align-items:stretch;gap:7px;flex:0 0 96px;width:96px;}
+.scx2-tkside .sc-tkc-ball{align-self:center;}
+.scx2-tkd{display:flex;flex-direction:column;align-items:center;gap:1px;
+  padding:5px 4px 6px;border:1px solid #e3eaf2;border-radius:9px;background:#f8fbfe;}
+.scx2-tkd-r{display:flex;align-items:baseline;gap:5px;max-width:100%;}
+.scx2-tkd-r .k{font-family:'Oswald',sans-serif;font-size:7.5px;font-weight:700;
+  letter-spacing:1px;color:#a3b2c1;white-space:nowrap;}
+.scx2-tkd-r b{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:700;
+  color:#1f3346;white-space:nowrap;}
+.scx2-tkd-tag{font-family:'Oswald',sans-serif;font-size:7.5px;font-weight:700;
+  letter-spacing:.8px;line-height:1.5;padding:0 5px;margin:1px 0 2px;border-radius:5px;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.scx2-tkd.ok   .scx2-tkd-tag{background:#e3f3e8;color:#1b6b3a;}
+.scx2-tkd.est  .scx2-tkd-tag{background:#fdf1d8;color:#8a5a06;}
+.scx2-tkd.far  .scx2-tkd-tag{background:#fde4e4;color:#a31212;}
+.scx2-tkd.man  .scx2-tkd-tag{background:#eceff2;color:#6b7b8a;}
+.scx2-tkd.est  {border-color:#f0dcae;background:#fffdf7;}
+.scx2-tkd.far  {border-color:#f0bdbd;background:#fff8f8;}
+.scx2-tkd.empty{background:#fafbfc;border-style:dashed;}
+.scx2-tkd-e{font-size:9.5px;font-style:italic;color:#a3b2c1;padding:3px 0;}
+/* thẻ không được chọn bị làm mờ cả khối, giữ đúng tông thẻ dim */
+.sc-tkc.dim .scx2-tkd{opacity:.55;}
+
 /* per-tank extras: opening mini-row + INV action buttons */
 .scx2-tkx{border-top:1px dashed #dfe6ee;padding-top:6px;display:flex;flex-direction:column;gap:6px;}
 .scx2-tkx-open{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#43566a;}
@@ -4415,3 +4444,20 @@ body.role-sale .fleet-grid .cell-blk-tick{opacity:.4;}
 .sp-stale-opt{display:flex;align-items:flex-start;gap:7px;margin-top:7px;padding-top:7px;
   border-top:1px dashed rgba(0,0,0,.14);cursor:pointer;line-height:1.45;}
 .sp-stale-opt input{margin-top:2px;flex:none;width:14px;height:14px;cursor:pointer;}
+
+/* ══ v4.141 · 📆 MULTI-DAY — cổng ngày bán hàng ══════════════════════════
+   Hai trạng thái phải NHÌN LÀ BIẾT NGAY, vì bật nhầm mà không ai thấy chính
+   là rủi ro của chức năng này: TẮT = xám lặng lẽ, BẬT = cam + nhấp nháy nhẹ. */
+.scx2-mday{display:flex;align-items:center;gap:6px;height:38px;padding:0 12px;border-radius:10px;
+  background:#fff;border:1px solid #d7dee6;cursor:pointer;color:var(--ink);
+  font-family:'Oswald',sans-serif;font-size:11.5px;letter-spacing:.4px;
+  box-shadow:0 1px 3px rgba(16,40,80,.06);white-space:nowrap;}
+.scx2-mday:hover{border-color:#1565c0;background:#f2f8fe;}
+.scx2-mday .scx2-mday-ic{font-size:14px;filter:grayscale(1);opacity:.55;}
+.scx2-mday.on{background:#fff4e5;border-color:#d98324;color:#a35a00;
+  box-shadow:0 0 0 3px rgba(217,131,36,.16);animation:mdayPulse 2.4s ease-in-out infinite;}
+.scx2-mday.on .scx2-mday-ic{filter:none;opacity:1;}
+.scx2-mday.armed{border-color:#d98324;background:#fffaf2;color:#a35a00;}
+@keyframes mdayPulse{0%,100%{box-shadow:0 0 0 3px rgba(217,131,36,.16);}
+                     50%{box-shadow:0 0 0 6px rgba(217,131,36,.06);}}
+@media (max-width:1180px){ .scx2-mday .scx2-mday-tx{display:none;} .scx2-mday{padding:0 10px;} }

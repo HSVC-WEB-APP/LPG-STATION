@@ -63,6 +63,30 @@ const SCALE = (function(){
 
   function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+  /* ══ v4.143 — SAFE FILL ALLOW LAY DENSITY THEO LOT DANG BAN ═════
+     Truoc day ba cho tinh Safe Fill deu nhan voi MOT hang so go tay
+     (0.538) nen xe cho lot nang bi cho phep nap qua muc an toan. Nay
+     ca ba goi chung hai ham nay; luat chon density nam tron trong
+     js/data/sfdens.js — DUNG chep luat ra day. SFDENS thieu (file chua
+     nap) thi tu lui ve dung cach tinh cu, khong vo man hinh. */
+  function _sfInfo(capM3, ctx){
+    try{
+      if(typeof SFDENS!=='undefined' && SFDENS && SFDENS.kgInfo)
+        return SFDENS.kgInfo(capM3, ctx);
+    }catch(_){}
+    const cap = parseFloat(capM3)||0;
+    const dens = (typeof sfDensity==='function') ? sfDensity() : 0.538;
+    const pct  = (typeof sfFillPct==='function') ? sfFillPct() : 0.9;
+    return { kg: cap>0 ? Math.round(cap*dens*pct*1000) : null,
+             dens:dens, src:'manual', lot:'', scanning:false, far:false };
+  }
+  function _sfNote(info){
+    try{
+      if(typeof SFDENS!=='undefined' && SFDENS && SFDENS.note) return SFDENS.note(info);
+    }catch(_){}
+    return '';
+  }
+
   /* ─── Tank helpers ─── */
   function tkGetActive(){
     const key = SC_TK_CFG.tk1.selected ? 'tk1' : SC_TK_CFG.tk2.selected ? 'tk2' : null;
@@ -451,11 +475,12 @@ const SCALE = (function(){
     let planTotalMt = 0, planDoneLoadMt = 0, planRowCount = 0, planDoneCount = 0;
     const hasTP = (typeof TP !== 'undefined' && TP.PLAN);
     if(hasTP){
-      const d = new Date(), p = n => String(n).padStart(2,'0');
-      const today = d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+      /* v4.141 — cộng đúng những ngày ĐANG BÁN ĐƯỢC (MDAY.allows), không phải
+         cứng "hôm nay". Bật 📆 MULTI-DAY mà tổng vẫn chỉ đếm hôm nay thì xe
+         của ngày khác đang nạp không xuất hiện trong REMAIN — con số trên thẻ
+         PLAN lệch hẳn với việc thật đang diễn ra ngoài trạm. */
       const todayRows = Object.values(TP.PLAN).filter(r=>{
-        const fd = String(r._forDate || '').trim();
-        if(fd && fd !== today) return false;                 /* today's plan only */
+        if(!MDAY.allows(String(r._forDate || '').trim())) return false;
         return (parseFloat(r.qty || 0) || 0) > 0;            /* qty only — no contractQty */
       });
       if(typeof TP.lnkTotals === 'function'){
@@ -629,6 +654,12 @@ const SCALE = (function(){
     /* debounce save */
     clearTimeout(SC_TK_CFG._lotTimer);
     SC_TK_CFG._lotTimer=setTimeout(()=>_tkSaveToFb(),800);
+    /* v4.143 - gõ lot xong thì khối density dưới hình tròn phải theo kịp.
+       KHÔNG gọi _renderTankBar ở đây - nó ghi đè chính ô đang gõ. */
+    clearTimeout(SC_TK_CFG._densTimer);
+    SC_TK_CFG._densTimer=setTimeout(()=>{
+      try{ if(typeof SCX2!=='undefined' && SCX2.renderDens) SCX2.renderDens(); }catch(_){}
+    },250);
   }
   /* External helper — called by ENG init or whenever Tank Log changes.
      Refreshes the active tank's lot from latest Tank Log entry. */
@@ -1255,16 +1286,14 @@ const SCALE = (function(){
     if(!doStr){ toast('Order has no DO / Order ID','er'); return; }
     if(!row.plate){ toast('Missing plate','er'); return; }
     if(!row.driver){ toast('Missing driver','er'); return; }
-    /* Plan date gate — a row whose _forDate is not today is either a future
-       plan staged in advance, or a stale row from a previous day. Either way,
-       it must not be loaded onto a station: the operator should wait for the
-       day to arrive (future) or remove the stale row (past). */
-    const _scIsoToday = (()=>{ const d=new Date(),p=n=>String(n).padStart(2,'0');
-      return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); })();
+    /* Plan date gate — mặc định CHỈ dòng của hôm nay được lên trạm: dòng của
+       ngày mai là kế hoạch dựng sẵn, dòng của hôm qua là dòng sót.
+       v4.141 — luật này nay nằm ở window.MDAY (helpers.js), KHÔNG chép lại ở
+       đây. Nhân viên bật 📆 MULTI-DAY thì cửa sổ nới ra hôm qua → ngày mai,
+       cho ca đêm kéo qua nửa đêm vừa nạp nốt xe hôm nay vừa bán xe ngày mai. */
     const rowDate = String(row._forDate||'').trim();
-    if(rowDate && rowDate !== _scIsoToday){
-      const which = rowDate > _scIsoToday ? 'future' : 'stale';
-      toast('Cannot assign — this row is a '+which+' plan ('+rowDate+'). Only rows for today can be loaded.','er');
+    if(!MDAY.allows(rowDate)){
+      toast('Cannot assign — ' + MDAY.why(rowDate), 'er');
       return;
     }
     const qty=parseFloat(row.qty||row.contractQty||0)||0;
@@ -1925,7 +1954,7 @@ const SCALE = (function(){
     /* GW AVG reference (truck tare avg + safe-fill capacity) */
     const grossRefEl = document.getElementById('sc-gross-ref');
     if(grossRefEl){
-      let twAvg = 0, sfKg = 0;
+      let twAvg = 0, sfKg = 0, sfNote = '';
       try{
         const pl = String(s.plate||'').trim().toUpperCase();
         const rm = String(s.rmooc||'').trim().toUpperCase();
@@ -1944,14 +1973,16 @@ const SCALE = (function(){
         };
         const capM3 = findCap('tanklorry') || findCap('rmooc');
         if(capM3 > 0){
-          const dens = (typeof sfDensity==='function') ? sfDensity() : 0.538;
-          const pct  = (typeof sfFillPct==='function') ? sfFillPct() : 0.9;
-          sfKg = Math.round(capM3 * dens * pct * 1000);
+          /* v4.143 - density THEO LOT DANG BAN (SFDENS), khong con hang so
+             go tay. Tram da gan don nen co san lot + bon + loai hang. */
+          const _sf = _sfInfo(capM3, { lot:s.batch, tank:s.tank, type:s.type });
+          sfKg   = _sf.kg || 0;
+          sfNote = _sfNote(_sf);
         }
       }catch(_){}
       const grossRef = (twAvg && sfKg) ? Math.round(twAvg + sfKg) : 0;
       if(grossRef > 0){
-        grossRefEl.textContent = '📊 GW AVG ref: ' + grossRef.toLocaleString('en-US') + ' kg';
+        grossRefEl.textContent = '📊 GW AVG ref: ' + grossRef.toLocaleString('en-US') + ' kg' + (sfNote ? '  \u00B7  ' + sfNote : '');
         grossRefEl.classList.add('on');
       } else {
         grossRefEl.classList.remove('on');
@@ -2658,20 +2689,28 @@ const SCALE = (function(){
       twAvg = window.TWAVG ? TWAVG.find(s.plate, s.rmooc || (planRow && planRow.rmooc)) : null;
     }catch(e){}
     /* Safe fill from Fleet */
-    let sfKg = null;
+    let sfKg = null, sfNote = '';
     try{
       const fleets = (typeof DATA!=='undefined') ? DATA : {};
       const pl = String(s.plate||'').trim().toUpperCase();
       const rm = String(s.rmooc||'').trim().toUpperCase();
       const findCap = (tab)=>{ const d=fleets[tab]||{}; for(const rid in d){ const dp=String(d[rid].plate||'').trim().toUpperCase(); if(dp&&(dp===pl||(rm&&dp===rm))){ return parseFloat(d[rid].cap||d[rid].volume)||0; } } return 0; };
       const capM3 = findCap('tanklorry')||findCap('rmooc');
-      if(capM3>0) sfKg = Math.round(capM3 * (typeof sfDensity==='function'?sfDensity():0.538) * (typeof sfFillPct==='function'?sfFillPct():0.9) * 1000);
+      /* v4.143 - density theo LOT cua chinh tram nay */
+      if(capM3>0){
+        const _sf = _sfInfo(capM3, { lot:s.batch, tank:s.tank,
+                                     type:s.type||(planRow&&planRow.type)||'' });
+        sfKg = _sf.kg; sfNote = _sfNote(_sf);
+        /* In phieu trong luc con dang quet = so Safe Fill van la so go tay.
+           Bao ro de nhan vien in lai, dung de ho cam to phieu sai di. */
+        if(_sf.scanning) toast('⚠ Reading Tank Log for the lot density — Safe Fill on this slip is the fallback value. Re-print in a moment.','er');
+      }
     }catch(e){}
     _pttShowOverlay({
       stId, plate:s.plate, rmooc:s.rmooc||planRow?.rmooc||'', doNum:s.doNum,
       customer:custName, qty:parseFloat(s.qty)||0, type:s.type||planRow?.type||'',
       driver:s.driver||planRow?.driver||'', tank:s.tank, batch:s.batch,
-      turn, twAvg, sfKg, lotFull: s.batch ? _sanitizeLotPrefix(s.batch)+'/'+s.tank : (tk?(tk.lotFull+'/'+tk.name):''),
+      turn, twAvg, sfKg, sfNote, lotFull: s.batch ? _sanitizeLotPrefix(s.batch)+'/'+s.tank : (tk?(tk.lotFull+'/'+tk.name):''),
       saleNote: saleNote, maxTol: parseFloat(s.tolerance||planRow?.tolerance||planRow?.maxTol||0)||0,
       doRows: doRows          /* v4.112 — null = phiếu một DO như cũ */
     });
@@ -2679,6 +2718,19 @@ const SCALE = (function(){
 
   /* ─── Firebase init ─── */
   function init(){
+    /* v4.143 - SFDENS quet Tank Log BAT DONG BO khi 10 lot trong RAM khong
+       du de do density. Quet xong thi ve lai the don dang mo, de con so
+       Safe Fill / GW AVG ref tu nhay ve dung thay vi ket o so go tay. */
+    try{
+      if(typeof SFDENS!=='undefined' && SFDENS.onReady) SFDENS.onReady(function(){
+        try{
+          const sid = document.getElementById('tech-sid');
+          const id  = sid ? parseInt(sid.value,10) : 0;
+          const st  = id ? DB_SC.stations[id] : null;
+          if(st && st.status!=='empty') _populateOrderInfo(id, st);
+        }catch(_){}
+      });
+    }catch(_){}
     try{
       if(typeof firebase==='undefined') return;
       FB_SC=firebase.database();
@@ -2995,10 +3047,12 @@ const SCALE = (function(){
     if(!row.driver)   return {ok:false, err:'Missing driver'};
     const qty = parseFloat(row.qty || row.contractQty || 0) || 0;
     if(!qty)          return {ok:false, err:'Missing Loading Qty'};
+    /* v4.141 — cùng một cổng ngày với scAssignToStation (window.MDAY). Dòng
+       nào không lên trạm được thì cũng không được nằm chờ, nếu không nó chỉ
+       hỏng ở bước sau. */
     const rowDate = String(row._forDate || '').trim();
-    if(rowDate && rowDate !== _scWaitIsoToday()){
-      const which = rowDate > _scWaitIsoToday() ? 'future' : 'stale';
-      return {ok:false, err:'Cannot queue — this row is a ' + which + ' plan (' + rowDate + ').'};
+    if(!MDAY.allows(rowDate)){
+      return {ok:false, err:'Cannot queue — ' + MDAY.why(rowDate)};
     }
     return {ok:true, doStr, qty};
   }
@@ -3120,7 +3174,7 @@ const SCALE = (function(){
       twAvg = window.TWAVG ? TWAVG.find(item.plate, item.rmooc) : null;
     }catch(_){}
     /* Safe fill — derive from Fleet cap × density × fillPct */
-    let sfKg = null;
+    let sfKg = null, sfNote = '';
     try{
       const fleets = (typeof DATA !== 'undefined') ? DATA : {};
       const pl = String(item.plate || '').trim().toUpperCase();
@@ -3134,7 +3188,13 @@ const SCALE = (function(){
         return 0;
       };
       const capM3 = findCap('tanklorry') || findCap('rmooc');
-      if(capM3 > 0) sfKg = Math.round(capM3 * (typeof sfDensity === 'function' ? sfDensity() : 0.538) * (typeof sfFillPct === 'function' ? sfFillPct() : 0.9) * 1000);
+      /* v4.143 - xe trong hang doi chua vao tram: lay lot cua bon DANG
+         CHON (tk o tren da giai ca truong hop don Pure). */
+      if(capM3 > 0){
+        const _sf = _sfInfo(capM3, { lot: tk ? tk.lotFull : '',
+                                     tank: tk ? tk.name : '', type: item.type });
+        sfKg = _sf.kg; sfNote = _sfNote(_sf);
+      }
     }catch(_){}
     /* WGCHECK Plan↔WMS warnings — prepend to note for the booth, matching
        what scAssignToStation does at real assign time. RAM-only. */
@@ -3161,7 +3221,7 @@ const SCALE = (function(){
       tank:     tk ? tk.name : '',
       batch:    tk ? tk.lotFull : '',
       turn:     item._turn || 1,
-      twAvg, sfKg,
+      twAvg, sfKg, sfNote,
       lotFull:  tk ? (tk.lotFull + '/' + tk.name) : '',
       saleNote: displayNote,
       maxTol:   parseFloat(item.tolerance || 0) || 0   /* show plan max tole (e.g. 10.3), not fallback to qty */
@@ -3227,11 +3287,12 @@ const SCALE = (function(){
         if(!row){
           const pk = String(it.plate||'').replace(/[-.\s]/g,'').toUpperCase();
           const dk = String(it.driver||'').replace(/\s+/g,'').toLowerCase();
-          const today = _scWaitIsoToday();
+          /* v4.141 — dò cứu dòng cũng theo cổng MDAY: ca đêm bật MULTI-DAY thì
+             xe trong hàng đợi có thể thuộc kế hoạch ngày khác. */
           if(pk){
             row = Object.values(TP.PLAN).find(p =>
               String(p.plate||'').replace(/[-.\s]/g,'').toUpperCase() === pk
-              && String(p._forDate||'') === today
+              && MDAY.allows(String(p._forDate||''))
               && (!dk || String(p.driver||'').replace(/\s+/g,'').toLowerCase() === dk)
               && !['done','cancel'].includes(String((TP.getEffectiveStatus&&TP.getEffectiveStatus(p))||'').toLowerCase())
             ) || null;
@@ -3436,4 +3497,118 @@ const SCALE = (function(){
     waitRelink,   /* v4.59 — SYNC.promotePair relinks queued items TMP→real DO */
     _scWaitBackFromStation, _scWaitInit, _scWaitPositionRes
   };
+})();
+
+/* ══════════════════════════════════════════════════════════════════════════
+   v4.141 · MDAYUI — nút 📆 MULTI-DAY trên thanh SCALE CONSOLE
+   --------------------------------------------------------------------------
+   Luật nghiệp vụ nằm ở window.MDAY (helpers.js). Khối này CHỈ lo phần bấm nút:
+
+     bấm lần 1  → nút chuyển sang "armed", toast nhắc, đếm ngược 5 giây
+     bấm lần 2  → mở hộp xác nhận
+     xác nhận   → MDAY.set(true)
+
+   Vì sao phải khó đến vậy: bật cờ này là nới cổng an toàn cho TOÀN BỘ máy cân.
+   Một cú bấm nhầm giữa ca không ai để ý thì cả ngày hôm sau vẫn bán được đơn
+   sót của hôm trước. Hai lần bấm + một hộp xác nhận là cùng một luật đã dùng
+   cho hàng ≠50:50 (v4.083) — nhân viên đã quen nhịp này.
+   Tắt thì chỉ cần MỘT lần bấm + xác nhận: quay về trạng thái an toàn không
+   cần cản trở.
+   ══════════════════════════════════════════════════════════════════════════ */
+window.MDAYUI = (function(){
+  var ARM_MS = 5000;
+  var _armed = 0;          /* mốc hết hạn của lần bấm thứ nhất */
+  var _armT  = null;
+  var _want  = true;       /* hộp xác nhận đang hỏi bật hay tắt */
+
+  function $(id){ return document.getElementById(id); }
+
+  function paint(){
+    var b = $('scMdayBtn'); if(!b) return;
+    var on = MDAY.isOn();
+    b.classList.toggle('on', on);
+    b.classList.toggle('armed', !on && Date.now() < _armed);
+    var tx = $('scMdayTx');
+    if(tx){
+      if(on){
+        var st = MDAY.state();
+        var u  = st.until ? new Date(st.until) : null;
+        var hh = u ? String(u.getHours()).padStart(2,'0')+':'+String(u.getMinutes()).padStart(2,'0') : '';
+        tx.textContent = 'MULTI-DAY · until ' + hh;
+      } else {
+        tx.textContent = (Date.now() < _armed) ? 'CLICK AGAIN' : 'TODAY ONLY';
+      }
+    }
+    if(on){
+      var s2 = MDAY.state();
+      b.title = 'Multi-day selling is ON (' + MDAY.shift(-1) + ' → ' + MDAY.shift(1) + ')'
+              + (s2.by ? ' · turned on by ' + s2.by : '')
+              + '. Click to turn it off.';
+    } else {
+      b.title = 'Station accepts only orders dated ' + MDAY.today()
+              + '. Click twice to allow yesterday / tomorrow orders as well.';
+    }
+  }
+
+  function _disarm(){ _armed = 0; if(_armT){ clearTimeout(_armT); _armT = null; } paint(); }
+
+  function click(){
+    /* Đang BẬT ⇒ tắt: một lần bấm là đủ, vẫn hỏi xác nhận. */
+    if(MDAY.isOn()){ _want = false; _open(); return; }
+    /* Đang TẮT ⇒ đòi hai lần bấm. */
+    if(Date.now() < _armed){ _disarm(); _want = true; _open(); return; }
+    _armed = Date.now() + ARM_MS;
+    if(_armT) clearTimeout(_armT);
+    _armT = setTimeout(_disarm, ARM_MS);
+    paint();
+    try{ toast('Click 📆 again within 5s to allow selling orders from other dates','er'); }catch(_){}
+  }
+
+  function _open(){
+    var on = (_want === true);
+    var t  = MDAY.today();
+    $('scMdayOnBox').style.display  = on ? '' : 'none';
+    $('scMdayOffBox').style.display = on ? 'none' : '';
+    $('scMdayTitle').textContent = on
+      ? '📆 Allow selling orders from other dates'
+      : '📆 Turn multi-day selling off';
+    var go = $('scMdayGo');
+    go.textContent  = on ? '✓ Turn on multi-day' : '✓ Turn off — today only';
+    go.className    = on ? 'btn btn-green' : 'btn';
+    if(on){
+      $('scMdayToday').textContent = t;
+      $('scMdayRange').textContent = MDAY.shift(-1) + ' → ' + MDAY.shift(1);
+      var d = new Date(); d.setDate(d.getDate()+1); d.setHours(8,0,0,0);
+      $('scMdayUntil').textContent = d.toLocaleString();
+    } else {
+      $('scMdayToday2').textContent = t;
+    }
+    $('scMdayModal').classList.add('on');
+  }
+
+  function close(){ $('scMdayModal').classList.remove('on'); _disarm(); }
+
+  function confirm(){
+    var on = (_want === true);
+    var go = $('scMdayGo'); if(go) go.disabled = true;
+    MDAY.set(on, function(ok){
+      if(go) go.disabled = false;
+      close();
+      if(ok){ try{ toast(on
+        ? '📆 Multi-day selling ON — ' + MDAY.shift(-1) + ' → ' + MDAY.shift(1) + ' · expires 08:00 tomorrow'
+        : '📆 Multi-day selling OFF — today only', 'ok'); }catch(_){} }
+    });
+  }
+
+  function init(){
+    paint();
+    MDAY.onChange(function(){
+      paint();
+      /* Cờ đổi ⇒ thẻ PLAN / REMAIN đang cộng theo danh sách ngày khác. */
+      try{ if(typeof SCALE!=='undefined' && SCALE.scRenderCtrl) SCALE.scRenderCtrl(); }catch(_){}
+      try{ if(typeof INV!=='undefined' && INV.renderRow1) INV.renderRow1(); }catch(_){}
+    });
+  }
+
+  return { init:init, click:click, close:close, confirm:confirm, paint:paint };
 })();

@@ -178,7 +178,23 @@ var PTT_EARLY = (function(){
     try{ if(window.TWAVG) return TWAVG.find(plate, rmooc); }catch(_){}
     return null;
   }
-  function _sfKgFor(plate, rmooc){
+  /* v4.143 - Safe Fill lay density THEO LOT thay vi hang so go tay.
+     _sfInfoFor tra ca so kg lan nguon density (SFDENS.kgInfo). Phieu in
+     SOM (mode 'early') chua chot bon nao, luc do ctx chi co `type` va
+     SFDENS tu do ra %C3 muc tieu roi do lot gan sat nhat. Phieu in
+     'today' thi SCALE.tankForType da chot dung bon + lot (ke ca don
+     Pure -> TK-3301/3401), truyen thang vao. */
+  function _sfCtx(type){
+    var ctx = { type: type||'' };
+    try{
+      if(_mode==='today' && typeof SCALE!=='undefined' && SCALE.tankForType){
+        var tk = SCALE.tankForType(type||'');
+        if(tk){ ctx.lot = tk.lotFull || ''; ctx.tank = tk.name || ''; }
+      }
+    }catch(_){}
+    return ctx;
+  }
+  function _sfInfoFor(plate, rmooc, type){
     try{
       var fleets = (typeof DATA!=='undefined') ? DATA : {};
       var pl = String(plate||'').trim().toUpperCase();
@@ -186,13 +202,22 @@ var PTT_EARLY = (function(){
       var findCap = function(tab){ var d=fleets[tab]||{}; for(var rid in d){ var dp=String(d[rid].plate||'').trim().toUpperCase(); if(dp&&(dp===pl||(rm&&dp===rm))) return parseFloat(d[rid].cap||d[rid].volume)||0; } return 0; };
       var capM3 = findCap('tanklorry')||findCap('rmooc');
       if(capM3>0){
+        if(typeof SFDENS!=='undefined' && SFDENS && SFDENS.kgInfo)
+          return SFDENS.kgInfo(capM3, _sfCtx(type));
         var dens = (typeof sfDensity==='function') ? sfDensity() : 0.538;
         var pct  = (typeof sfFillPct==='function') ? sfFillPct() : 0.9;
-        return Math.round(capM3 * dens * pct * 1000);
+        return { kg: Math.round(capM3 * dens * pct * 1000), dens:dens, src:'manual', lot:'' };
       }
     }catch(_){}
-    return null;
+    return { kg:null, dens:0, src:'manual', lot:'' };
   }
+  function _sfNoteOf(info){
+    try{
+      if(typeof SFDENS!=='undefined' && SFDENS && SFDENS.note) return SFDENS.note(info);
+    }catch(_){}
+    return '';
+  }
+  function _sfKgFor(plate, rmooc, type){ return _sfInfoFor(plate, rmooc, type).kg; }
   /* Safe-fill adjustment of Loading Q'ty — same rule as _pttShowOverlay so the
      printed X/Y and the Check-booth warning match the on-station slip. */
   function _sfAdjust(planX, planY, sfKg){
@@ -247,7 +272,9 @@ var PTT_EARLY = (function(){
     var lotPlaceholder = _lotTankStr(r.type);   /* v4.59 — real tank/lot in 'today' mode */
     var custName = _custVN(r.customer);
     var twAvg = _twAvgFor(r.plate, r.rmooc);
-    var sfKg  = _sfKgFor(r.plate, r.rmooc);
+    var sfInfo = _sfInfoFor(r.plate, r.rmooc, r.type);
+    var sfKg  = sfInfo.kg;
+    var sfTip = _sfNoteOf(sfInfo);
     var sf = _sfAdjust(parseFloat(r.qty)||0, parseFloat(r.tolerance||r.maxTol||0)||0, sfKg);
     var dX = sf.x, dY = sf.y, boothNote = sf.note;
     var sfStr = sfKg ? sfKg.toLocaleString('en-US') : '';
@@ -275,7 +302,7 @@ var PTT_EARLY = (function(){
     h += '<div class="pf-il-qty">Loading Q\'ty</div>';
     h += '<div style="padding:3px 6px;border-right:1px solid #888;border-bottom:2px solid #333;display:flex;align-items:center"><span style="font-size:20pt;font-weight:900;font-family:\'Courier New\',monospace">'+_esc(dX>0?dX:'')+'</span><span style="font-size:11pt;color:#666;margin:0 4px">Ton /</span><span style="font-size:20pt;font-weight:900;font-family:\'Courier New\',monospace">'+_esc(dY>0?dY:'')+'</span><span style="font-size:11pt;color:#666;margin-left:4px">Ton</span></div>';
     h += '<div class="pf-il-qty" style="border-left:none;font-size:8pt">Product Type</div><div style="padding:3px 6px;border-bottom:2px solid #333;display:flex;align-items:center"><span style="font-size:12pt;font-weight:800;color:#1a5276;letter-spacing:0.5px">'+_esc(prodType)+'</span></div>';
-    h += '<div class="pf-il" style="font-size:8pt;padding:2px 4px">Safe Fill Allow</div><div class="pf-iv" style="font-family:\'Courier New\',monospace;padding:2px 5px;display:flex;align-items:center">'+(sfStr?('<span style="font-size:20pt;font-weight:900">'+_esc(sfStr)+'</span><span style="font-size:11pt;color:#666;margin-left:4px">kg</span>'):'')+'</div>';
+    h += '<div class="pf-il" style="font-size:8pt;padding:2px 4px">Safe Fill Allow</div><div class="pf-iv" style="font-family:\'Courier New\',monospace;padding:2px 5px;display:flex;align-items:center">'+(sfStr?('<span style="font-size:20pt;font-weight:900"'+(sfTip?' title="'+_esc(sfTip)+'"':'')+'>'+_esc(sfStr)+'</span><span style="font-size:11pt;color:#666;margin-left:4px">kg</span>'):'')+'</div>';
     h += '<div class="pf-il" style="border-left:none;font-size:8pt;padding:2px 4px">Lot / Tank</div><div class="pf-iv norb" style="font-family:\'Courier New\',monospace;font-size:12pt;font-weight:700;padding:2px 5px;line-height:1.15;white-space:pre-line">'+_esc(lotPlaceholder)+'</div>';
     h += '<div class="pf-il nobb" style="font-size:8pt;padding:2px 4px">DO Info</div><div class="pf-iv nobb" style="font-family:\'Courier New\',monospace;padding:2px 5px;line-height:1.2;display:block"><div style="font-size:12pt;font-weight:900;white-space:pre-line">'+_esc(r.doNum)+'</div><div style="font-size:12pt;font-weight:900;color:#000"><span>'+_esc(qty)+'</span><span style="font-size:9pt;color:#666;margin-left:3px;font-weight:600">Ton</span></div></div>';
     h += '<div class="pf-il nobb" style="border-left:none;font-size:8pt;padding:2px 4px">Bay</div><div class="pf-iv norb nobb" style="font-size:15pt;font-weight:900;padding:2px 5px"></div>';
@@ -403,7 +430,9 @@ var PTT_EARLY = (function(){
     var totalStr = total ? String(Math.round(total*100)/100) : '';
     /* RAM Fleet lookups keyed on the shared truck (r0). Gross = TW avg + total. */
     var twAvg = _twAvgFor(r0.plate, r0.rmooc);
-    var sfKg  = _sfKgFor(r0.plate, r0.rmooc);
+    var sfInfo = _sfInfoFor(r0.plate, r0.rmooc, r0.type);
+    var sfKg  = sfInfo.kg;
+    var sfTip = _sfNoteOf(sfInfo);
     var sfStr = sfKg ? sfKg.toLocaleString('en-US') : '';
     var twStr = twAvg ? Math.round(twAvg).toLocaleString('en-US') : '';
     var gwStr = (twAvg && total>0) ? Math.round(twAvg + total*1000).toLocaleString('en-US') : '';
@@ -428,7 +457,7 @@ var PTT_EARLY = (function(){
     h += '<div class="pf-il-qty">Loading Q\'ty</div>';
     h += '<div style="padding:3px 6px;border-right:1px solid #888;border-bottom:2px solid #333;display:flex;align-items:center"><span style="font-size:20pt;font-weight:900;font-family:\'Courier New\',monospace">'+_esc(totalStr)+'</span><span style="font-size:11pt;color:#666;margin:0 4px">Ton</span><span style="font-size:8pt;color:#888;font-weight:600">(total)</span></div>';
     h += '<div class="pf-il-qty" style="border-left:none;font-size:8pt">Product Type</div><div style="padding:3px 6px;border-bottom:2px solid #333;display:flex;align-items:center"><span style="font-size:12pt;font-weight:800;color:#1a5276;letter-spacing:0.5px">'+_esc(prodType)+'</span></div>';
-    h += '<div class="pf-il" style="font-size:8pt;padding:2px 4px">Safe Fill Allow</div><div class="pf-iv" style="font-family:\'Courier New\',monospace;padding:2px 5px;display:flex;align-items:center">'+(sfStr?('<span style="font-size:20pt;font-weight:900">'+_esc(sfStr)+'</span><span style="font-size:11pt;color:#666;margin-left:4px">kg</span>'):'')+'</div>';
+    h += '<div class="pf-il" style="font-size:8pt;padding:2px 4px">Safe Fill Allow</div><div class="pf-iv" style="font-family:\'Courier New\',monospace;padding:2px 5px;display:flex;align-items:center">'+(sfStr?('<span style="font-size:20pt;font-weight:900"'+(sfTip?' title="'+_esc(sfTip)+'"':'')+'>'+_esc(sfStr)+'</span><span style="font-size:11pt;color:#666;margin-left:4px">kg</span>'):'')+'</div>';
     h += '<div class="pf-il" style="border-left:none;font-size:8pt;padding:2px 4px">Lot / Tank</div><div class="pf-iv norb" style="font-family:\'Courier New\',monospace;font-size:12pt;font-weight:700;padding:2px 5px;line-height:1.15;white-space:pre-line">'+_esc(lotPlaceholder)+'</div>';
     h += '<div class="pf-il nobb" style="font-size:8pt;padding:2px 4px">DO Info</div><div class="pf-iv nobb" style="font-family:\'Courier New\',monospace;padding:2px 5px;line-height:1.25;display:block">'+doLines+'</div>';
     h += '<div class="pf-il nobb" style="border-left:none;font-size:8pt;padding:2px 4px">Bay</div><div class="pf-iv norb nobb" style="font-size:15pt;font-weight:900;padding:2px 5px"></div>';

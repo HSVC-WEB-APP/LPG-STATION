@@ -278,6 +278,65 @@ v4.108 đã gợi ý được con số chuyển kho đúng. v4.111 biến nó t�
 
 Test canh: `tests/stx-recon-dom.smoke.js` (mục F–I).
 
+## 📗 TAB ODORANT XUẤT THẲNG RA FILE EXCEL (v4.142)
+
+Nút **⬇ Export Excel** của tab 🧴 Odorant (`js/data/odorxl.js` — `ODORXL`) nhận vào
+**chính file `Cavern Odorant Stock ….xlsx` đang dùng**, **chèn thêm dòng** cho tháng báo
+cáo vào **cả hai sheet** `ODR_Consumption_Cavern` và `Cavern`, rồi lưu ra **file mới**.
+File gốc không bị sửa. (Bản CSV cũ `ODOR.exportCsv` đã **bỏ hẳn**.)
+
+### Vì sao KHÔNG dùng SheetJS
+
+`XLSX.writeFile` đọc–ghi lại workbook là **mất sạch** style, viền, comment, conditional
+formatting, drawing/VML, print setting. Ở đây sửa **trực tiếp XML trong zip bằng JSZip**:
+chỉ `xl/worksheets/sheet1.xml`, `sheet2.xml` và `workbook.xml` bị chạm — `styles.xml`,
+`sharedStrings.xml`, `comments1.xml`, `vmlDrawing1.vml`, `printerSettings*.bin` và hai
+sheet còn lại **giữ nguyên từng byte** (đã đối chiếu `cmp` trên file thật).
+
+### "Chèn một dòng" phải làm đủ 6 việc — thiếu việc nào cũng SAI IM LẶNG
+
+1. **Gỡ shared formula** (`t="shared"`). File này dùng dày đặc, có ô con `si=20` ở `O29`
+   cách ô chủ `O22` **7 dòng**. Đánh số lại dòng mà bỏ bước này ⇒ Excel bắt repair.
+2. **Dịch mọi tham chiếu** tới sheet đích (hàng ≥ chỗ chèn thì +n), ở **mọi sheet** —
+   sheet `Cavern` tra sang `ODR` bằng `LOOKUP` — kèm `<formula>` của conditional
+   formatting và `definedNames`. Vùng có **điểm cuối ≥ chỗ chèn thì nới ra**, nên
+   `SUM(C9:C28)` tự thành `SUM(C9:C29)` đúng như Excel làm.
+3. **Đánh số lại** `r=` của `<row>` và của từng ô `<c>`.
+4. **Dịch** `mergeCells` · `dimension` · `autoFilter` · `sqref` của
+   `conditionalFormatting`/`dataValidation`/`ignoredErrors` · `hyperlink` · `ref` comment.
+5. **Xoá `xl/calcChain.xml`** (kèm rel + `[Content_Types].xml`) và bật `fullCalcOnLoad`.
+6. **BỎ `<v>` cache của ô nào ĐỔI công thức.** ⚠ Đây là cái bẫy nguy nhất: giữ cache lại
+   thì Excel/LibreOffice hiện **số cũ** đúng định dạng, không báo lỗi gì — dòng Total nói
+   dối rất thuyết phục cho tới khi có người bấm `Ctrl+Alt+F9`.
+
+### Công thức dòng mới KHÔNG hard-code
+
+Mỗi cột lấy công thức bằng cách **dịch công thức của ô cùng cột ở dòng gần nhất phía trên
+có công thức**. Sửa công thức bên Excel thì dòng mới tự theo. Cột dữ liệu nhập tay
+(Date · Mixing Q'ty · FQ · Gravity · Charging · LG 21201 · Inventory m³ · Remark) ghi số
+từ `ODOR.snapshot()`; cột không thuộc hai loại trên (ngưỡng H.H/H/L Inventory) **copy y
+nguyên** ô của dòng mẫu. Map cột **theo tên header**, không theo vị trí.
+
+### Vài chốt nữa
+
+* **Viền đáy bảng**: dòng cuối của sheet `Cavern` mang style riêng (viền đậm). Dòng mới
+  nhận style đó, dòng cuối cũ bị **hạ về style dòng giữa** ⇒ viền đáy luôn ở đúng dòng cuối.
+* **Chạy lại bao nhiêu lần cũng được**: tháng đã có dòng thì **cập nhật tại chỗ** (giữ
+  nguyên công thức), không sinh dòng trùng. Chọn tháng cách xa dòng cuối thì mọi tháng
+  còn thiếu ở giữa được chèn đủ. Tháng nằm **giữa** bảng mà chưa có dòng thì **từ chối**,
+  bắt chèn tay trong Excel để không phá thứ tự thời gian.
+* **Nới vùng Average/Total** (tuỳ chọn, mặc định bật): hàng `Average` của file gốc dừng ở
+  `C9:C19` nên thiếu tháng — bật thì kéo tới dòng dữ liệu cuối. Chỉ nới vùng **rõ ràng là
+  vùng dữ liệu** (mốc đầu bám dòng dữ liệu đầu, lệch tối đa 3 dòng vì file gốc có chỗ ghi
+  `SUM(D3:D15)`).
+* **Ô "Date: 260630"** ở đầu sheet ODR được cập nhật thành ngày cuối tháng báo cáo.
+* `ODORXL` **có gán `window.ODORXL`** nên `LOCK_FNS` của `auth.js` khoá được thật với vai
+  trò `sale`. ⚠ Mấy entry `ODOR.exportCsv` · `ENG.*` · `TLXK.*` · `SCALE.*` · `PTT_EARLY.*`
+  · `KTPTVC.*` trong `LOCK_FNS` **chưa bao giờ khoá được gì** vì `_lockFn` tra
+  `window[OBJ]` mà mấy module đó khai bằng `const` (không gán ra `window`).
+
+Test: `node tests/odorxl.test.js` — **119 mục**, không cần cài gì.
+
 ## Chạy / xuất bản
 
 Đây là web tĩnh, **không cần build**. Đẩy repo lên GitHub rồi bật **Settings → Pages**
@@ -292,7 +351,7 @@ index.html        shell: nạp CDN + css + module theo thứ tự
 vendor/           tabulator.min.js/.css (thư viện ngoài)
 css/              core, plan, fleet, scale, cavern, report, engineer, inventory
 js/core/          config · helpers · sync(SC) · auth ★
-js/data/          tl · wg · ws · sp · ct · pp · bulkops
+js/data/          tl · wg · ws · sp · ct · pp · bulkops · tlxk · odorxl
 js/checks/        fcheck · wgcheck
 js/features/      fleet · plan · scale · eng · rpt · inv · tkv · vlog · staff
                   · mixctrl · vmix · mixnotify · cav · scx2
@@ -411,6 +470,7 @@ Test canh: [`tests/sale-role.test.js`](tests/sale-role.test.js) — `node tests/
 
 ```bash
 npm i jsdom && node test/smoke.mjs
+node tests/odorxl.test.js     # 119 muc — engine chen dong Excel cua tab Odorant
 ```
 Kiểm: nạp đủ 33 script · không lỗi "X is not defined" · boot chạy hết · không module init lỗi.
 

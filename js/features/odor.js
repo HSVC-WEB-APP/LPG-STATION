@@ -1,4 +1,11 @@
 /* ============================================================
+ * ODOR — odor.js (v4.142)
+ * v4.142: BỎ HẲN export CSV. Nút ⬇ Export của tab giờ mở ODORXL
+ *   (js/data/odorxl.js) — chèn dòng thẳng vào file Excel "Cavern
+ *   Odorant Stock" và giữ nguyên format. Thêm ODOR.snapshot(): trả
+ *   { initRow, rows } đã tính đủ I/J/K/ppm để ODORXL dùng, thay vì
+ *   bắt nó tính lại chuỗi tồn kho (một công thức, một chỗ).
+ * ------------------------------------------------------------
  * ODOR — odor.js (v4.132)
  * v4.132: C (LPG Mixing Q'Ty) LẤY THEO KHỐI LƯỢNG TÍNH BẰNG COQ —
  *   C = Σ ENG.lpgOf(lot) chứ không còn đọc thẳng ô [15] (tổng theo GC).
@@ -653,35 +660,11 @@ const ODOR = (function(){
     render();
   }
 
-  /* ================= export CSV (thứ tự thời gian tăng dần như Excel) ================= */
-  function exportCsv(){
-    const { initRow, rows } = _compute();
-    const head = ['No.','Date','LPG Mixing QTy (MT)','FQ 21171 (KG)','Gravity (Kg/cm3)','Charging (Kg)',
-      'LG 21201 (mm)','Inventory (m3)','Inventory (KG)','Cal. Consumption (KG)','Consumption & FQ Diff. (KG)',
-      'Price/Unit (VND/KG)','Monthly Cost (VND)','Ratio (MT/KG)','Cal. Concentration (ppm)','Available Mixing QTy (MT)','Remark'];
-    const out = [head.join(',')];
-    const q = v => { let s = String(v==null?'':v); if(/[",\n]/.test(s)) s = '"'+s.replace(/"/g,'""')+'"'; return s; };
-    if(initRow){
-      out.push(['(*)', initRow.d, '', 0, initRow.e, initRow.f==null?'':initRow.f, initRow.g==null?'':initRow.g,
-        initRow.h==null?'':initRow.h.toFixed(4), initRow.i==null?'':initRow.i, '', '', initRow.l==null?'':initRow.l,
-        '', '', '', '', initRow.rm].map(q).join(','));
-    }
-    rows.forEach((r,ix)=>{
-      out.push([ix+1, _ymLabel(r.ym), r.c==null?'':r.c, r.d==null?'':r.d, r.e, r.f==null?'':r.f, r.g==null?'':r.g,
-        r.h==null?'':r.h.toFixed(4), r.i==null?'':r.i, r.j==null?'':r.j, r.k==null?'':r.k,
-        r.l==null?'':r.l, r.mcost==null?'':r.mcost, r.ratio==null?'':r.ratio.toFixed(2),
-        r.ppm==null?'':r.ppm.toFixed(2), r.avail==null?'':Math.round(r.avail), r.rm].map(q).join(','));
-    });
-    const blob = new Blob(['﻿'+out.join('\n')], {type:'text/csv;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const dt = new Date(), p2 = n=>String(n).padStart(2,'0');
-    a.href = url;
-    a.download = 'odorant_consumption_'+dt.getFullYear()+p2(dt.getMonth()+1)+p2(dt.getDate())+'.csv';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('📥 Exported Odorant Consumption','ok');
-  }
+  /* ================= snapshot cho ODORXL (v4.142) =================
+     Trả về ĐÚNG những gì bảng đang hiển thị: dòng (*) đầu kỳ + mọi dòng
+     tháng đã tính xong chuỗi I → J → K → ppm. ODORXL chỉ ghi ra Excel,
+     KHÔNG tự tính lại — công thức tồn kho chỉ tồn tại ở một chỗ. */
+  function snapshot(){ return _compute(); }
 
   /* ================= refresh (tab switch) =================
      v4.62.1 — KHÔNG tự tải toàn bộ Tank Log nữa (giữ chế độ 10 lot).
@@ -718,5 +701,6 @@ const ODOR = (function(){
            addMonth, cancelNewMonth, commitNewMonth, deleteRow,  /* v4.63 — thêm/xóa tháng */
            gravBlur,                          /* v4.63.3 — Gravity 3dp + focus đầy đủ */
            openPaste, closePaste, doPaste, pasteText,
-           exportCsv, mmToM3 };
+           snapshot,                          /* v4.142 — nguồn dữ liệu cho ODORXL */
+           mmToM3 };
 })();
