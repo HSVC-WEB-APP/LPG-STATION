@@ -203,7 +203,7 @@ const MIXNOTIFY = (function(){
        đổi số, và một ký tự lỡ tay làm ô trả về chuỗi rỗng). */
     return '<input class="ntx-inp c' + k + '" id="' + id + '" type="text" inputmode="decimal" autocomplete="off" '
          + 'placeholder="C' + k + ' kg" value="' + (v === null || v === undefined ? '' : Math.round(v)) + '" '
-         + 'title="System opening stock in SAP, C' + k + ' part (kg). '
+         + 'title="WMS initial stock in SAP, C' + k + ' part (kg). '
          + 'This is the same figure as in the ⚖ Stock-transfer reconciliation table — editing it here edits it there." '
          + 'oninput="MIXNOTIFY.sysEdit(\'' + String(pk).replace(/'/g, "\\'") + '\')">';
   }
@@ -229,7 +229,7 @@ const MIXNOTIFY = (function(){
     } else if(!F.ok){
       recon = '<div class="ntx-note warn">'
             + (F.why === 'no-row'
-                ? 'No Tank Log row found for lot <b>' + _esc(lotRaw) + '</b> yet, so the opening gap and the '
+                ? 'No Tank Log row found for lot <b>' + _esc(lotRaw) + '</b> yet, so the gap at initial and the '
                   + 'adjusted transfer quantity cannot be computed. Confirming still ticks Stock Transfer.'
                 : 'Lot <b>' + _esc(lotRaw) + '</b> has no COQ basis yet (missing: ' + _esc(F.miss) + '), '
                   + 'so the gap cannot be computed. Run ◈ CALC COQ on the lot in the Tank Log.')
@@ -239,13 +239,15 @@ const MIXNOTIFY = (function(){
       const srcTxt = ({ sap:'from SAP End Stock',
                         /* v4.113 — số gõ tay được giữ hộ trên server theo TỪNG LOT,
                            nên bồn trộn tiếp mẻ mới cũng không nuốt mất nó. */
-                        manual:'typed by the operator and held on the server for this lot',
+                        /* v4.150 — RAM-only: kho số dùng chung với bảng ⚖ nhưng KHÔNG
+                           lưu ở đâu cho tới khi bấm ✅ / 💾 ghi vào Tank Log. */
+                        manual:'typed by an operator — kept on this machine until it is saved to the Tank Log',
                         'sap-missing':'SAP End Stock for that day is not loaded — type it in',
                         'manual-required':'must be typed in (mixing finished inside operating hours)',
                         none:'—' })[F.sysTag] || '';
       recon =
         '<div class="ntx-grid">'
-        + '<div class="ntx-r r-s"><span class="ntx-k">SYSTEM OPENING</span>'
+        + '<div class="ntx-r r-s"><span class="ntx-k">WMS INITIAL</span>'
         +   '<span class="ntx-v">' + _sysInp(item._pk, sloc, lotRaw, '3', F.sysC3) + '</span>'
         +   '<span class="ntx-v">' + _sysInp(item._pk, sloc, lotRaw, '4', F.sysC4) + '</span>'
         +   '<span class="ntx-t">' + (hs ? _kg(F.sysC3 + F.sysC4) + ' kg' : '') + '</span></div>'
@@ -260,15 +262,15 @@ const MIXNOTIFY = (function(){
         + '</div>'
         + '<div class="ntx-note' + (hs ? '' : ' warn') + '">'
         +   (hs
-              ? 'System opening ' + _esc(srcTxt) + '. Post <b>' + _kg(F.xC3) + '</b> / <b>' + _kg(F.xC4)
+              ? 'WMS initial ' + _esc(srcTxt) + '. Post <b>' + _kg(F.xC3) + '</b> / <b>' + _kg(F.xC4)
                 + '</b> kg instead of the notified figure so the system end stock lands on the measured one. '
                 + '✅ writes the gap and this quantity onto the lot in the Tank Log.'
-              : 'Enter the system opening stock to get the adjusted transfer quantity — '
+              : 'Enter the WMS initial stock to get the adjusted transfer quantity — '
                 + _esc(srcTxt) + '.')
         + '</div>';
       if((F.xC3 !== null && F.xC3 < 0) || (F.xC4 !== null && F.xC4 < 0))
         recon += '<div class="ntx-note warn">⚠ The adjusted quantity is NEGATIVE — the system already holds '
-               + 'more than the tank actually contains. Check the system opening figure before posting.</div>';
+               + 'more than the tank actually contains. Check the WMS initial figure before posting.</div>';
     }
 
     /* v4.131 — HÀNG TIÊU ĐỀ C3 / C4.

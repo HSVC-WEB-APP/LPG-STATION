@@ -15,32 +15,30 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="app-build" content="4.143">
+<meta name="app-build" content="4.153">
 
 <!-- Fonts (giữ từ V4-54) -->
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
 <!-- CSS theo module (nạp core trước) -->
 <link rel="stylesheet" href="vendor/tabulator.min.css">
-<link rel="stylesheet" href="css/core.css?v=4143"><!-- v4.127 — chip số hiệu bản + dải cảnh báo chạy bản cũ -->
+<link rel="stylesheet" href="css/core.css?v=4151"><!-- v4.127 — chip số hiệu bản + dải cảnh báo chạy bản cũ -->
 <link rel="stylesheet" href="css/monthly.css"><!-- Monthly Report (mthr) — file tách riêng, link ACTIVE -->
 <link rel="stylesheet" href="css/tldata.css"><!-- TL Data paste (mthr) — link ACTIVE -->
 <link rel="stylesheet" href="css/vessel.css"><!-- Vessel data tab (LPG Sales) — link ACTIVE -->
 <link rel="stylesheet" href="css/bond.css?v=4118"><!-- v4.106 — kho ngoại quan GỘP vào tab SAP (BOND) — link ACTIVE -->
-<link rel="stylesheet" href="css/xsplit.css?v=4137"><!-- v4.136 — 🔀 Cross-tank GI split — link ACTIVE (⚠ PHẢI nằm TRÊN khối comment bên dưới) -->
-<!-- ⚠ BẪY: khối dưới đây là COMMENT — mọi <link> trong nó KHÔNG được nạp.
-     Toàn bộ app CSS thực sự nằm trong core.css. Khi thêm style mới thì viết
-     vào core.css, ĐỪNG thêm link ở đây rồi tưởng là đã nạp (v4.82 dính đúng
-     Tách mịn 8 file là bước tuỳ chọn sau — xem docs/PROGRESS.md.
-<link rel="stylesheet" href="css/plan.css">
-<link rel="stylesheet" href="css/fleet.css">
-<link rel="stylesheet" href="css/scale.css">
-<link rel="stylesheet" href="css/cavern.css">
-<link rel="stylesheet" href="css/report.css">
-<link rel="stylesheet" href="css/engineer.css?v=480">
-<link rel="stylesheet" href="css/inventory.css">
-<link rel="stylesheet" href="css/monthly.css">
--->
+<link rel="stylesheet" href="css/xsplit.css?v=4153"><!-- v4.136 — 🔀 Cross-tank GI split — link ACTIVE (⚠ PHẢI nằm TRÊN khối comment bên dưới) -->
+<!-- ⚠ v4.144 — TOÀN BỘ CSS THẬT NẰM TRONG core.css.
+     Tám file css cũ (plan · fleet · scale · cavern · report · engineer · inventory ·
+     fnote) từng có <link> ở ngay chỗ này nhưng nằm LỌT TRONG MỘT KHỐI COMMENT, nên
+     suốt nhiều bản chưa bao giờ được nạp — sửa mấy file đó là công toi (bẫy v4.82,
+     tái diễn ở v4.136). Nay thư mục V4 chỉ giữ đúng file cần để deploy nên tám file
+     đó đã được DỜI khỏi repo, sang
+         «HSVC LPG STATION COWORK/_archive/css-not-loaded»
+     và mấy dòng <link> chết cũng đã bị GỠ HẲN — để lại là tự dựng bẫy: file không
+     còn tồn tại, mà test "mọi src/href phải trỏ tới file có thật" thì báo đỏ.
+     ⇒ Thêm style mới thì viết THẲNG vào core.css. Muốn tách file thì phải thêm
+       <link> THẬT (ngoài mọi comment) và thêm file vào danh sách deploy. -->
 </head>
 <body>
 
@@ -189,10 +187,10 @@
             <!-- TK-3501 — v4.33.0: ball-tank gauge left (sphere shell + liquid
                  rising from the bottom, level = spherical-cap inverse of the
                  stock volume fraction), info stack right. Updated live by
-                 INV.renderRow1() on every inventory change (opening stock, GI, loading). -->
+                 INV.renderRow1() on every inventory change (initial stock, GI, loading). -->
             <div class="sc-tkc sc-tkc-3501" id="scTk1Card" onclick="SCALE.scTkSelect(1)" title="Click to select TK-3501">
               <div class="sc-tkc-body">
-                <div class="sc-tkc-ball nostock" id="scTkBall1" title="No opening stock data">
+                <div class="sc-tkc-ball nostock" id="scTkBall1" title="No initial stock data">
                   <svg class="sc-tkb" viewBox="0 0 60 60">
                     <defs><clipPath id="scTkClip1"><circle cx="30" cy="30" r="23"/></clipPath></defs>
                     <circle class="sc-tkb-shell" cx="30" cy="30" r="23"/>
@@ -218,14 +216,14 @@
                     <span class="sc-inv-stat"><span class="sc-inv-k">C3</span><b class="sc-inv-v c3" id="scInvC3_1">—</b></span>
                     <span class="sc-inv-stat"><span class="sc-inv-k">C4</span><b class="sc-inv-v c4" id="scInvC4_1">—</b></span>
                   </div>
-                  <div class="sc-tkc-nodata" id="scTkNoData1">⚠ No opening stock data</div>
+                  <div class="sc-tkc-nodata" id="scTkNoData1">⚠ No initial stock data</div>
                 </div>
               </div>
             </div>
             <!-- TK-3502 -->
             <div class="sc-tkc sc-tkc-3502" id="scTk2Card" onclick="SCALE.scTkSelect(2)" title="Click to select TK-3502">
               <div class="sc-tkc-body">
-                <div class="sc-tkc-ball nostock" id="scTkBall2" title="No opening stock data">
+                <div class="sc-tkc-ball nostock" id="scTkBall2" title="No initial stock data">
                   <svg class="sc-tkb" viewBox="0 0 60 60">
                     <defs><clipPath id="scTkClip2"><circle cx="30" cy="30" r="23"/></clipPath></defs>
                     <circle class="sc-tkb-shell" cx="30" cy="30" r="23"/>
@@ -251,7 +249,7 @@
                     <span class="sc-inv-stat"><span class="sc-inv-k">C3</span><b class="sc-inv-v c3" id="scInvC3_2">—</b></span>
                     <span class="sc-inv-stat"><span class="sc-inv-k">C4</span><b class="sc-inv-v c4" id="scInvC4_2">—</b></span>
                   </div>
-                  <div class="sc-tkc-nodata" id="scTkNoData2">⚠ No opening stock data</div>
+                  <div class="sc-tkc-nodata" id="scTkNoData2">⚠ No initial stock data</div>
                 </div>
               </div>
             </div>
@@ -441,7 +439,7 @@
               <div class="inv-x-stock" id="invXStock"></div>
               <div class="inv-x-meta" id="invXMeta"></div>
               <div class="inv-x-acts">
-                <button class="inv-x-btn prim" onclick="INV.openInit()">📥 Opening Stock</button>
+                <button class="inv-x-btn prim" onclick="INV.openInit()">📥 Initial Stock</button>
                 <button class="inv-x-btn prim2" onclick="INV.openWt()">📐 %wt C3</button>
                 <button class="inv-x-btn" onclick="INV.openCavern()">⇄ Cavern</button>
                 <button class="inv-x-btn" onclick="INV.openXfer()">⇆ Transfer</button>
@@ -1957,20 +1955,20 @@
             <th style="width:66px;color:#8798a8;font-weight:500" title="Tham chiếu — Filled C4 theo GC. Con số chính thức nay là cột C4 ◈COQ.">Filled C4 <i style="font-style:normal;font-size:8px">(GC)</i></th>
             <th style="width:66px;color:var(--red);background:#fef0f1" title="Σ Filled LPG = C3 ◈COQ + C4 ◈COQ. Lot nào chưa có kết quả COQ thì tạm lấy Filled C3 + Filled C4 theo GC (ô hiện xám, có dấu ᴳᶜ).">Filled LPG</th>
             <!-- v4.108 — tồn ĐẦU thực tế (đo được) kẹp bên trái cặp Filled COQ -->
-            <th style="width:64px;color:#7fa39d;background:#f7fbfa;font-weight:500" title="Reference — ACTUAL opening stock in the tank, C3 part = INIT VOL (measured) × opening COQ density × opening %wt C3. Computed on this machine — not stored.">Open C3 ◈</th>
-            <th style="width:64px;color:#7fa39d;background:#f7fbfa;font-weight:500" title="Reference — ACTUAL opening stock in the tank, C4 part = INIT VOL (measured) × opening COQ density × (1 − opening %wt C3).">Open C4 ◈</th>
+            <th style="width:64px;color:#7fa39d;background:#f7fbfa;font-weight:500" title="Reference — ACTUAL initial stock in the tank, C3 part = INIT VOL (measured) × initial COQ density × initial %wt C3. Computed on this machine — not stored.">Init C3 ◈</th>
+            <th style="width:64px;color:#7fa39d;background:#f7fbfa;font-weight:500" title="Reference — ACTUAL initial stock in the tank, C4 part = INIT VOL (measured) × initial COQ density × (1 − initial %wt C3).">Init C4 ◈</th>
             <th class="th-cq2" style="width:70px;color:#8a4708;background:#fdf0d0;font-size:10px" title="OFFICIAL — the figure sent to the Check Booth. Filled C3 from the COQ mass balance: FINAL VOL × COQ density × %wt C3, minus INIT VOL × previous COQ density × previous %wt C3">C3 ◈COQ</th>
             <th class="th-cq2-r" style="width:70px;color:#8a4708;background:#fdf0d0;font-size:10px" title="OFFICIAL — the figure sent to the Check Booth. Filled C4 from the COQ mass balance">C4 ◈COQ</th>
             <!-- … và tồn CUỐI thực tế kẹp bên phải: Open + Filled = End -->
-            <th style="width:64px;color:#9d93b5;background:#faf8fd;font-weight:500" title="Reference — ACTUAL closing stock in the tank, C3 part = FINAL VOL (measured) × COQ density of this lot × %wt C3. Open C3 + C3 ◈COQ = End C3.">End C3 ◈</th>
-            <th style="width:64px;color:#9d93b5;background:#faf8fd;font-weight:500" title="Reference — ACTUAL closing stock in the tank, C4 part = FINAL VOL (measured) × COQ density of this lot × (1 − %wt C3). Open C4 + C4 ◈COQ = End C4.">End C4 ◈</th>
+            <th style="width:64px;color:#9d93b5;background:#faf8fd;font-weight:500" title="Reference — ACTUAL end stock in the tank, C3 part = FINAL VOL (measured) × COQ density of this lot × %wt C3. Open C3 + C3 ◈COQ = End C3.">End C3 ◈</th>
+            <th style="width:64px;color:#9d93b5;background:#faf8fd;font-weight:500" title="Reference — ACTUAL end stock in the tank, C4 part = FINAL VOL (measured) × COQ density of this lot × (1 − %wt C3). Open C4 + C4 ◈COQ = End C4.">End C4 ◈</th>
             <th style="width:46px" title="Which Filled C3/C4 figures get sent to Scale for the Check Booth — click the cell to change">⇒Scale</th>
             <th style="width:38px;color:var(--green);background:#eef8f2" title="Đã stock transfer trên WMS. Lot chưa tick sẽ được Allocation cộng thêm vào bồn.">ST</th>
             <!-- v4.111 — 4 cột ĐỐI CHIẾU CHUYỂN KHO (kg). Chỉ có số khi nhân viên
                  bấm 💾 SAVE ở bảng 📏 hoặc ✅ xác nhận ở ô thông báo Tank Mix. -->
             <!-- v4.131 — tồn đầu HỆ THỐNG (WMS/SAP) đứng TRƯỚC Gap: đọc trái
                  sang phải đúng thứ tự phép tính hệ thống → lệch → đã chuyển. -->
-            <th style="width:66px;color:#5b6b7c;background:#f2f5f8;font-size:10px" title="Tồn đầu HỆ THỐNG (WMS/SAP), phần C3 (kg) — đúng con số đã gõ ở ô SYSTEM OPENING. Gap = tồn đầu thực tế − ô này. Bấm vào ô để sửa tay.">WMS C3 <i style="font-style:normal;font-size:8px">(kg)</i></th>
+            <th style="width:66px;color:#5b6b7c;background:#f2f5f8;font-size:10px" title="Tồn đầu HỆ THỐNG (WMS/SAP), phần C3 (kg) — đúng con số đã gõ ở ô WMS INITIAL. Gap = tồn đầu thực tế − ô này. Bấm vào ô để sửa tay.">WMS C3 <i style="font-style:normal;font-size:8px">(kg)</i></th>
             <th style="width:66px;color:#5b6b7c;background:#f2f5f8;font-size:10px" title="Tồn đầu HỆ THỐNG (WMS/SAP), phần C4 (kg). Bấm vào ô để sửa tay.">WMS C4 <i style="font-style:normal;font-size:8px">(kg)</i></th>
             <th style="width:62px;color:#8a5a09;background:#fff8e6;font-size:10px" title="Gap ở TỒN ĐẦU, phần C3 (kg) = tồn đầu THỰC TẾ (INIT VOL đo được × nền COQ) − tồn đầu HỆ THỐNG (SAP End Stock). Số âm = hệ thống đang giữ nhiều hơn thực tế. Ô trống = lot này chưa được đối chiếu.">Gap C3 <i style="font-style:normal;font-size:8px">(kg)</i></th>
             <th style="width:62px;color:#8a5a09;background:#fff8e6;font-size:10px" title="Gap ở tồn đầu, phần C4 (kg). Ô trống = lot này chưa được đối chiếu.">Gap C4 <i style="font-style:normal;font-size:8px">(kg)</i></th>
@@ -3875,7 +3873,7 @@
           <label>New %wt C3</label>
           <input type="number" id="invWtVal" step="any" placeholder="30" autocomplete="off">
         </div>
-        <p class="inv-hint">Updates <b>%wt C3</b> only. Does not change the entered opening C3/C4 stock. Applies to every C3/C4 split calculation from this point on (logged to history).</p>
+        <p class="inv-hint">Updates <b>%wt C3</b> only. Does not change the entered initial C3/C4 stock. Applies to every C3/C4 split calculation from this point on (logged to history).</p>
       </div>
     </div>
     <div class="modal-foot">
@@ -3885,11 +3883,11 @@
   </div>
 </div>
 
-<!-- Opening stock (initial stock) -->
+<!-- Initial stock (initial stock) -->
 <div class="modal-bg" id="invInitModal">
   <div class="modal" style="width:460px">
     <div class="modal-hdr">
-      <h3>📥 Opening Stock</h3>
+      <h3>📥 Initial Stock</h3>
       <button class="modal-close" onclick="INV.closeAll()">×</button>
     </div>
     <div class="modal-body">
@@ -3903,11 +3901,11 @@
         </div>
         <div class="inv-row2">
           <div class="inv-fld">
-            <label>Opening C3 (kg)</label>
+            <label>Initial C3 (kg)</label>
             <input type="number" id="invInitC3" step="any" placeholder="0" autocomplete="off">
           </div>
           <div class="inv-fld">
-            <label>Opening C4 (kg)</label>
+            <label>Initial C4 (kg)</label>
             <input type="number" id="invInitC4" step="any" placeholder="0" autocomplete="off">
           </div>
         </div>
@@ -3915,12 +3913,12 @@
           <label>%wt C3</label>
           <input type="number" id="invInitWt" step="any" placeholder="30" autocomplete="off">
         </div>
-        <p class="inv-hint">This is the day's <b>baseline</b>. Current stock = Opening + cavern in + transfers − exported (TL). Overwrites any previous opening stock for this tank &amp; date.</p>
+        <p class="inv-hint">This is the day's <b>baseline</b>. Live stock = Initial + cavern in ± inter-tank − sold (TL Data). Overwrites any previous initial stock for this tank &amp; date.</p>
       </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="INV.closeAll()">Cancel</button>
-      <button class="btn btn-green" onclick="INV.saveInit()">Confirm opening stock</button>
+      <button class="btn btn-green" onclick="INV.saveInit()">Confirm initial stock</button>
     </div>
   </div>
 </div>
@@ -4027,6 +4025,34 @@
   </div>
 </div>
 
+<!-- ══ v4.145 — TANK CONSOLE: một bảng, ba tab, thay cụm 10 nút ══
+     z-index 190 < 200 của .modal-bg ⇒ mọi modal cũ mở ra vẫn nằm TRÊN bảng này. -->
+<div class="modal-bg" id="tkcModal" style="z-index:190">
+  <div class="modal tkc-modal">
+    <div class="modal-hdr">
+      <h3 id="tkcTitle">Tank Console</h3>
+      <div class="tkc-tanks">
+        <button class="tkc-tk" id="tkcTk2100" type="button" onclick="TKC.tank('2100')">TK-3501</button>
+        <button class="tkc-tk" id="tkcTk2101" type="button" onclick="TKC.tank('2101')">TK-3502</button>
+      </div>
+      <button class="modal-close" onclick="TKC.close()">&times;</button>
+    </div>
+    <div class="tkc-tabs">
+      <button class="tkc-tab" id="tkcTabstock" type="button" onclick="TKC.tab('stock')">&#9878; Stock</button>
+      <button class="tkc-tab" id="tkcTabrecon" type="button" onclick="TKC.tab('recon')">&#128207; Recon</button>
+      <button class="tkc-tab" id="tkcTabsplit" type="button" onclick="TKC.tab('split')">&#129518; Split</button>
+    </div>
+    <div class="modal-body">
+      <div class="tkc-pane" id="tkcPanestock"></div>
+      <div class="tkc-pane" id="tkcPanerecon" style="display:none"></div>
+      <div class="tkc-pane" id="tkcPanesplit" style="display:none"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="TKC.close()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Export breakdown (per-truck C3/C4 split by entered %wt) -->
 <div class="modal-bg" id="invExportModal">
   <div class="modal" style="width:600px">
@@ -4047,9 +4073,22 @@
           <label>Date</label>
           <input type="date" id="invExportDate" onchange="INV.pickExportDate(this.value)" style="height:34px">
         </div>
+        <!-- v4.144 — cùng nền %wt WMS với bảng 🧮, cùng luật làm tròn. -->
+        <div class="inv-fld" style="margin-bottom:0">
+          <label>%wt C3 — WMS basis</label>
+          <div class="inv-wt-fld" style="width:132px">
+            <span class="inv-wt-mark" id="invExportWtMark"></span>
+            <input class="inv-wt-inp" type="text" id="invExportWt" inputmode="decimal" autocomplete="off"
+                   oninput="INV.wtEdit('Export')"
+                   title="The C3 share the WMS itself holds for this tank. Type here to override for this window only; nothing is saved.">
+          </div>
+        </div>
       </div>
+      <div class="inv-wt-src" id="invExportWtSrc" style="margin:-4px 0 8px"></div>
       <div class="inv-export-sum" id="invExportSum"></div>
-      <p class="inv-hint" style="margin:0 0 6px">Chỉ gồm xe có <b>TRADE = Export</b> trong TL Data của ngày đã chọn (mặc định hôm nay). Bấm vào dòng hoặc ô tick để chọn/bỏ chọn xe tính tổng.</p>
+      <p class="inv-hint" style="margin:0 0 6px">Only trucks with <b>TRADE = Export</b> in the TL Data of the chosen date (today by default).
+        Click a row or its tick box to include or exclude it from the totals. Each row is split on the <b>WMS %wt C3</b> above
+        (C3 rounded up, C4 = net − C3); the totals are summed from the rows, never recomputed from the grand total.</p>
       <div class="inv-hist-scroll">
         <table class="inv-export-tbl">
           <thead><tr><th class="pick"><input type="checkbox" id="invExportAll" checked onclick="INV.toggleExportAll(this.checked)" title="Chọn / bỏ chọn tất cả"></th><th>DO No.</th><th>Customer</th><th>Net (kg)</th><th>C3 (kg)</th><th>C4 (kg)</th></tr></thead>
@@ -4067,7 +4106,7 @@
 <div class="modal-bg" id="invSplitModal">
   <div class="modal" style="width:440px">
     <div class="modal-hdr">
-      <h3>🧮 Tách LPG → C3 / C4</h3>
+      <h3>🧮 Split LPG → C3 / C4</h3>
       <button class="modal-close" onclick="INV.closeAll()">×</button>
     </div>
     <div class="modal-body">
@@ -4079,21 +4118,33 @@
             <button type="button" onclick="INV.pickSplit('2101')">TK-3502</button>
           </div>
         </div>
+        <!-- v4.144 — nền tách là %wt C3 CỦA WMS (tồn đầu + bút toán cộng vào bồn),
+             KHÔNG phải %wt của COQ. Ô này sửa được: gõ đè chỉ có tác dụng trong
+             cửa sổ này, muốn lưu cho cả bồn thì dùng nút 📐. -->
         <div class="inv-fld">
-          <label>%wt C3 (đã khai báo)</label>
-          <input type="text" id="invSplitWt" readonly>
+          <label>%wt C3 — WMS basis</label>
+          <div class="inv-wt-fld">
+            <span class="inv-wt-mark" id="invSplitWtMark"></span>
+            <input class="inv-wt-inp" type="text" id="invSplitWt" inputmode="decimal" autocomplete="off"
+                   oninput="INV.wtEdit('Split')"
+                   title="The C3 share the WMS itself holds for this tank — this is what WMS uses to split an LPG quantity. Type here to override for this window only; nothing is saved.">
+          </div>
+          <div class="inv-wt-src" id="invSplitWtSrc"></div>
         </div>
         <div class="inv-fld">
-          <label>Tổng LPG (kg)</label>
-          <input type="number" id="invSplitTotal" step="any" placeholder="0" autocomplete="off" oninput="INV.calcSplit()">
+          <label>Total LPG (kg)</label>
+          <input type="text" id="invSplitTotal" inputmode="decimal" placeholder="0" autocomplete="off" oninput="INV.calcSplit()">
         </div>
         <div class="inv-export-sum" id="invSplitResult"></div>
-        <p class="inv-hint">Nhập tổng LPG, hệ thống tự chia theo <b>%wt C3</b> đã khai báo: <b>C3 = Tổng × %wt</b>, <b>C4 = Tổng − C3</b>.</p>
+        <p class="inv-hint">Enter the total LPG; it is split on the <b>WMS %wt C3</b> above, the same way the WMS does it:
+          <b>C3 = round UP of (total × %wt)</b>, <b>C4 = total − C3</b>, so the two parts always add back to the total.<br>
+          <b>ƒ dashed blue</b> = worked out by the app (WMS initial + the adjusted stock transfer of the overnight mix).
+          <b>✎ solid amber</b> = a figure you entered yourself; it always wins.</p>
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn" onclick="INV.closeAll()">Đóng</button>
-      <button class="btn btn-green" onclick="INV.copySplit()">Copy kết quả</button>
+      <button class="btn" onclick="INV.closeAll()">Close</button>
+      <button class="btn btn-green" onclick="INV.copySplit()">Copy result</button>
     </div>
   </div>
 </div>
@@ -4163,7 +4214,7 @@
 
       </div>
 
-      <!-- Ô nhập System opening sống ở đây và được CHUYỂN vào đúng ô của bảng
+      <!-- Ô nhập WMS initial sống ở đây và được CHUYỂN vào đúng ô của bảng
            mỗi lần vẽ lại, nên gõ liên tục không bị mất con trỏ. -->
       <!-- v4.114 — type=text + inputmode=decimal, KHÔNG dùng type=number:
            ô number không cho đọc/đặt vị trí con trỏ (selectionStart ném lỗi),
@@ -4176,7 +4227,7 @@
         <input type="text" inputmode="decimal" autocomplete="off" id="stxSys32101" class="stx-inp c3" placeholder="C3 kg" oninput="INV.stxSysEdit('2101')">
         <input type="text" inputmode="decimal" autocomplete="off" id="stxSys42101" class="stx-inp c4" placeholder="C4 kg" oninput="INV.stxSysEdit('2101')">
         <!-- v4.128 — batch D: gõ MỘT trong hai ô, ô kia tự suy ra theo %wt C3.
-             Cùng cơ chế kho ẩn với ô System opening vì lý do y hệt. -->
+             Cùng cơ chế kho ẩn với ô WMS initial vì lý do y hệt. -->
         <input type="text" inputmode="decimal" autocomplete="off" id="stxBd32100" class="stx-inp c3" placeholder="C3 kg" oninput="INV.stxBdEdit('2100','3')">
         <input type="text" inputmode="decimal" autocomplete="off" id="stxBd42100" class="stx-inp c4" placeholder="C4 kg" oninput="INV.stxBdEdit('2100','4')">
         <input type="text" inputmode="decimal" autocomplete="off" id="stxBdW2100" class="stx-inp wt" placeholder="%wt" oninput="INV.stxBdEdit('2100','w')">
@@ -4188,14 +4239,14 @@
       <div class="stx-legend">
         <b>How the suggested figure is built.</b>
         <code>Actual = measured volume × COQ density × %wt C3</code> ·
-        <code>Suggested transfer = actual closing − system opening</code>.
+        <code>Suggested transfer = actual end stock − WMS initial</code>.
         Posting that quantity makes the system end stock land exactly on the measured end stock,
-        so the opening gap is cleared in the same posting instead of carrying forward.
-        <span class="rule"><b>System opening</b> is auto-filled from <b>SAP End Stock</b> only when mixing
+        so the gap at initial is cleared in the same posting instead of carrying forward.
+        <span class="rule"><b>WMS initial</b> is auto-filled from <b>SAP End Stock</b> only when mixing
         finished <b>outside 08:00–19:00</b> (no loading in between, so the day's End Stock is the balance
         right before this transfer): finish after 19:00 → same day; finish before 08:00 → previous day.
         Inside operating hours the figure must be typed in. You can always overwrite it.</span>
-        <span class="rule">The source line under <b>System opening</b> names <b>which SAP day</b> the figure belongs to
+        <span class="rule">The source line under <b>WMS initial</b> names <b>which SAP day</b> the figure belongs to
         and <b>when that SAP data was pasted</b>, and by whom. A tank's End Stock pasted last week looks identical to one
         pasted this morning — only the fresh one reflects the postings this transfer sits on, so check that line before
         trusting the suggested quantity.</span>
@@ -4904,7 +4955,7 @@
      ============================================================ -->
 <!-- core (thứ tự: nav → config → helpers → sync → auth → globals; globals PHẢI trước data) -->
 <script src="js/core/nav.js"></script>
-<script src="js/core/config.js?v=4143"></script><!-- v4.127 — APP_BUILD: số hiệu bản đang chạy -->
+<script src="js/core/config.js?v=4153"></script><!-- v4.127 — APP_BUILD: số hiệu bản đang chạy -->
 <script src="js/core/helpers.js?v=4141"></script><!-- v4.127 — window.TWAVG: nguồn DUY NHẤT tra khối lượng xe rỗng, khớp CẶP đầu xe + rơ-moóc -->
 <script src="js/core/sync.js?v=4130"></script><!-- v4.127 — SC.upsertRows: dán theo kiểu GỘP (cập nhật / thêm mới / giữ nguyên dòng không dán) -->
 <script src="js/core/forcesync.js"></script>
@@ -4939,7 +4990,7 @@
 <script src="js/features/rpt.js?v=4112"></script><!-- v4.112 — cột Trips: dòng TL mang chung khoá mdoG chỉ tính MỘT lượt xe -->
 <script src="js/features/mthr.js"></script>
 <script src="js/features/bond.js?v=4118"></script><!-- v4.106 — ⭐ KHO NGOẠI QUAN GỘP THẲNG VÀO TAB SAP: nút gạt "📊 SAP thô | 🛃 Kho ngoại quan", bảng KNQ đọc SỐ SỐNG từ SP.ROWS (SLoc 1100 tại D-1) chứ không giữ sổ riêng nữa. Cột TRÁI = STT tàu · Tên tàu · TK nhập · TK get out (người dùng gõ, lưu ở node knq_info theo mã batch, dán SAP ngày mới là tự ghép lại); GIỮA = nguyên văn SAP (Date·SLoc·Mat·Batch·Batch code·Init·GR·GI·Trs·End); PHẢI = HQ approved · Thực còn · % · VASSCM · Ghi chú. TRỪ LÙI: lô P/X lấy thẳng End Stock D-1 làm tồn đầu kỳ (đã kiểm chứng SAP KHÔNG động vào P/X suốt tháng) rồi trừ FIFO theo FEED OL1 của kỳ — BỎ HẲN đóng kỳ / tồn đầu kỳ op[] / cờ ✔Done / 🔒 khoá lô. Lô End=0 hoặc rơi khỏi ZMMFR022 thì tô màu mời xoá. 💾 Lưu kỳ = ảnh chụp cả bảng vào knq_period/<kỳ>, xem lại và xoá được để Firebase khỏi phình. Sửa ô bằng Tabulator tại chỗ ⇒ HẾT lỗi nuốt chữ khi gõ. Tab KNQ cũ vẫn chạy song song để đối chiếu, dùng chung node FEED OL1. -->
-<script src="js/features/inv.js?v=4131"></script><!-- v4.108 — ⚖ Stock-transfer reconciliation: tồn C3/C4 thực tế vs tồn hệ thống (SAP End Stock tự lấy theo giờ finish) → số chuyển kho đã điều chỉnh · v4.111 — lot đang tính hiện cạnh tên bồn, nút 💾 Save to Tank Log, tồn đầu hệ thống dùng chung với ô thông báo Tank Mix · v4.113 — số tồn đầu gõ tay lưu tạm lên /stx_draft theo TỪNG LOT (sống sót qua F5 / đổi máy / bồn trộn mẻ mới) và tự xoá khi đã lưu vào Tank Log · v4.114 — VÁ LỖI GÕ: ô System opening không còn bị cắt focus sau mỗi chữ số (cập nhật tại chỗ, type=text) · v4.117 — 🔍 WMS stock check (modal #stxWmsModal): gõ thể tích vừa đo + số C3/C4 WMS đang hiện ⇒ độ vênh và CÂU LỆNH chuyển kho rõ chiều (bồn ➜ hầm 1100 để GIẢM, hầm 1100 ➜ bồn để TĂNG); không lưu gì, số gõ giữ trong RAM suốt phiên · v4.131 — 💾 Save ghi luôn tồn đầu hệ thống vào 2 cột WMS của Tank Log -->
+<script src="js/features/inv.js?v=4152"></script><!-- v4.108 — ⚖ Stock-transfer reconciliation: tồn C3/C4 thực tế vs tồn hệ thống (SAP End Stock tự lấy theo giờ finish) → số chuyển kho đã điều chỉnh · v4.111 — lot đang tính hiện cạnh tên bồn, nút 💾 Save to Tank Log, tồn đầu hệ thống dùng chung với ô thông báo Tank Mix · v4.113 — số tồn đầu gõ tay lưu tạm lên /stx_draft theo TỪNG LOT (sống sót qua F5 / đổi máy / bồn trộn mẻ mới) và tự xoá khi đã lưu vào Tank Log · v4.114 — VÁ LỖI GÕ: ô WMS initial không còn bị cắt focus sau mỗi chữ số (cập nhật tại chỗ, type=text) · v4.117 — 🔍 WMS stock check (modal #stxWmsModal): gõ thể tích vừa đo + số C3/C4 WMS đang hiện ⇒ độ vênh và CÂU LỆNH chuyển kho rõ chiều (bồn ➜ hầm 1100 để GIẢM, hầm 1100 ➜ bồn để TĂNG); không lưu gì, số gõ giữ trong RAM suốt phiên · v4.131 — 💾 Save ghi luôn tồn đầu hệ thống vào 2 cột WMS của Tank Log · v4.152 — P2: tồn đầu ngày tự lấy (End Stock SAP D-1, hoặc trạng thái FINISH của mẻ nếu mẻ kết thúc SAU lúc dán SAP) · P4: ✅ cộng luôn số cavern đưa lên bồn vào tồn, có dấu /mixIn chống cộng trùng -->
 <script src="js/features/tkv.js"></script>
 <script src="js/features/vlog.js"></script>
 <script src="js/features/plog.js"></script>
@@ -4947,12 +4998,13 @@
 <script src="js/features/mixctrl.js?v=4111"></script><!-- v4.107 — MIX PLANNER: ô tuần hoàn đường ống MẶC ĐỊNH TẮT (trước là bật sẵn và tự trừ 74 m³) -->
 <!-- v4.101 — ★ MIX PLANNER: chọn CÓ/KHÔNG tuần hoàn đường ống (mặc định CÓ) + ô PIPE VOL; hàng tỉ lệ cũ trong ống được tính vào phần phải đưa về tỉ lệ thường -->
 <script src="js/features/vmix.js"></script>
-<script src="js/features/mixnotify.js?v=4131"></script><!-- v4.111 — thẻ thông báo Tank Mix hiện thêm System opening (sửa được tại chỗ), Gap và số chuyển kho ĐÃ ĐIỀU CHỈNH; ✅ ghi luôn kết quả đối chiếu vào 4 cột mới của Tank Log · v4.113 — hiện dòng "+N thông báo nữa đang chờ" khi vượt quá 4 ô · v4.114 — ô nhập đổi sang type=text để giữ được con trỏ · v4.131 — thêm hàng nhãn C3 / C4 ở đầu thẻ để không gõ nhầm cột -->
+<script src="js/features/mixnotify.js?v=4150"></script><!-- v4.111 — thẻ thông báo Tank Mix hiện thêm WMS initial (sửa được tại chỗ), Gap và số chuyển kho ĐÃ ĐIỀU CHỈNH; ✅ ghi luôn kết quả đối chiếu vào 4 cột mới của Tank Log · v4.113 — hiện dòng "+N thông báo nữa đang chờ" khi vượt quá 4 ô · v4.114 — ô nhập đổi sang type=text để giữ được con trỏ · v4.131 — thêm hàng nhãn C3 / C4 ở đầu thẻ để không gõ nhầm cột -->
 <script src="js/features/cav.js?v=4125"></script>
 <script src="js/features/vs.js"></script>
 <script src="js/features/fcst.js?v=4125"></script><!-- v4.120 — ⭐ DỰ BÁO TỒN KHO trên thanh SCALE CONSOLE · CHỈ lô D + E (P/X không tính), đơn xuất khẩu trừ lô E, nội địa trừ lô D, thêm ô nhập tàu/heater tạm tính · v4.119 — bản đầu: tồn ĐÃ THÔNG QUAN của SAP (1100+2100+2101) trừ MỌI kế hoạch có ngày SAU ngày SAP (Today Plan + Tomorrow Plan). Tỉ lệ bán (%vol) được ghép với lot có %vol gần nhất — lot đang trong bồn → lịch sử Tank Log → tạm tính — rồi lấy %wt của lot đó tách ra kg C3/C4. Cảnh báo khi kế hoạch bán LỐ hơn hàng đã thông quan (rủi ro bơm nhầm hàng chưa thông quan) -->
-<script src="js/features/xsplit.js?v=4137"></script><!-- v4.136 — 🔀 CROSS-TANK GI SPLIT: xe phải lấy hàng từ CẢ HAI ball tank nhưng phiếu cân + GI trên WMS chỉ làm được từ MỘT bồn. Chọn xe theo ngày/biển số/tài xế/DO trong TL Data, gõ KL lấy từ bồn kia, app tách C3/C4 theo %wt COQ của lot và duyệt mọi cách gán xe→bồn GI để ra phương án phải chuyển kho ÍT NHẤT (thay vì chuyển trọn cục làm tổng GI vượt LPG bồn đó có theo COQ). Không ghi gì — số giữ trong RAM suốt phiên -->
-<script src="js/features/scx2.js?v=4143"></script><!-- v4.108 — nút 📏 trên thẻ tank mở bảng đối chiếu chuyển kho · v4.117 — thêm nút 🔍 WMS stock check (đo tại chỗ → câu lệnh chuyển kho rõ chiều bồn ⇄ hầm 1100) · v4.136 — thêm nút 🔀 Cross-tank GI split trên CẢ HAI thẻ tank; nút 🔍 WMS stock check thu hẹp lại lấy chỗ -->
+<script src="js/features/xsplit.js?v=4153"></script><!-- v4.136 — 🔀 CROSS-TANK GI SPLIT: xe phải lấy hàng từ CẢ HAI ball tank nhưng phiếu cân + GI trên WMS chỉ làm được từ MỘT bồn. Chọn xe theo ngày/biển số/tài xế/DO trong TL Data, gõ KL lấy từ bồn kia, app tách C3/C4 theo %wt COQ của lot và duyệt mọi cách gán xe→bồn GI để ra phương án phải chuyển kho ÍT NHẤT (thay vì chuyển trọn cục làm tổng GI vượt LPG bồn đó có theo COQ). Không ghi gì — số giữ trong RAM suốt phiên · v4.153 — bảng xe rộng đúng theo nội dung: ngày, biển số và cột GI AT không còn bị cắt chữ -->
+<script src="js/features/tkc.js?v=4152"></script><!-- v4.145 — Tank Console: gom 10 nút thẻ tank về 3 nút có chữ, một bảng 3 tab · v4.152 — ô Initial stock mang dáng ƒ / ✎ theo nguồn + nút ↺ lấy lại số của app -->
+<script src="js/features/scx2.js?v=4146"></script><!-- v4.108 — nút 📏 trên thẻ tank mở bảng đối chiếu chuyển kho · v4.117 — thêm nút 🔍 WMS stock check (đo tại chỗ → câu lệnh chuyển kho rõ chiều bồn ⇄ hầm 1100) · v4.136 — thêm nút 🔀 Cross-tank GI split trên CẢ HAI thẻ tank; nút 🔍 WMS stock check thu hẹp lại lấy chỗ -->
 <!-- integrations -->
 <script src="js/integrations/ptt-early.js?v=4143"></script><!-- v4.87 — chọn kỹ sư cho phiếu KTPTVC khi in early/today -->
 <script src="js/integrations/sync2.js"></script>

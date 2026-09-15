@@ -61,10 +61,37 @@ const SCX2 = (function(){
       box.className = 'scx2-tkx';
       box.id = 'scx2Tkx'+n;
       const stop = 'event.stopPropagation();';
+      /* ══ v4.145 — BA NÚT CÓ CHỮ THAY CHO MƯỜI NÚT KÝ HIỆU ═══════════
+         Mười nút cũ (📥 📐 ⇄ ⇆ 📜 📤 🧮 📏 🔀 🔍) không nút nào có chữ, và
+         ba trong số đó cùng trả lời một câu hỏi. Nay gom thành ba nút, mỗi
+         nút là MỘT CÂU HỎI của người vận hành, cả ba mở CÙNG bảng Tank
+         Console — chỉ khác tab mở sẵn. Mọi hộp thoại cũ GIỮ NGUYÊN, bảng
+         mới chỉ tóm tắt số và mở chúng ra ([[tkc.js]] nói rõ vì sao không
+         bê thân modal đi chỗ khác). */
+      box.innerHTML =
+        '<div class="scx2-tkx-open" id="scx2Open'+n+'"></div>'
+      + '<div class="scx2-tkx-acts tkc3">'
+      +   '<button onclick="'+stop+'TKC.open(\''+sloc+'\',\'stock\')"'
+      +     ' title="Initial stock, %wt C3, cavern receipts, inter-tank transfers and today history — one ledger">⚖ Stock</button>'
+      +   '<button onclick="'+stop+'TKC.open(\''+sloc+'\',\'recon\')"'
+      +     ' title="Stock-transfer reconciliation and the WMS spot check — how far the system is off and what to post">📏 Recon</button>'
+      +   '<button onclick="'+stop+'TKC.open(\''+sloc+'\',\'split\')"'
+      +     ' title="Split a quantity into C3/C4 on the WMS basis — one number, the export list, or a truck loaded from both tanks">🧮 Split</button>'
+      + '</div>';
+      main.appendChild(box);
+    });
+  }
+
+  /* ⛔ v4.145 — CỤM 10 NÚT CŨ, GIỮ LẠI ĐỂ TRA CỨU, KHÔNG CÒN ĐƯỢC GỌI.
+     Đừng khôi phục: mỗi lối vào ở đây nay nằm trong một tab của TKC. */
+  function _buildTankExtrasLegacy(){
+    [[1,'2100','3501'],[2,'2101','3502']].forEach(([n, sloc, tk])=>{
+      const box = document.createElement('div');
+      const stop = 'event.stopPropagation();';
       box.innerHTML =
         '<div class="scx2-tkx-open" id="scx2Open'+n+'"></div>'
       + '<div class="scx2-tkx-acts">'
-      +   '<button onclick="'+stop+'INV.view(\''+sloc+'\');INV.openInit()"    title="Opening stock">📥</button>'
+      +   '<button onclick="'+stop+'INV.view(\''+sloc+'\');INV.openInit()"    title="Initial stock">📥</button>'
       +   '<button onclick="'+stop+'INV.view(\''+sloc+'\');INV.openWt()"      title="%wt C3 update">📐</button>'
       +   '<button onclick="'+stop+'INV.view(\''+sloc+'\');INV.openCavern()"  title="Cavern receive / return">⇄</button>'
       +   '<button onclick="'+stop+'INV.view(\''+sloc+'\');INV.openXfer()"    title="Inter-tank transfer">⇆</button>'
@@ -89,7 +116,7 @@ const SCX2 = (function(){
       +   '<button class="scx2-tkx-wms" onclick="'+stop+'INV.view(\''+sloc+'\');INV.openWms('+n+')"'
       +     ' title="WMS stock check — type the volume you have just measured and the C3/C4 the WMS shows now; the window gives the gap and says exactly which stock transfer to post">🔍</button>'
       + '</div>';
-      main.appendChild(box);
+      return box;   /* legacy — không gắn vào DOM nữa */
     });
   }
 
@@ -104,7 +131,7 @@ const SCX2 = (function(){
       let c = null;
       try{ c = INV.stockFor(sloc); }catch(_){}
       if(!c || !c.hasInit){
-        el.innerHTML = '<span class="e">no opening stock</span>';
+        el.innerHTML = '<span class="e">no initial stock</span>';
         return;
       }
       const f = v => Math.round(v||0).toLocaleString('en-US');
