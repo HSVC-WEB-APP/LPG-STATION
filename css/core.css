@@ -3531,6 +3531,10 @@ body{font-family:'Barlow',system-ui,sans-serif;background:var(--bg);color:var(--
 .scx2-tkx-open .k{font-family:'Oswald',sans-serif;font-size:7.5px;font-weight:700;letter-spacing:1px;color:#a3b2c1;}
 .scx2-tkx-open b{font-weight:600;}
 .scx2-tkx-open .e{font-size:10px;color:#b45309;font-style:italic;font-family:inherit;}
+/* v4.154 — nhãn nguồn tồn đầu trên thẻ tank: ƒ app (xanh, nét đứt) · ✎ người gõ (hổ phách) */
+.scx2-tkx-open .osrc{font-family:'Oswald',sans-serif;font-size:8.5px;letter-spacing:.4px;padding:0 5px;border-radius:3px;line-height:14px;white-space:nowrap;}
+.scx2-tkx-open .osrc.app{color:#1d5f95;background:#eef6fd;border:1px dashed #7fb2dc;}
+.scx2-tkx-open .osrc.user{color:#92400e;background:#fff4e0;border:1px solid #f0b95a;font-weight:700;}
 .scx2-tkx-acts{display:flex;gap:4px;flex-wrap:wrap;}
 .scx2-tkx-acts button{flex:1;min-width:30px;height:26px;border-radius:7px;border:1px solid #dfe6ee;background:#f7fafd;font-size:12px;cursor:pointer;padding:0;line-height:1;}
 .scx2-tkx-acts button:hover{border-color:#1565c0;background:#eaf3fd;}
@@ -4716,3 +4720,8 @@ table.tkc-exp tfoot td[id="tkcExpCnt"]{font-size:10px;letter-spacing:.5px;
 .tkc-lotbar .k{font-size:9.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;
   color:var(--ink-3);cursor:help;border-bottom:1px dotted var(--line)}
 .tkc-lotbar b{font-size:13px;font-family:'Oswald',sans-serif;letter-spacing:.4px;color:var(--navy)}
+
+/* v4.155 — ô chọn lot: <select> đủ danh sách + ô gõ tay bên cạnh */
+.tkc-lotpick{display:inline-flex;gap:4px;align-items:center}
+.tkc-lotsel{max-width:138px;font-weight:700;color:var(--navy);cursor:pointer}
+.tkc-lotbar .tkc-lot,.tkc-lotpick .tkc-lot{max-width:78px}

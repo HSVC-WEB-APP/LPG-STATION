@@ -1658,6 +1658,52 @@ const SCALE = (function(){
     {k:'note',     dom:'tc-note',      num:false},
     {k:'error',    dom:'tc-error',     num:false}
   ];
+  /* ══ v4.155 — NHÁP SCALE DATA GIỮ TRONG RAM SUỐT PHIÊN ══════════════
+     Gõ dở rồi bấm Close/Cancel (hoặc bấm ra ngoài) thì lần mở lại vẫn thấy
+     đủ những gì đã gõ, không phải nhập lại. CHỈ RAM: F5 là mất, không ghi
+     localStorage/Firebase. Khoá theo trạm + ĐƠN (oid/DO) + biển số ⇒ đơn khác
+     vào trạm đó không bao giờ nhận nhầm nháp của đơn cũ. Nháp chỉ giữ khi nó
+     KHÁC số đã lưu của trạm; bấm SAVE / DONE là bỏ nháp. */
+  const _techDraft = Object.create(null);
+  let _techDraftBound = false;
+  let _techNoDraft = false;     /* vừa lưu xong ⇒ lần đóng này không giữ nháp */
+  function _techDraftKey(stId){
+    const s = (DB_SC.stations || {})[stId] || {};
+    return String(stId) + '|' + String(s._oid || s.doNum || '') + '|' + String(s.plate || '');
+  }
+  function _techSavedVal(tech, f){
+    let raw = (tech && tech[f.k] != null && tech[f.k] !== '') ? tech[f.k] : '';
+    if(f.fmt && raw !== '') raw = _fmtWtDisplay(raw);
+    return String(raw);
+  }
+  function _techDraftSave(){
+    try{
+      const bg = document.getElementById('scTechBg');
+      if(!bg || !bg.classList.contains('on')) return;
+      const stId = parseInt(document.getElementById('tech-sid').value);
+      const s = (DB_SC.stations || {})[stId];
+      if(!stId || !s || s.status === 'empty') return;
+      const tech = s.tech || {};
+      const v = {}; let diff = false;
+      _TECH_FIELDS.forEach(f=>{
+        const el = document.getElementById(f.dom); if(!el) return;
+        v[f.k] = String(el.value == null ? '' : el.value);
+        if(v[f.k] !== _techSavedVal(tech, f)) diff = true;
+      });
+      const k = _techDraftKey(stId);
+      if(diff) _techDraft[k] = v; else delete _techDraft[k];
+    }catch(e){ console.warn('[SCALE] techDraftSave', e); }
+  }
+  function _techDraftClear(stId){ try{ delete _techDraft[_techDraftKey(stId)]; }catch(_){} }
+  function _techDraftOnEdit(){ _techNoDraft = false; _techDraftSave(); }
+  function _techDraftBind(){
+    if(_techDraftBound) return;
+    const body = document.getElementById('scTechBody');
+    if(!body || typeof body.addEventListener !== 'function') return;
+    body.addEventListener('input',  _techDraftOnEdit);
+    body.addEventListener('change', _techDraftOnEdit);
+    _techDraftBound = true;
+  }
   /* Auto-set GI Date toggle preference (persisted in localStorage) */
   const _GI_PREF_KEY = 'lpg_v4_gi_auto';
   function _giGetPref(){ try{ return localStorage.getItem(_GI_PREF_KEY) === '1'; }catch(_){ return false; } }
@@ -2009,6 +2055,17 @@ const SCALE = (function(){
       if(f.fmt && raw !== '') raw = _fmtWtDisplay(raw);
       el.value = raw;
     });
+    /* v4.155 — phủ nháp RAM (gõ dở lần trước) lên số đã lưu */
+    _techNoDraft = false;
+    _techDraftBind();
+    const _dr = _techDraft[_techDraftKey(stId)];
+    if(_dr){
+      _TECH_FIELDS.forEach(f=>{
+        const el = document.getElementById(f.dom);
+        if(el && _dr[f.k] != null) el.value = _dr[f.k];
+      });
+      setTimeout(()=>{ try{ toast('✎ Restored what you typed earlier — not saved yet','ok'); }catch(_){} }, 60);
+    }
 
     /* GI toggle — remember last preference */
     const giCb = document.getElementById('tc-gi-auto');
@@ -2497,7 +2554,7 @@ const SCALE = (function(){
     }
     /* Persist updatedAt for downstream consumers */
     tech.updatedAt = Date.now();
-    setSt(stId, {...cur, tech});
+    setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
     /* Combined multi-DO: split this one weigh across the linked DOs via the
        allocation popup (pushes one TL row per DO). Needs both gross + truck. */
     if(_mdoIsCombined(cur)){
@@ -2539,13 +2596,13 @@ const SCALE = (function(){
         const net = g - t;
         if(net <= 0){ toast('Net ≤ 0 — check Truck / Gross Wt','er'); return; }
         tech.updatedAt = Date.now();
-        setSt(stId, {...cur, tech});
+        setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
         _mdoAllocShow(stId, cur, tech, net);
         return;
       }
       tech._mdoAllocated = true;
       tech.updatedAt = Date.now();
-      setSt(stId, {...cur, tech});
+      setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
       techClose();
       /* Dòng TL đã được đẩy lúc chia số. Giờ hỏi: MỘT phiếu gộp, hay MỖI DO
          một phiếu. v4.110 — danh sách per-DO được DỰNG LẠI từ số đã lưu trên
@@ -2565,7 +2622,7 @@ const SCALE = (function(){
       return;
     }
     tech.updatedAt = Date.now();
-    setSt(stId, {...cur, tech});
+    setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
     _pushToTL(stId, cur, tech);
     techClose();
     /* Open DN preview overlay so user can edit before printing */
@@ -2592,20 +2649,20 @@ const SCALE = (function(){
         const net = g - t;
         if(net <= 0){ toast('Net ≤ 0 — check Truck / Gross Wt','er'); return; }
         tech.updatedAt = Date.now();
-        setSt(stId, {...cur, tech});
+        setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
         _mdoAllocShow(stId, cur, tech, net);
         return;
       }
       tech._mdoAllocated = true;
       tech.updatedAt = Date.now();
-      setSt(stId, {...cur, tech});
+      setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
       toast('✓ Done · Station '+stId,'ok');
       techClose();
       setEmpty(stId);
       return;
     }
     tech.updatedAt = Date.now();
-    setSt(stId, {...cur, tech});
+    setSt(stId, {...cur, tech}); _techDraftClear(stId); _techNoDraft = true;
     _pushToTL(stId, cur, tech);
     toast('✓ Done · Station '+stId,'ok');
     techClose();
@@ -2632,6 +2689,9 @@ const SCALE = (function(){
   /* Back-compat shim — older paths still call _techNet */
   function _techNet(){ scCalcNet(); }
   function techClose(){
+    /* v4.155 — giữ nháp khi đóng (ô gợi ý đích đến không bắn 'input') */
+    if(!_techNoDraft) _techDraftSave();
+    _techNoDraft = false;
     document.getElementById('scTechBg').classList.remove('on');
     const dd = document.getElementById('sc-dest-dd');
     if(dd) dd.classList.remove('on');

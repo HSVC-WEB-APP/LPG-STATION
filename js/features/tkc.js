@@ -122,12 +122,45 @@ const TKC = (function(){
         + W.mixLots.length + ' lots</span>' : '';
     return ' <span class="tkc-lottag" title="' + esc('Lot ' + L) + '">lot ' + esc(_shortLot(L)) + '</span>';
   }
-  function _lotDatalist(){
-    let L = [];
-    try{ L = INV.wtLotList(_sloc) || []; }catch(_){}
-    return '<datalist id="tkcLotList">'
-      + L.map(function(x){ return '<option value="' + esc(x) + '"></option>'; }).join('')
-      + '</datalist>';
+  /* ⭐ v4.155 — Ô CHỌN LOT = <select> + ô gõ tay.
+     Bản cũ dùng <input list> + <datalist>: đã chọn một lot thì trình duyệt LỌC
+     danh sách theo chữ đang có ⇒ chỉ còn đúng lot đó, không chọn lại được lot
+     khác (user báo "lỡ bấm không chọn lại được"). <select> luôn hiện ĐỦ danh
+     sách + dòng "auto" để quay về; ô bên cạnh để gõ lot không có trong danh
+     sách (Enter hoặc rời ô là áp dụng). */
+  function _lotPicker(id, list, cur, pickCall, typeCall, autoTxt, tip){
+    const L = (list || []).slice();
+    const c = String(cur || '');
+    const inList = !c || L.some(function(x){ return x === c; });
+    let o = '<option value="">' + esc(autoTxt) + '</option>';
+    L.forEach(function(x){
+      o += '<option value="' + esc(x) + '"' + (x === c ? ' selected' : '') + '>' + esc(x) + '</option>';
+    });
+    if(!inList) o += '<option value="' + esc(c) + '" selected>' + esc(c) + ' (typed)</option>';
+    return '<select class="tkc-sel tkc-lotsel" id="' + id + 'Sel"'
+         +   (tip ? ' title="' + esc(tip) + '"' : '')
+         +   ' onchange="TKC.' + pickCall + '(this.value)">' + o + '</select>'
+         + '<input class="tkc-inp tkc-lot" id="' + id + '" type="text" autocomplete="off"'
+         +   ' placeholder="type lot" title="' + esc('Type a lot number (e.g. 413) and press Enter.') + '"'
+         +   ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}"'
+         +   ' onchange="TKC.' + typeCall + '()">';
+  }
+  /* Áp dụng lot rồi VẼ LẠI NGAY. Lỗi cũ: onchange chạy khi ô lot còn focus ⇒
+     render() thấy _busy() và bỏ qua ⇒ chọn/gõ lot mà bảng không đổi gì.
+     Rời focus khỏi ô lot trước; nếu focus đã sang một ô nhập khác thì đợi ô
+     đó rời đi mới vẽ (không huỷ chữ đang gõ). */
+  function _lotApplied(){
+    try{
+      const a = document.activeElement;
+      if(a && /^tkc(ReconLot|WtLot)/.test(String(a.id || '')) && typeof a.blur === 'function') a.blur();
+      const b = document.activeElement;
+      if(b && b.tagName === 'INPUT' && String(b.id || '').indexOf('tkc') === 0
+         && typeof b.addEventListener === 'function'){
+        b.addEventListener('blur', function(){ setTimeout(render, 0); }, { once:true });
+        return;
+      }
+    }catch(_){}
+    render();
   }
   /* khoá Firebase chỉ có A-Za-z0-9_- nên ghép thẳng vào id là an toàn */
   const _idk = k => String(k || 'New').replace(/[^A-Za-z0-9_-]/g, '');
@@ -190,7 +223,9 @@ const TKC = (function(){
     P.init.auto = !!(I && I.auto);
     const iKind = !c.hasInit ? 'none' : ((I && I.auto) ? 'app' : 'user');
     const iSrcTxt = !c.hasInit ? 'NOT SET'
-                  : (I && I.auto) ? (I.src === 'mix' ? 'MIX FINISH STATE' : 'SAP END STOCK D-1')
+                  : (I && I.auto) ? (I.src === 'mix' ? 'MIX FINISH STATE'
+                                     : I.src === 'sapfill' ? 'SAP D-1 + FILLED COQ'
+                                     : 'SAP END STOCK D-1')
                   : 'YOU TYPED IT';
     const iTip = !c.hasInit
       ? ((A && A.ok) ? 'The app can take this from ' + A.txt + ' — press ↺.'
@@ -228,11 +263,13 @@ const TKC = (function(){
       +   _inp('tkcWt','%','','wtEdit') + '<span class="pc">%</span></span></td>'
       /* ⭐ v4.148 — ô chọn LOT: %wt này là của mẻ nào. onchange chứ không
          oninput — gõ giữa chừng mà vẽ lại là mất ô. */
-      + '<td class="n"><input class="tkc-inp tkc-lot" id="tkcWtLot" type="text"'
-      +   ' list="tkcLotList" autocomplete="off" placeholder="lot (auto)"'
-      +   ' title="' + esc('Which lot this %wt belongs to. Leave it empty and the app adds every '
-            + 'mix already transferred onto this tank; type a lot to use that mix only.')
-      +   '" onchange="TKC.wtLot()">' + _lotDatalist() + '</td>'
+      + '<td class="n"><span class="tkc-lotpick">'
+      +   _lotPicker('tkcWtLot',
+            (function(){ try{ return INV.wtLotList(_sloc) || []; }catch(_){ return []; } })(),
+            P.init.lot, 'wtLotPick', 'wtLot', 'all lots (auto)',
+            'Which lot this %wt belongs to. Auto adds every mix already transferred onto this '
+            + 'tank; pick or type a lot to use that mix only.')
+      + '</span></td>'
       + '<td class="n tot">' + _chip(kind, W ? (W.src||'') : '', W ? W.srcTxt : '')
       +   _lotTag(W) + '</td>'
       + '<td class="src">' + _btn('Save','wtSave()','Save this %wt C3 for the tank.') + '</td></tr>';
@@ -242,9 +279,12 @@ const TKC = (function(){
               cavT ? kg(c.cav.c3) : '—', cavT ? kg(c.cav.c4) : '—', cavT ? kg(cavT) : '—', '');
     H.filter(function(e){ return e.type === 'cavern'; }).forEach(function(e){
       P.cav[_idk(e._k)] = { c3:Math.round(num(e.c3)), c4:Math.round(num(e.c4)), note:e.note||'' };
-      h += _entryRow('tkcCav', e._k, _hm(e.ts) + (e.by ? ' · ' + esc(e.by) : ''),
-                     'Recorded ' + _hm(e.ts) + (e.by ? ' by ' + e.by : '')
-                       + '. Change the figures and press Save.',
+      /* v4.154 — dòng app tự ghi khi mẻ xong trong ngày: dấu ƒ + lot */
+      const autoLbl = e.auto ? 'ƒ app' + (e.lot ? ' · lot ' + esc(_shortLot(e.lot)) : '') + ' · ' : '';
+      h += _entryRow('tkcCav', e._k, autoLbl + _hm(e.ts) + (e.by && !e.auto ? ' · ' + esc(e.by) : ''),
+                     (e.auto ? 'Added by the app: ' + (e.note || 'mix finished today') + '. ' : '')
+                       + 'Recorded ' + _hm(e.ts) + (e.by ? ' by ' + e.by : '')
+                       + '. Change the figures and press Save — once you do, the app leaves it alone.',
                      false, "cavDel('" + e._k + "')");
     });
     h += _entryRow('tkcCav', '', 'new receipt',
@@ -398,11 +438,8 @@ const TKC = (function(){
           + 'app takes the lot it can work out — a pending mix notification first, then the lot on the '
           + 'tank card, then the latest lot in the Tank Log. Type a lot to work on an older mix. '
           + 'The full reconciliation table uses the same choice.') + '">Lot</span>'
-      + '<input class="tkc-inp tkc-lot" id="tkcReconLot" type="text" list="tkcReconLotList"'
-      +   ' autocomplete="off" placeholder="auto" onchange="TKC.reconLot()">'
-      + '<datalist id="tkcReconLotList">'
-      +   list.map(function(x){ return '<option value="' + esc(x) + '"></option>'; }).join('')
-      + '</datalist>'
+      + _lotPicker('tkcReconLot', list, typed, 'reconLotPick', 'reconLot', 'auto',
+                   'Pick a lot, or go back to auto (the lot the app works out).')
       + '<b>' + esc((F && F.lot) ? F.lot : '—') + '</b>'
       + (typed ? _chip('user','✎ typed', 'You picked this lot yourself — clear the box to go back to auto.')
                : (srcTxt ? _chip('app','ƒ ' + srcTxt, 'The app worked this lot out: ' + srcTxt + '.') : ''))
@@ -648,8 +685,15 @@ const TKC = (function(){
   }
   function wtEdit(){ /* để trống có chủ ý: chỉ chốt khi bấm Save */ }
   function wtLot(){
-    try{ INV.wtLotSet(_sloc, _val('tkcWtLot')); }catch(e){ console.warn('[TKC] wtLot', e); }
-    render();
+    const v = String(_val('tkcWtLot') || '').trim();
+    if(!v) return;                         /* ô gõ trống ⇒ giữ lựa chọn ở ô chọn */
+    try{ INV.wtLotSet(_sloc, v); }catch(e){ console.warn('[TKC] wtLot', e); }
+    _lotApplied();
+  }
+  function wtLotPick(v){
+    try{ INV.wtLotSet(_sloc, String(v == null ? '' : v)); }catch(e){ console.warn('[TKC] wtLotPick', e); }
+    const t = $('tkcWtLot'); if(t) t.value = '';
+    _lotApplied();
   }
   function wtSave(){
     const w = _pct(_val('tkcWt'));
@@ -680,8 +724,15 @@ const TKC = (function(){
     }
   }
   function reconLot(){
-    try{ INV.stxSetLot(_sloc, _val('tkcReconLot')); }catch(e){ console.warn('[TKC] reconLot', e); }
-    render();
+    const v = String(_val('tkcReconLot') || '').trim();
+    if(!v) return;
+    try{ INV.stxSetLot(_sloc, v); }catch(e){ console.warn('[TKC] reconLot', e); }
+    _lotApplied();
+  }
+  function reconLotPick(v){
+    try{ INV.stxSetLot(_sloc, String(v == null ? '' : v)); }catch(e){ console.warn('[TKC] reconLotPick', e); }
+    const t = $('tkcReconLot'); if(t) t.value = '';
+    _lotApplied();
   }
   function sysReset(){
     try{ INV.stxSysReset(_sloc); }catch(e){ console.warn('[TKC] sysReset', e); }
@@ -866,7 +917,6 @@ const TKC = (function(){
     if(_tab === 'stock' && _pending.stock){
       const P = _pending.stock;
       _fill('tkcInitC3', P.init.c3); _fill('tkcInitC4', P.init.c4); _fill('tkcWt', P.init.wt);
-      _fill('tkcWtLot', P.init.lot);
       Object.keys(P.cav).forEach(k=>{
         _fill('tkcCav'+k+'C3', P.cav[k].c3); _fill('tkcCav'+k+'C4', P.cav[k].c4);
         _fill('tkcCav'+k+'Note', P.cav[k].note);
@@ -879,7 +929,6 @@ const TKC = (function(){
     if(_tab === 'recon'){
       if(_pending.sys){
         _fill('tkcSysC3', _pending.sys.c3); _fill('tkcSysC4', _pending.sys.c4);
-        _fill('tkcReconLot', _pending.sys.lotIn || '');
       }
       if(_pending.wms){
         _fill('tkcWv', _pending.wms.vol); _fill('tkcW3', _pending.wms.c3); _fill('tkcW4', _pending.wms.c4);
@@ -917,8 +966,8 @@ const TKC = (function(){
 
   return { init, open, close, tank, tab, render, run,
            /* v4.146 — gõ thẳng trên bảng, không phải mở thêm hộp thoại */
-           initEdit, initSave, initReset, wtEdit, wtSave, wtLot,
-           sysEdit, sysReset, stxSave, reconLot,
+           initEdit, initSave, initReset, wtEdit, wtSave, wtLot, wtLotPick,
+           sysEdit, sysReset, stxSave, reconLot, reconLotPick,
            expToggle, expAll,
            /* v4.147 — sổ cavern / liên bồn · WMS check · bảng export ngay trên bảng */
            cavSave, cavDel, xfSave, xfDel,

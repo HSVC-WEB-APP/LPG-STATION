@@ -47,15 +47,19 @@ const INV = (function(){
   let _localVer = { '2100':null, '2101':null };
   /* v4.152 — đã nghe Firebase trả lời cho ngày hôm nay chưa (theo bồn). */
   let _fbSeen = { '2100':false, '2101':false };
+  /* v4.154 — đồng hồ đóng băng được (chỉ test dùng) */
+  let _clock = 0;
+  function _nowMs(){ return _clock || Date.now(); }
+  let _boundDay = '', _invRef = null;
 
   /* ── date / misc helpers ── */
-  function ds(){ const d=new Date(),p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+  function ds(){ const d=new Date(_nowMs()),p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
   /* Canonical DD/MM/YY (2-digit year) — MUST match normalizeDate() / the date
      stored on TL Data rows (_buildTLPayload uses String(year).slice(-2)).
      giFromTL() and _renderExport() compare r.date === todayDMY() by exact
      string; a 4-digit year here silently fails every match, so today's actual
      net-weight sales are NEVER deducted from tank stock. Keep this 2-digit. */
-  function todayDMY(){ const d=new Date(),p=n=>String(n).padStart(2,'0'); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2); }
+  function todayDMY(){ const d=new Date(_nowMs()),p=n=>String(n).padStart(2,'0'); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2); }
   function nowHM(){ const d=new Date(),p=n=>String(n).padStart(2,'0'); return p(d.getHours())+':'+p(d.getMinutes()); }
   function by(){ try{ return (typeof CURRENT_USER!=='undefined' && CURRENT_USER.name) || '—'; }catch(_){ return '—'; } }
   function num(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
@@ -84,10 +88,18 @@ const INV = (function(){
     const h = fb(); if(!h || _fbBound) return;
     _fbBound = true;
     /* v4.150 — KHÔNG còn listener /stx_draft: số WMS gõ tay là RAM-only. */
-    /* Listen to today's node only (cheap). Re-bind is handled on date roll by init scheduler re-run. */
-    h.ref('inv_daily/'+ds()).on('value', snap=>{
+    /* Listen to today's node only (cheap). v4.154 — sang ngày mới thì
+       _rebindIfRolled() gỡ listener cũ và nghe lại node của ngày mới. Ngày
+       được CHỐT vào closure: listener của hôm qua không bao giờ ghi nhầm
+       sang ô hôm nay. */
+    const day = ds();
+    _boundDay = day;
+    _invRef = h.ref('inv_daily/'+day);
+    _attachSapLot();
+    _invRef.on('value', snap=>{
+      if(day !== _boundDay) return;
       const v = snap.val() || {};
-      DATA[ds()] = DATA[ds()] || {};
+      DATA[day] = DATA[day] || {};
       let changed = false;
       ['2100','2101'].forEach(sl=>{
         const n = v[sl] || {};
@@ -100,7 +112,7 @@ const INV = (function(){
         const fbVer = (n._ver!=null) ? n._ver : 0;
         /* Only adopt + recompute when the version actually moved (or first load). */
         if(_localVer[sl] === null || fbVer !== _localVer[sl]){
-          DATA[ds()][sl] = { init:n.init||null, wt:n.wt||null,
+          DATA[day][sl] = { init:n.init||null, wt:n.wt||null,
                              history:n.history||{}, mixIn:n.mixIn||{} };
           _localVer[sl] = fbVer;
           changed = true;
@@ -108,6 +120,15 @@ const INV = (function(){
       });
       if(changed){ saveCache(); render(); }
     }, err=>{ if(typeof fbErr==='function') fbErr(err,'Load inventory'); else console.warn('[INV] fb listen', err); });
+  }
+
+  function _rebindIfRolled(){
+    if(!_fbBound || !_boundDay || _boundDay === ds()) return;
+    try{ if(_invRef && typeof _invRef.off === 'function') _invRef.off(); }catch(_){}
+    _fbBound = false; _invRef = null;
+    _fbSeen = { '2100':false, '2101':false };
+    _localVer = { '2100':null, '2101':null };
+    attachFirebase();
   }
 
   /* ── GI sold-today from TL Data (read-only, guarded) ──
@@ -120,8 +141,7 @@ const INV = (function(){
     const dmy = todayDMY();
     let c3=0, c4=0;
     const b = bucket(d, sloc);
-    const pctC3 = (b.wt && isFinite(b.wt.wtC3) ? num(b.wt.wtC3)
-                 : b.init && isFinite(b.init.wtC3) ? num(b.init.wtC3) : DEFAULT_WT) / 100;
+    const pctC3 = _bucketWt(b) / 100;
     Object.values(TL.ROWS).forEach(r=>{
       if(!r || r.disabled || !r.date) return;
       if(r.date !== dmy) return;
@@ -149,8 +169,7 @@ const INV = (function(){
                gi:{c3:0,c4:0}, stn:{c3:0,c4:0}, c3Cur:0, c4Cur:0, lpg:0 };
     }
     const c3Init = num(b.init.c3), c4Init = num(b.init.c4);
-    const wtC3 = b.wt && isFinite(b.wt.wtC3) ? num(b.wt.wtC3)
-               : isFinite(b.init.wtC3) ? num(b.init.wtC3) : DEFAULT_WT;
+    const wtC3 = _bucketWt(b);
     let cvC3=0,cvC4=0, xInC3=0,xInC4=0, xOutC3=0,xOutC4=0;
     Object.values(b.history||{}).forEach(e=>{
       if(!e) return;
@@ -210,7 +229,9 @@ const INV = (function(){
   function render(){
     /* v4.152 — tồn đầu ngày tự lấy (P2). Đặt ở đầu render vì render được gọi
        lại sau MỌI thay đổi Firebase — lần nào đủ dữ liệu là nó chốt được. */
-    try{ _autoInitTick(); }catch(e){ console.warn('[INV] autoInitTick', e); }
+    /* v4.154 — cùng lượt: tính lại tồn đầu của app + tự ghi cavern receipt
+       cho mẻ xong trong ngày. Có khoá chống gọi lồng. */
+    _autoTick();
     renderRow1();   // ROW 1 (Scale tab) always refreshes, independent of the card
     const tab1=document.getElementById('invXTab1'), tab2=document.getElementById('invXTab2');
     if(tab1){ tab1.className='inv-x-tab'+(sel==='2100'?' on-3501':''); }
@@ -456,12 +477,13 @@ const INV = (function(){
     if(!TKNAME[sloc]) return done(false, 'bad-tank');
     const c3 = num(c3v), c4 = num(c4v);
     if(c3 < 0 || c4 < 0) return done(false, 'negative');
-    let wt = num(wtv);
-    if(!wt || wt <= 0 || wt > 100) wt = _wtRatio(c3, c4);
+    let wt = num(wtv), wtApp = false;
+    if(!wt || wt <= 0 || wt > 100){ wt = _wtInt(c3, c4); wtApp = true; }
     if(wt === null || !(wt > 0)) wt = DEFAULT_WT;
     const d = ds(), ts = Date.now(), user = by();
     const updates = {};
-    updates['inv_daily/'+d+'/'+sloc+'/init'] = { c3, c4, wtC3:wt, ts, by:user };
+    updates['inv_daily/'+d+'/'+sloc+'/init'] = wtApp ? { c3, c4, wtC3:wt, wtApp:true, ts, by:user }
+                                                     : { c3, c4, wtC3:wt, ts, by:user };
     updates['inv_daily/'+d+'/'+sloc+'/wt']   = null;   /* khai lại tồn đầu thì xoá số %wt gõ đè */
     const key = h.ref('inv_daily/'+d+'/'+sloc+'/history').push().key;
     updates['inv_daily/'+d+'/'+sloc+'/history/'+key] =
@@ -953,6 +975,18 @@ const INV = (function(){
     return out.sort((a,b)=>_stxLotKey(b) - _stxLotKey(a)).slice(0, 12);
   }
 
+  /* v4.155 — %wt C3 do APP TÍNH để dùng như WMS ⇒ SỐ NGUYÊN, đúng cách WMS
+     làm tròn. Số người gõ tay thì giữ nguyên (người nhập luôn thắng). */
+  function _wtInt(c3, c4){ const w = _wtRatio(c3, c4); return w === null ? null : Math.round(w); }
+  /* %wt dùng cho tồn bồn: người gõ (wt) → giữ; lấy từ tồn đầu của app → làm tròn. */
+  function _bucketWt(b){
+    if(b && b.wt && isFinite(b.wt.wtC3)) return num(b.wt.wtC3);
+    if(b && b.init && isFinite(b.init.wtC3)){
+      const w = num(b.init.wtC3);
+      return (b.init.auto || b.init.wtApp) ? Math.round(w) : w;
+    }
+    return DEFAULT_WT;
+  }
   function _wtRatio(c3, c4){
     const t = num(c3) + num(c4);
     if(!(t > 0)) return null;
@@ -2132,109 +2166,361 @@ const INV = (function(){
     const t = new Date(d + 'T' + String(STX_OPEN_H).padStart(2,'0') + ':00:00');
     return isNaN(t.getTime()) ? 0 : t.getTime();
   }
-  /* THUẦN TÍNH — không đụng DOM, không ghi gì, để test gọi thẳng được. */
+  /* ══ v4.154 — END STOCK SAP NÀY LÀ CỦA LOT NÀO ══════════════════════
+     LỖI v4.152: so giờ FINISH của mẻ với giờ DÁN bảng SAP. Nhưng End Stock
+     của ngày X là số dư CUỐI NGÀY X theo NGÀY HẠCH TOÁN — dán lúc nào cũng
+     thế. Ca thật 16/09: SAP 15/09 dán sáng 16/09, muộn hơn mẻ 413 xong
+     20:10 tối 15/09 ⇒ luật cũ kết luận "SAP đã gồm mẻ" và lấy nhầm số SAP,
+     trong khi bút toán chuyển kho của 413 CHƯA hề post (cờ ST còn ○).
+     LUẬT ĐÚNG — lot L nằm trong End Stock SAP ngày X khi và chỉ khi:
+        ① L xong TRƯỚC hết ngày X, VÀ
+        ② cờ ST [53] của L đã tick (đã chuyển kho trên WMS), VÀ
+        ③ giờ tick [54] thuộc ngày ≤ X (post ngày nào, SAP ngày đó mới có).
+     Dòng cũ có tick mà không có giờ tick ⇒ lùi về luật giờ dán cũ.
+     Mỗi lần dán SAP, app GHI LẠI kết luận này vào /sap_lot/<ngày>/<sloc>:
+     số SAP đó đại diện cho lot nào + các lot đã trộn mà SAP chưa có. Bảng
+     tồn đầu đọc lại bản ghi đó trước, không có mới tự suy. */
+  function _dayAt(iso, h){
+    if(!iso) return 0;
+    const t = new Date(iso + 'T' + String(h).padStart(2,'0') + ':00:00');
+    return isNaN(t.getTime()) ? 0 : t.getTime();
+  }
+  function _dayEndAt(iso){ const n = _dayAt(_stxShift(iso, 1), 0); return n ? n - 1 : 0; }
+  function _isoOf(ms){
+    const t = +ms || 0; if(!t) return '';
+    const d = new Date(t); if(isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2,'0');
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+  }
+  function _stOn(row){ return String((row && row[53]) || '') === '1'; }
+  function _stTickAt(row){ const t = +(row && row[54]) || 0; return t > 0 ? t : 0; }
+  /* Mọi mẻ của MỘT bồn có giờ finish, xếp theo giờ finish TĂNG dần. */
+  function _tankMixes(sloc){
+    const want = _STX_TKNUM[sloc], out = [];
+    _stxRows().forEach(r=>{
+      if(!r || String(r[2]||'').replace(/\D/g,'') !== want) return;
+      const at = _mixFinishAt(r);
+      if(at) out.push({ row:r, at:at, lot:String(r[1]||'').trim() });
+    });
+    out.sort((a, z) => a.at - z.at);
+    return out;
+  }
+  /* THUẦN TÍNH — lot của dòng r đã nằm trong End Stock SAP ngày X chưa. */
+  function _sapHasMix(r, X, sapAt){
+    const fin = _mixFinishAt(r);
+    if(!fin || !X) return false;
+    if(fin > _dayEndAt(X)) return false;                 /* ① xong sau ngày X */
+    if(!_stOn(r)) return false;                          /* ② chưa chuyển kho */
+    const t = _stTickAt(r);
+    if(t) return _isoOf(t) <= X;                         /* ③ post ngày nào */
+    return !(sapAt && fin > sapAt);                      /* dòng cũ: luật giờ dán */
+  }
+  function _notInSapWhy(r, X){
+    if(!_stOn(r)) return 'its stock transfer is not ticked yet';
+    const t = _stTickAt(r);
+    if(t && _isoOf(t) > X) return 'its stock transfer was posted on ' + _stxWhen(t);
+    return 'the SAP data was pasted before it finished';
+  }
+  const _SAPLOT_WIN_MS = 72 * 3600 * 1000;
+  function _sapLotLive(sloc, X, sapAt){
+    const out = { lot:'', lotAt:0, pending:[], src:'live' };
+    const endX = _dayEndAt(X);
+    const M = _tankMixes(sloc).filter(m => m.at <= endX);
+    M.forEach(m=>{ if(_sapHasMix(m.row, X, sapAt)){ out.lot = m.lot; out.lotAt = m.at; } });
+    M.forEach(m=>{
+      if(m.at <= out.lotAt || m.at < endX - _SAPLOT_WIN_MS) return;
+      if(!_sapHasMix(m.row, X, sapAt)) out.pending.push(m.lot);
+    });
+    return out;
+  }
+  const _SAPLOT = {};               /* iso → sloc → bản ghi /sap_lot (Firebase) */
+  let _sapLotBound = false;
+  function _splitLots(s){ return String(s||'').split(',').map(x=>x.trim()).filter(Boolean); }
+  /* Bản ghi lúc dán thắng; chưa có bản ghi (SAP dán bằng bản cũ) thì tự suy. */
+  function sapLotOf(sloc, X, sapAt){
+    const live = _sapLotLive(sloc, X, sapAt);
+    const n = (_SAPLOT[X] || {})[sloc];
+    if(!n) return live;
+    const lot = String(n.lot || '');
+    let lotAt = +n.lotAt || 0;
+    if(lot){
+      const hit = _tankMixes(sloc).filter(m => _stxLotMatch(m.lot, lot)).pop();
+      if(hit) lotAt = hit.at;
+    }
+    return { lot:lot, lotAt:lotAt, pending:_splitLots(n.pending), src:'node',
+             at:+n.at || 0, by:String(n.by||''), live:live };
+  }
+  /* Gọi sau mỗi lần dán SAP: ghi lot mà End Stock của từng bồn đại diện. */
+  function sapLotStamp(dates){
+    if(!_canAuto()) return 0;
+    const h = fb(); if(!h) return 0;
+    if(!_stxRows().length) return 0;        /* Tank Log chưa nạp ⇒ không kết luận bừa */
+    const updates = {}, ts = Date.now(), who = by();
+    let n = 0;
+    const seen = {};
+    (dates || []).forEach(x=>{
+      const X = _stxIso(x); if(!X || seen[X]) return; seen[X] = 1;
+      ['2100','2101'].forEach(sl=>{
+        let sap = null;
+        try{ sap = (typeof SP !== 'undefined' && SP.tankEnd) ? SP.tankEnd(sl, X) : null; }catch(_){}
+        if(!sap || !sap.has) return;
+        const L = _sapLotLive(sl, X, +sap.lastAt || 0);
+        const rec = { lot:L.lot, lotAt:L.lotAt, pending:L.pending.join(','),
+                      c3:Math.round(num(sap.c3)), c4:Math.round(num(sap.c4)),
+                      sapAt:+sap.lastAt || 0, at:ts, by:who };
+        const old = (_SAPLOT[X] || {})[sl];
+        if(old && String(old.lot||'') === rec.lot && String(old.pending||'') === rec.pending
+           && Math.round(num(old.c3)) === rec.c3 && Math.round(num(old.c4)) === rec.c4) return;
+        (_SAPLOT[X] = _SAPLOT[X] || {})[sl] = rec;
+        updates['sap_lot/' + X + '/' + sl] = rec; n++;
+      });
+    });
+    if(n) h.ref().update(updates).catch(e=>console.warn('[INV] sapLotStamp', e));
+    return n;
+  }
+  function _attachSapLot(){
+    const h = fb(); if(!h || _sapLotBound) return;
+    _sapLotBound = true;
+    try{
+      let q = h.ref('sap_lot');
+      if(q && typeof q.orderByKey === 'function') q = q.orderByKey().limitToLast(10);
+      q.on('value', snap=>{
+        const v = (snap && typeof snap.val === 'function' && snap.val()) || {};
+        Object.keys(_SAPLOT).forEach(k=>{ delete _SAPLOT[k]; });
+        Object.keys(v).forEach(k=>{ _SAPLOT[k] = v[k] || {}; });
+        render();
+      }, err=>console.warn('[INV] sap_lot listen', err));
+    }catch(e){ console.warn('[INV] sap_lot attach', e); }
+  }
+
+  /* Quyền + độ chín dữ liệu cho mọi lệnh app TỰ ghi. Vai trò chỉ xem / sale
+     không được ghi; 15 giây đầu để SAP + Tank Log kịp nạp, khỏi chốt số từ
+     RAM còn trống rồi phải lật lại. */
+  let _bootAt = 0;
+  function _canAuto(){
+    try{ if(typeof canWrite === 'function' && !canWrite('inv')) return false; }catch(_){ return false; }
+    return true;
+  }
+  function _autoReady(){ return !!_clock || (_bootAt > 0 && Date.now() - _bootAt > 15000); }
+  let _lastVer = 0;
+  function _vts(){ const t = Date.now(); _lastVer = (t > _lastVer) ? t : _lastVer + 1; return _lastVer; }
+
+  /* ══ TỒN ĐẦU NGÀY — THUẦN TÍNH, không đụng DOM, không ghi gì ══════════
+     Mẻ mới nhất của bồn xong TRƯỚC giờ mở cửa hôm nay:
+       • SAP D-1 đã có mẻ đó (hoặc không có mẻ nào)  ⇒ End Stock SAP D-1
+       • SAP D-1 CHƯA có, mẻ xong sau 19:00 hôm qua  ⇒ trạng thái FINISH của
+         mẻ trên Tank Log (đo thật, cả ruột bồn; không ai xuất hàng từ lúc đó)
+       • SAP D-1 CHƯA có, mẻ xong trước 19:00 hôm qua ⇒ SAP D-1 + lượng nạp
+         ◈COQ của các mẻ đó (sau mẻ còn xuất hàng nên trạng thái finish đã cũ)
+       • mẻ chưa có COQ ⇒ tạm lấy SAP, có COQ là tự chuyển. */
   function _autoInitPick(sloc, d){
     d = d || ds();
-    const out = { ok:false, c3:0, c4:0, wt:null, src:'none', lot:'', day:'',
-                  sapAt:0, sapGuess:false, finishAt:0, txt:'', why:'' };
+    const out = { ok:false, c3:0, c4:0, wt:null, src:'none', lot:'', lots:[], day:'',
+                  sapAt:0, sapGuess:false, sapLot:'', sapLotSrc:'', finishAt:0,
+                  waitCoq:'', txt:'', why:'' };
     if(!_STX_TKNUM[sloc]){ out.why = 'bad-tank'; return out; }
     const yest = _stxShift(d, -1);
+    out.day = yest;
     let sap = null;
     try{ sap = (typeof SP !== 'undefined' && SP.tankEnd) ? SP.tankEnd(sloc, yest) : null; }catch(_){}
     const hasSap = !!(sap && sap.has && (num(sap.c3) + num(sap.c4)) > 0);
     let sapAt = hasSap ? (+sap.lastAt || 0) : 0;
-    /* Bảng SAP dán bằng bản cũ không có dấu thời gian ⇒ coi như chụp lúc
-       đóng cửa ngày hôm trước. Không đoán thì mẻ nào cũng hoá "mới hơn SAP". */
     if(hasSap && !sapAt){
-      const g = new Date(yest + 'T' + String(STX_CLOSE_H).padStart(2,'0') + ':00:00');
-      if(!isNaN(g.getTime())){ sapAt = g.getTime(); out.sapGuess = true; }
+      const g = _dayAt(yest, STX_CLOSE_H);
+      if(g){ sapAt = g; out.sapGuess = true; }
     }
     out.sapAt = sapAt;
-    const openAt = _dayOpenAt(d);
-    const want = _STX_TKNUM[sloc];
-    let best = null, bestAt = 0, bestSplit = null;
-    _stxRows().forEach(r=>{
-      if(!r || String(r[2]||'').replace(/\D/g,'') !== want) return;
-      const at = _mixFinishAt(r);
-      if(!at || (openAt && at > openAt)) return;                  /* xong giữa ban ngày ⇒ TRONG ngày */
-      if(openAt && at < openAt - _MIX_STALE_MS) return;           /* quá cũ, không phải mẻ đêm vừa rồi */
-      if(sapAt && at <= sapAt) return;                            /* SAP chụp sau mẻ ⇒ đã có trong SAP */
-      let sp = null;
-      try{ sp = (typeof ENG !== 'undefined' && ENG.actualSplit) ? ENG.actualSplit(r) : null; }catch(_){}
-      if(!sp || !sp.endOk) return;
-      if(at > bestAt){ bestAt = at; best = r; bestSplit = sp; }
-    });
-    if(best){
-      out.ok = true; out.src = 'mix'; out.finishAt = bestAt;
-      out.c3  = Math.round(bestSplit.endC3 * 1000);               /* actualSplit trả TẤN */
-      out.c4  = Math.round(bestSplit.endC4 * 1000);
-      out.lot = String(best[1]||'').trim();
-      out.wt  = _wtRatio(out.c3, out.c4);
-      out.txt = 'the Tank Log finish state of lot ' + (out.lot || '—')
-              + ' (' + (_stxWhen(bestAt) || 'no time') + ')'
-              + (hasSap
-                  ? ' — that mix finished AFTER the SAP data was pasted'
-                    + (out.sapGuess ? '' : ' (' + _stxWhen(sapAt) + ')')
-                    + ', so the SAP End Stock of ' + _stxDmy(yest) + ' does not include it yet'
-                  : ' — there is no SAP End Stock for ' + _stxDmy(yest));
+    const openAt = _dayOpenAt(d), closeY = _dayAt(yest, STX_CLOSE_H);
+    const SL = hasSap ? sapLotOf(sloc, yest, sapAt) : { lot:'', lotAt:0, pending:[], src:'' };
+    out.sapLot = SL.lot; out.sapLotSrc = SL.src;
+    const inSap = m => hasSap && !!SL.lot
+                    && (_stxLotMatch(m.lot, SL.lot) || (SL.lotAt > 0 && m.at <= SL.lotAt));
+    const M = _tankMixes(sloc).filter(m => m.at <= openAt);
+    const best = M.length ? M[M.length - 1] : null;
+    const fresh = !!best && best.at >= openAt - _MIX_STALE_MS;
+    const sapTxt = () => 'the SAP End Stock of ' + _stxDmy(yest)
+                       + (sap && sap.lastAt ? ' (pasted ' + _stxWhen(sap.lastAt) + ')' : '');
+    const useSap = why => {
+      out.ok = true; out.src = 'sap';
+      out.c3 = Math.round(num(sap.c3)); out.c4 = Math.round(num(sap.c4));
+      out.wt = _wtInt(out.c3, out.c4);
+      out.txt = sapTxt() + ' — ' + why;
+      return out;
+    };
+
+    if(best && fresh && !inSap(best)){
+      const pend = M.filter(m => m.at >= openAt - _MIX_STALE_MS && m.at > (SL.lotAt || 0) && !inSap(m));
+      const lotTxt = 'lot ' + best.lot + ' (finished ' + _stxWhen(best.at) + ')';
+      const whyNot = hasSap
+        ? ', not in the SAP End Stock of ' + _stxDmy(yest) + ' yet — ' + _notInSapWhy(best.row, yest)
+        : ' — there is no SAP End Stock for ' + _stxDmy(yest);
+      if(!hasSap || best.at >= closeY){
+        let sp = null;
+        try{ sp = (typeof ENG !== 'undefined' && ENG.actualSplit) ? ENG.actualSplit(best.row) : null; }catch(_){}
+        if(sp && sp.endOk){
+          out.ok = true; out.src = 'mix'; out.finishAt = best.at;
+          out.c3 = Math.round(sp.endC3 * 1000);               /* actualSplit trả TẤN */
+          out.c4 = Math.round(sp.endC4 * 1000);
+          out.lot = best.lot;
+          out.lots = pend.map(m => m.lot);
+          if(out.lots.indexOf(best.lot) < 0) out.lots.push(best.lot);
+          out.wt = _wtInt(out.c3, out.c4);
+          out.txt = 'the Tank Log finish state of ' + lotTxt + whyNot;
+          return out;
+        }
+        out.waitCoq = best.lot;
+        if(hasSap) return useSap('lot ' + best.lot + ' is not in it yet, but it has no COQ basis so its '
+                                 + 'finish state cannot be used; the app switches as soon as the COQ is in');
+        out.why = 'no-coq';
+        out.txt = lotTxt + ' has no COQ basis yet and there is no SAP End Stock for '
+                + _stxDmy(yest) + ' — enter it by hand';
+        return out;
+      }
+      /* xong trước 19:00 hôm qua mà SAP chưa có: sau mẻ còn xuất hàng */
+      let f3 = 0, f4 = 0, miss = '';
+      pend.forEach(m=>{
+        const q3 = parseFloat(m.row[66]), q4 = parseFloat(m.row[67]);
+        if(isFinite(q3) && isFinite(q4)){ f3 += q3 * 1000; f4 += q4 * 1000; }
+        else if(!miss) miss = m.lot;
+      });
+      if(miss){
+        out.waitCoq = miss;
+        return useSap('lot ' + miss + ' is not in it yet, but it has no COQ filled quantity; '
+                      + 'the app adds it as soon as the COQ is in');
+      }
+      out.ok = true; out.src = 'sapfill'; out.finishAt = best.at;
+      out.c3 = Math.round(num(sap.c3) + f3); out.c4 = Math.round(num(sap.c4) + f4);
+      out.lot = best.lot; out.lots = pend.map(m => m.lot);
+      out.wt = _wtInt(out.c3, out.c4);
+      out.txt = sapTxt() + ' plus the COQ filled quantity of ' + out.lots.join(', ')
+              + ' — ' + lotTxt + whyNot + ', and trucks were loaded after it, so its finish state is out of date';
       return out;
     }
     if(hasSap){
-      out.ok = true; out.src = 'sap'; out.day = yest;
-      out.c3 = Math.round(num(sap.c3)); out.c4 = Math.round(num(sap.c4));
-      out.wt = _wtRatio(out.c3, out.c4);
-      out.txt = 'the SAP End Stock of ' + _stxDmy(yest)
-              + (sap.lastAt ? ' (pasted ' + _stxWhen(sap.lastAt) + ')' : '')
-              + ' — no mix has finished on this tank since';
-      return out;
+      if(best && fresh) return useSap('it already contains lot ' + SL.lot
+                                      + (SL.src === 'node' ? ' (recorded when the SAP data was pasted)' : ''));
+      if(best && !inSap(best)) return useSap('lot ' + best.lot + ' finished too long ago to use its finish state');
+      return useSap('no mix has finished on this tank since');
     }
     out.why = 'no-data';
     out.txt = 'no SAP End Stock for ' + _stxDmy(yest)
-            + ' and no mix finish state in the Tank Log — enter it by hand';
+            + ' and no recent mix finish state in the Tank Log — enter it by hand';
     return out;
+  }
+  function _pickLots(a){
+    const L = (a && a.lots && a.lots.length) ? a.lots.slice()
+            : (a && a.src === 'mix' && a.lot ? [a.lot] : []);
+    return L;
+  }
+  function _pickSig(a){ return [a.src, _pickLots(a).join(','), Math.round(a.c3), Math.round(a.c4)].join('|'); }
+  function _initSig(i){
+    if(!i) return '';
+    const lots = (i.autoLots != null) ? String(i.autoLots) : (i.autoSrc === 'mix' ? String(i.autoLot||'') : '');
+    return [String(i.autoSrc||''), lots, Math.round(num(i.c3)), Math.round(num(i.c4))].join('|');
   }
   function _autoInitWrite(sloc, d, a, force, cb){
     const done = (ok, why) => { if(typeof cb === 'function'){ try{ cb(ok, why); }catch(_){} } return ok; };
     const h = fb(); if(!h) return done(false, 'no-firebase');
     if(!a || !a.ok) return done(false, (a && a.why) || 'no-data');
-    if(bucket(d, sloc).init && !force) return done(false, 'has-init');
-    const ts = Date.now();
-    const wt = (a.wt !== null && a.wt > 0) ? a.wt : DEFAULT_WT;
+    const bk = bucket(d, sloc);
+    const had = bk.init;
+    if(had && !force) return done(false, 'has-init');
+    const ts = _vts();
+    const wt = (a.wt !== null && a.wt > 0) ? Math.round(a.wt) : DEFAULT_WT;
+    const lots = _pickLots(a);
     const updates = {};
     updates['inv_daily/'+d+'/'+sloc+'/init'] =
       { c3:a.c3, c4:a.c4, wtC3:wt, ts:ts, by:'app',
-        auto:true, autoSrc:a.src, autoLot:a.lot || '', autoTxt:a.txt || '' };
+        auto:true, autoSrc:a.src, autoLot:a.lot || '', autoLots:lots.join(','),
+        autoSapLot:a.sapLot || '', autoTxt:a.txt || '' };
     updates['inv_daily/'+d+'/'+sloc+'/wt'] = null;
     const key = h.ref('inv_daily/'+d+'/'+sloc+'/history').push().key;
     updates['inv_daily/'+d+'/'+sloc+'/history/'+key] =
       { type:'init', c3:a.c3, c4:a.c4, wtC3:wt, ts:ts, by:'app', auto:true,
         note:'Initial stock — taken by the app from ' + (a.txt || a.src) };
-    if(a.src === 'mix' && a.lot)
-      updates['inv_daily/'+d+'/'+sloc+'/mixIn/'+_mixKey(a.lot)] =
-        { via:'init', lot:a.lot, c3:a.c3, c4:a.c4, ts:ts };
+    /* Dấu chống cộng trùng: lot nào đã nằm trong tồn đầu thì ✅ / dòng cavern
+       tự ghi KHÔNG được cộng nó thêm lần nữa. Nền đổi thì dọn dấu cũ. */
+    Object.keys(bk.mixIn || {}).forEach(mk=>{
+      const e = bk.mixIn[mk];
+      if(e && e.via === 'init' && !lots.some(l => _stxLotMatch(e.lot || mk, l)))
+        updates['inv_daily/'+d+'/'+sloc+'/mixIn/'+mk] = null;
+    });
+    lots.forEach(l=>{
+      const hk = 'mix_' + _mixKey(l);
+      const old = (bk.history || {})[hk];
+      if(old && old.auto) updates['inv_daily/'+d+'/'+sloc+'/history/'+hk] = null;
+      updates['inv_daily/'+d+'/'+sloc+'/mixIn/'+_mixKey(l)] =
+        (l === a.lot && a.src === 'mix')
+          ? { via:'init', lot:l, c3:a.c3, c4:a.c4, ts:ts }
+          : { via:'init', lot:l, ts:ts };
+    });
     updates['inv_daily/'+d+'/'+sloc+'/_ver'] = ts;
+    const what = a.src === 'mix'     ? 'the mix finish state' + (a.lot ? ' · lot ' + a.lot : '')
+               : a.src === 'sapfill' ? 'SAP End Stock + filled COQ of ' + lots.join(', ')
+               :                       'SAP End Stock';
     h.ref().update(updates)
-      .then(()=>{ toast('↺ Initial stock of ' + TKNAME[sloc] + ' taken from '
-                      + (a.src === 'mix' ? 'the mix finish state' + (a.lot ? ' · lot ' + a.lot : '')
-                                         : 'SAP End Stock')
-                      + ' — type over it if it is wrong', 'ok');
+      .then(()=>{ toast((had ? '↺ Initial stock of ' + TKNAME[sloc] + ' updated from '
+                             : '↺ Initial stock of ' + TKNAME[sloc] + ' taken from ')
+                        + what + ' — type over it if it is wrong', 'ok');
                   done(true, 'ok'); })
       .catch(e=>{ console.warn('[INV] autoInitWrite', e); done(false, 'fb-error'); });
     return true;
   }
+  /* Chạy lại sau MỌI thay đổi (render) + mỗi 30 giây. Số của app được tính
+     lại liên tục: dán SAP mới, tick ST, có COQ… là tồn đầu tự đổi theo.
+     Số người gõ (auto không còn) thì KHÔNG BAO GIỜ đụng tới. */
+  const _autoSig = {};
   function _autoInitTick(){
+    if(!_canAuto() || !_autoReady()) return;
     const d = ds();
     ['2100','2101'].forEach(sl=>{
       const k = d + '|' + sl;
-      if(_autoInitDone[k]) return;
       if(!_fbSeen[sl]) return;              /* chưa nghe Firebase ⇒ chưa biết có số hay chưa */
-      if(bucket(d, sl).init){ _autoInitDone[k] = 'has-init'; return; }
+      const cur = bucket(d, sl).init;
+      if(cur && !cur.auto){ _autoInitDone[k] = 'has-init'; return; }
       let a = null;
       try{ a = _autoInitPick(sl, d); }catch(e){ console.warn('[INV] autoInitPick', e); return; }
-      if(!a || !a.ok) return;               /* thiếu dữ liệu ⇒ thử lại ở lần vẽ sau */
+      if(!a || !a.ok) return;               /* thiếu dữ liệu ⇒ thử lại ở lần sau */
+      const sig = _pickSig(a);
+      if(cur && _initSig(cur) === sig){ _autoSig[k] = sig; return; }
+      if(_autoSig[k] === sig) return;       /* máy này đã ghi đúng số này rồi — chờ Firebase */
+      _autoSig[k] = sig;
       _autoInitDone[k] = a.src;
-      _autoInitWrite(sl, d, a, false);
+      _autoInitWrite(sl, d, a, true);
     });
+  }
+  /* ══ v4.154 — MẺ XONG TRONG NGÀY: TỰ GHI DÒNG CAVERN RECEIPT ═════════
+     Mẻ kết thúc SAU giờ mở cửa hôm nay mà đã có số ◈COQ ⇒ lượng từ hầm đã
+     nằm trong bồn ⇒ live stock phải tăng ngay, không chờ ai bấm ✅. Dòng
+     ghi khoá 'mix_<lot>', cờ auto ⇒ hiện ở Tank Console, nhân viên sửa/xoá
+     được; sửa rồi thì app không đè nữa. ✅ sau đó chỉ tinh lại con số
+     (Filled ◈COQ → Adjusted qty for WMS ST khi đã có WMS initial). */
+  function _autoRecvTick(){
+    if(!_canAuto() || !_autoReady()) return;
+    const d = ds(), openAt = _dayOpenAt(d), now = _nowMs();
+    const nextOpen = _dayOpenAt(_stxShift(d, 1));
+    ['2100','2101'].forEach(sl=>{
+      if(!_fbSeen[sl] || !bucket(d, sl).init) return;
+      _tankMixes(sl).forEach(m=>{
+        if(m.at <= openAt || m.at > now || (nextOpen && m.at > nextOpen)) return;
+        const prev = mixInGet(sl, m.lot, d);
+        if(prev && prev.via === 'init') return;
+        let F = null;
+        try{ F = _stxFigures(sl, m.lot); }catch(_){ return; }
+        if(!F || !F.ok || !F.ctx || F.ctx.coqC3 === null || F.ctx.coqC4 === null) return;
+        try{ _mixStockApply(F, true); }catch(e){ console.warn('[INV] autoRecv', e); }
+      });
+    });
+  }
+  let _ticking = false;
+  function _autoTick(){
+    if(_ticking) return;
+    _ticking = true;
+    try{
+      try{ _rebindIfRolled(); }catch(_){}
+      try{ _autoInitTick(); }catch(e){ console.warn('[INV] autoInitTick', e); }
+      try{ _autoRecvTick(); }catch(e){ console.warn('[INV] autoRecvTick', e); }
+    } finally { _ticking = false; }
   }
   /* Nút ↺ trên bảng: lấy lại số của app và ĐÈ lên số đang có. */
   function autoInitApply(sloc, cb){
@@ -2252,8 +2538,10 @@ const INV = (function(){
   /* Bảng hỏi: số tồn đầu đang hiện là của AI — app hay người. */
   function initInfoFor(sloc, d){
     const i = bucket(d || ds(), sloc).init;
-    if(!i) return { has:false, auto:false, src:'', lot:'', txt:'', by:'', ts:0 };
+    if(!i) return { has:false, auto:false, src:'', lot:'', lots:[], sapLot:'', txt:'', by:'', ts:0 };
     return { has:true, auto:!!i.auto, src:String(i.autoSrc||''), lot:String(i.autoLot||''),
+             lots:_splitLots(i.autoLots != null ? i.autoLots : (i.autoSrc === 'mix' ? i.autoLot : '')),
+             sapLot:String(i.autoSapLot||''),
              txt:String(i.autoTxt||''), by:String(i.by||''), ts:+i.ts || 0,
              c3:num(i.c3), c4:num(i.c4), wt:num(i.wtC3) };
   }
@@ -2295,6 +2583,16 @@ const INV = (function(){
                      + ' — no cavern receipt added, so the quantity is never counted twice', 'ok');
       return false;
     }
+    /* v4.154 — mẻ xong TRƯỚC giờ mở cửa hôm nay mà tồn đầu là số của app:
+       tồn đầu đã tính tới mẻ đó rồi (SAP đã có nó, hoặc lấy thẳng trạng thái
+       finish). Cộng thêm là cộng hai lần. */
+    const curInit = bucket(d, sloc).init;
+    const finAt = (F.ctx && F.ctx.row) ? _mixFinishAt(F.ctx.row) : 0;
+    if(curInit && curInit.auto && finAt && finAt <= _dayOpenAt(d)){
+      if(!quiet) toast('ℹ Lot ' + lot + ' finished before the day opened, so the initial stock of '
+                     + TKNAME[sloc] + ' already accounts for it — no cavern receipt added', 'ok');
+      return false;
+    }
     const k = 'mix_' + _mixKey(lot);
     const old = (bucket(d, sloc).history || {})[k];
     if(old && !old.auto){
@@ -2305,8 +2603,11 @@ const INV = (function(){
     const c3 = Math.round(useAdj ? F.xC3 : F.fC3);
     const c4 = Math.round(useAdj ? F.xC4 : F.fC4);
     if(!isFinite(c3) || !isFinite(c4) || (!c3 && !c4)) return false;
+    /* đã ghi đúng số này rồi ⇒ không ghi lại (vòng tự động chạy liên tục) */
+    if(old && old.auto && Math.round(num(old.c3)) === c3 && Math.round(num(old.c4)) === c4
+       && prev && prev.via === 'cavern') return false;
     const h = fb(); if(!h) return false;
-    const ts = Date.now();
+    const ts = _vts();
     const updates = {};
     updates['inv_daily/'+d+'/'+sloc+'/history/'+k] =
       { type:'cavern', c3:c3, c4:c4, ts:ts, by:'app', auto:true, lot:lot,
@@ -2956,9 +3257,19 @@ const INV = (function(){
         else sel='2100';
       }
     }catch(_){ }
+    _bootAt = Date.now();
     render();
     attachFirebase();
+    /* v4.154 — nhịp 30 giây: SAP / Tank Log / cờ ST đổi ở máy khác cũng
+       được tính lại mà không cần ai bấm gì. */
+    try{
+      if(!_tickTimer && typeof setInterval === 'function'){
+        _tickTimer = setInterval(()=>{ try{ render(); }catch(_){} }, 30000);
+        if(_tickTimer && typeof _tickTimer.unref === 'function') _tickTimer.unref();
+      }
+    }catch(_){}
   }
+  let _tickTimer = null;
 
   return { init, view, onTankSwitch, render, renderRow1, stockFor,
            openInit, pickInit, saveInit,
@@ -2967,6 +3278,9 @@ const INV = (function(){
            /* v4.152 — P2 tồn đầu tự lấy + P4 dấu chống cộng trùng của mẻ mix */
            autoInitPick:_autoInitPick, autoInitApply, initInfoFor, mixInGet,
            mixFinishAt:_mixFinishAt, mixStockApply:_mixStockApply,
+           /* v4.154 — End Stock SAP là của lot nào + nhịp tự động */
+           sapLotOf, sapLotStamp, sapHasMix:_sapHasMix, autoTick:_autoTick,
+           _testClock(ms){ _clock = +ms || 0; },
            /* v4.147 — sổ cavern / liên bồn gõ thẳng trên bảng Tank Console */
            histFor, saveCavernFor, saveXferFor, delHistFor,
            exportRowsFor, todayDmy,

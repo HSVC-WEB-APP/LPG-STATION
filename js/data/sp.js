@@ -578,6 +578,18 @@ const SP = (function(){
     applyAndPush(batch,'paste '+adds.length+' new / '+changes.length+' updated'
       +(legacy.length?' / '+legacy.length+' legacy removed':'')
       +(stale.length?' / '+stale.length+' gone from SAP':''));
+    /* v4.154 — dán xong: ghi lại End Stock của từng bồn là của LOT nào
+       (/sap_lot) rồi cho INV tính lại tồn đầu ngay, không đợi nhịp 30 giây. */
+    try{
+      const _dd={};
+      adds.forEach(a=>{ if(a&&a.fields&&a.fields.date) _dd[a.fields.date]=1; });
+      changes.forEach(c=>{ const r=ROWS[c.rid]; if(r&&r.date) _dd[r.date]=1; });
+      stale.forEach(r=>{ if(r&&r.date) _dd[r.date]=1; });
+      if(typeof INV!=='undefined'){
+        if(INV.sapLotStamp) INV.sapLotStamp(Object.keys(_dd));
+        if(INV.render) setTimeout(()=>{ try{ INV.render(); }catch(_){} }, 50);
+      }
+    }catch(e){ console.warn('[SP] sapLotStamp', e); }
     closeDiff();rebuildTableData();document.getElementById('spPasteArea').value='';
     toast(`SAP: ${adds.length} added, ${changes.length} updated`
       +(legacy.length?`, ${legacy.length} legacy 1100 removed`:'')

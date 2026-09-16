@@ -135,11 +135,34 @@ const SCX2 = (function(){
         return;
       }
       const f = v => Math.round(v||0).toLocaleString('en-US');
+      /* v4.154/4.155 — %C3 của app là SỐ NGUYÊN như WMS (INV đã làm tròn);
+         số người gõ giữ tới 2 số lẻ.
+         thêm nhãn nguồn: ƒ = app tự lấy (SAP D-1 / finish của lot nào),
+         ✎ = người gõ. Rê chuột xem đủ câu giải thích. */
+      const w = parseFloat(c.wtC3);
+      let I = null;
+      try{ I = INV.initInfoFor ? INV.initInfoFor(sloc) : null; }catch(_){}
+      let tag = '', tip = '';
+      if(I && I.has){
+        const sl = l => String(l||'').replace(/^LPG-\d{4}-/i, '');
+        if(I.auto){
+          tag = I.src === 'mix'     ? 'ƒ lot ' + sl(I.lot)
+              : I.src === 'sapfill' ? 'ƒ SAP+' + sl(I.lot)
+              :                       'ƒ SAP' + (I.sapLot ? ' · ' + sl(I.sapLot) : '');
+          tip = 'Initial stock taken by the app from ' + (I.txt || I.src);
+        } else {
+          tag = '✎ typed';
+          tip = 'Initial stock entered by ' + (I.by || 'a user');
+        }
+      }
+      const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+      el.title = tip;
       el.innerHTML =
         '<span class="k">OPEN</span><b>'+f((c.c3Init||0)+(c.c4Init||0))+'</b>'
       + '<span class="k">C3</span><b>'+f(c.c3Init)+'</b>'
       + '<span class="k">C4</span><b>'+f(c.c4Init)+'</b>'
-      + '<span class="k">%C3</span><b>'+(isFinite(c.wtC3) ? c.wtC3 : '—')+'</b>';
+      + '<span class="k">%C3</span><b>'+(isFinite(w) ? (Number.isInteger(w) ? String(w) : String(+w.toFixed(2))) : '—')+'</b>'
+      + (tag ? '<span class="osrc '+(I.auto ? 'app' : 'user')+'">'+esc(tag)+'</span>' : '');
     });
   }
 
