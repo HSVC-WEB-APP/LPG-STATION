@@ -348,15 +348,47 @@ const MC = (function(){
     const raw = (el.value||'').replace(/[^\d\/]/g,'').slice(0,8);
     if(raw !== el.value) el.value = raw;
   }
+  /* v4.161 -- VA HAI LOI CU CUA O NGAY TREN PANEL MIX:
+       (a) nhanh 4 chu so tra ve "dd/mm" KHONG CO NAM va khong chan mm>12,
+           tuc la tu tay hop thuc hoa mot ngay hong;
+       (b) khong he co canh bao nao khi chuoi con lai khong phai ngay that.
+     Nay: chi tu chen dau "/" khi ket qua la MOT NGAY CO THAT; con lai giu
+     nguyen chuoi nguoi ta go va TO DO o nhap. Van cho luu -- chi canh bao. */
+  /* v4.161 -- hai canh bao moi ben duoi deu nam trong duong chay LIEN TUC
+     (moi lan doi lot, moi lan vao tab), nen phai chan lap: mot tinh huong
+     chi keu toast dung MOT lan cho toi khi tinh huong doi. */
+  const _warnOnce = Object.create(null);
+  function _warnedOnce(key){
+    if(_warnOnce[key]) return true;
+    _warnOnce[key] = 1;
+    return false;
+  }
+  function _mcDateOk(v){
+    const s = String(v == null ? '' : v).trim();
+    if(!s) return false;
+    const mt = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if(!mt) return false;
+    const d = +mt[1], m = +mt[2];
+    let y = +mt[3]; if(y < 100) y += 2000;
+    if(!(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return false;
+    const dt = new Date(y, m - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+  }
   function fmtDateBlur(el){
-    const v = (el.value||'').replace(/[^\d]/g,'');
-    if(!v.length) return;
-    if(v.length <= 2){ el.value = v; return; }
-    if(v.length <= 4){ el.value = v.slice(0,2)+'/'+v.slice(2); return; }
-    let dd = v.slice(0,2), mm = v.slice(2,4), yy = v.slice(4,6);
-    if(parseInt(dd) > 31) dd = '31';
-    if(parseInt(mm) > 12) mm = '12';
-    el.value = dd + '/' + mm + (yy ? '/' + yy : '');
+    const raw = (el.value||'').trim();
+    const v = raw.replace(/[^\d]/g,'');
+    if(!raw.length){ el.style.borderColor = ''; el.style.background = ''; el.title = ''; return; }
+    if(/^\d+$/.test(raw) && (v.length === 6 || v.length === 8)){
+      const cand = v.slice(0,2) + '/' + v.slice(2,4) + '/' + v.slice(4);
+      if(_mcDateOk(cand)) el.value = cand;
+    }
+    const bad = !_mcDateOk(el.value);
+    el.style.borderColor = bad ? '#dc2626' : '';
+    el.style.background  = bad ? '#fef2f2' : '';
+    el.title = bad
+      ? 'Not a real date (DD/MM/YY) \u2014 the lot saved with this date is dropped from every monthly total.'
+      : '';
+    if(bad) toast('\u26a0 "' + el.value + '" is not a real date \u2014 expected DD/MM/YY','warn');
   }
 
   /* ---------- lot-name label (LPG-YYYY-NNN) ---------- */
@@ -384,6 +416,13 @@ const MC = (function(){
       toast('⚠ Lot '+val+' is already used by TK-'+(otherN==='1'?'3501':'3502')+' — pick a different lot','er');
       lotEl.value = ''; lotEl.focus();
       return;
+    }
+    /* v4.161 -- noi ro PHAM VI: khi Tank Log chua Load All thi vong lap
+       duoi day chi quet duoc N lot dang co trong RAM, nen mot lot trung
+       nam ngoai cua so se KHONG bi bat. Canh bao, khong chan. */
+    if(typeof ENG !== 'undefined' && !ENG.allLoaded && !_warnedOnce('dupscope')){
+      const _tot = (ENG.ROWS || []).length;
+      toast('\u2139 Duplicate check covers the ' + _tot + ' loaded lots only \u2014 press \ud83d\udce5 Load All in the Tank Log to check every lot','warn');
     }
     const rows = (typeof ENG !== 'undefined') ? ENG.ROWS : [];
     for(const r of rows){
@@ -3086,6 +3125,29 @@ const MC = (function(){
       src.textContent = '← COQ of lot ' + prev.lot + ' (' + tk + ') · ρ ' + prev.den
                       + ' · C3 ' + (prev.w3 * 100).toFixed(2) + ' %wt';
     }
+    /* v4.161 -- CHOT QUAN TRONG NHAT: trang thai DAU cua lot dang tron
+       duoc lay tu "lot cu gan nhat cung bon TRONG RAM". Neu con lot nam
+       GIUA lot do va lot dang tron ma chua nap (cua so chi giu N lot), thi
+       con so vua lay ve gan nhu chac chan la cua sai bon -- va truoc day
+       phan mem KHONG he bao gi, chi im lang tinh tiep.
+       Vi du that: thieu lot 414 => lot 415/TK-3502 lay nen cua lot 412. */
+    try{
+      const _cur = parseInt(_gv('mc-l' + n)) || 0;
+      const _pm  = String(prev.lot||'').match(/(?:LPG-)?\d{4}-?(\d+)/i);
+      const _pn  = _pm ? parseInt(_pm[1]) : 0;
+      const _g   = (typeof ENG !== 'undefined' && ENG.lotGaps) ? ENG.lotGaps() : null;
+      const _hole = (_g && _cur && _pn)
+        ? _g.miss.filter(k=> k > _pn && k < _cur) : [];
+      if(_hole.length){
+        if(src){
+          src.className = 'mc-alt-src mc-alt-src-warn';
+          src.textContent = '\u26a0 Lot ' + _hole.join(', ') + ' not loaded \u2014 the initial state above may come'
+                          + ' from the WRONG lot. Press \ud83d\udce5 Load All in the Tank Log, then re-check.';
+        }
+        if(!_warnedOnce('hole|' + n + '|' + _hole.join(',')))
+          toast('\u26a0 Lot ' + _hole.join(', ') + ' not loaded \u2014 initial COQ state may be taken from the wrong lot','er');
+      }
+    }catch(_){}
     if(loud) toast('⟲ Pulled COQ of lot ' + prev.lot + ' — ρ ' + prev.den + ' · C3 ' + (prev.w3 * 100).toFixed(2) + ' %wt', 'ok');
     _altSyncLock(n);
     altCalc(n, true);

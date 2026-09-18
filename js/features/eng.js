@@ -81,7 +81,20 @@ const ENG = (function(){
      SÁU Ô [69]–[74] SỬA ĐƯỢC TAY ngay trên bảng (ENG.stxEdit) — nhân
      viên chỉnh lại số đã đối chiếu mà không phải mở lại bảng 📏.
      Old shorter rows load fine (missing cells default ''). */
-  const ROW_W = 75;
+  /* v4.156 -- +5 -> 80 CHO 5 COT THAM KHAO (quy doi Filled C3/C4 theo nhiet
+     do THUC luc ket thuc tron, so voi cach hien tai dung Density COQ chuan
+     15C nhan thang voi the tich do duoc o nhiet do van hanh):
+       [75] Filled C3 quy doi theo nhiet do thuc (ton)
+       [76] Filled C4 quy doi theo nhiet do thuc (ton)
+       [77] He so quy doi rho_mix(T)/rho_mix(15C) -- thuong < 1 vi T > 15C
+       [78] Chenh lech so voi COQ@15 dang dung (ton) = COQ - quy doi
+       [79] Chenh lech (%) so voi COQ@15
+     CHI DE THAM KHAO / THU THAP SO LIEU CHO BAO CAO -- phan mem chi tinh
+     va dien vao 5 cot nay, KHONG dung, KHONG thay the bat ky cot nao khac
+     (Filled C3/C4 chinh thuc [13][14][66][67] giu nguyen, khong gui Scale,
+     khong doi Quality). Xem khoi _tempAdjCalc/_tempAdjApply va nut
+     'Temp-adj audit' o gan cuoi file de biet cong thuc & cach back-fill lot cu. */
+  const ROW_W = 80;
   const C_ST = 53, C_ST_TS = 54, C_ST_BY = 55;
   /* v4.111 — 4 cột đối chiếu chuyển kho (kg) */
   const S_GAP3 = 69, S_GAP4 = 70, S_ADJ3 = 71, S_ADJ4 = 72;
@@ -91,6 +104,8 @@ const ENG = (function(){
   const STX_LBL = { [S_WMS3]:'WMS C3', [S_WMS4]:'WMS C4',
                     [S_GAP3]:'Gap C3', [S_GAP4]:'Gap C4',
                     [S_ADJ3]:'Adj ST C3', [S_ADJ4]:'Adj ST C4' };
+  /* v4.156 -- 5 cot THAM KHAO quy doi theo nhiet do thuc (xem ROW_W o tren) */
+  const T_FC3 = 75, T_FC4 = 76, T_FACTOR = 77, T_DIFF = 78, T_DIFFPCT = 79;
   /* v4.85 — cột của 2 cách tính bổ sung (PHẢI khớp mixctrl.js) */
   const A_MID = 56, A_T3 = 57, A_P3 = 58, A_T4 = 59, A_P4 = 60,   /* RETIRED v4.86 */
         A_DC3 = 61, A_DC4 = 62,                                     /* RETIRED v4.86 */
@@ -134,6 +149,124 @@ const ENG = (function(){
     return { v:(a === null ? 0 : a) + (b === null ? 0 : b), src:'gc' };
   }
 
+  /* ================================================================
+     v4.156 -- TEMP-ADJ REFERENCE (nhiet do thuc te) -- CHI THAM KHAO
+     ----------------------------------------------------------------
+     Filled C3/C4 theo COQ [66]/[67] = FINAL VOL do THUC (o nhiet do van
+     hanh, thuong 24-31C khi ket thuc tron) x Density COQ da CHUAN HOA VE
+     15C. LPG gian no kha manh theo nhiet do (khac dau), nen nhan the tich
+     da "phong" luc am voi ty trong "co lai" o 15C se tinh DU khoi luong
+     that -- dung theo huong ma Gap [69]/[70] dang cho thay (WMS/thuc te
+     lech ~4-5% / ~10-12 tan moi me).
+
+     PHUONG PHAP (uoc tinh ky thuat noi bo, KHONG phai bang chuan GPA
+     TP-27/API MPMS 11.2.4 chinh thuc -- bang do dung phuong phap
+     "corresponding states" phuc tap, khong co cong thuc mo cong khai):
+       1) Duong cong ty trong LONG cua propane/butane THEO NHIET DO, fit
+          tu du lieu bao hoa NIST/Engineering ToolBox (phu hop vi LPG
+          trong bon luon o ap suat hoi bao hoa cua chinh no):
+            rho_C3(T) ~= 0.016667*T^2 - 2.8733*T + 538.23   (kg/m3, T C)
+            rho_C4(T) ~= -1.11552*T + 600.708                (kg/m3, T C)
+          (khop tot trong dai 0-40C; ngoai dai nay chi mang tinh tham khao).
+       2) Suy %wt C3 ngay tu chinh hai so Filled COQ dang co -- TU NHAT
+          QUAN, khong phu thuoc cot %wt nao khac:
+            wC3 = FilledC3_COQ / (FilledC3_COQ + FilledC4_COQ)
+       3) Tron ly tuong theo the tich o 15C va o nhiet do T ghi nhan luc
+          ket thuc tron [31]:
+            1/rho_mix(T) = wC3/rho_C3(T) + (1-wC3)/rho_C4(T)
+          He so quy doi = rho_mix(T) / rho_mix(15C), ap thang len TONG
+          khoi luong COQ hien co (giu nguyen ty le %wt C3 do duoc).
+       Bo qua hieu chinh ap suat/pha hoi -- sai so nay nho so voi phan
+       nhiet do va khong can thiet cho muc dich tham khao/bao cao.
+
+     Chi tinh khi co DU: Temp [31], Filled C3 COQ [66], Filled C4 COQ [67]
+     (>0). Thieu bat ky o nao thi de trong, khong doan so.
+     ================================================================ */
+  function _rhoC3AtT(T){ return 0.0166666667*T*T - 2.8733333333*T + 538.2325; }
+  function _rhoC4AtT(T){ return -1.1155234700*T + 600.70758123; }
+  function _rhoMixAtT(T, wC3){
+    const rc3 = _rhoC3AtT(T), rc4 = _rhoC4AtT(T);
+    if(!(rc3 > 0) || !(rc4 > 0)) return null;
+    const denom = (wC3 / rc3) + ((1 - wC3) / rc4);
+    return denom > 0 ? (1 / denom) : null;
+  }
+
+  /* Tinh thuan -- khong dung gi toi `r`. Tra ve null neu thieu du lieu. */
+  function _tempAdjCalc(tempC, fc3Coq, fc4Coq){
+    const T = _num(tempC), c3 = _num(fc3Coq), c4 = _num(fc4Coq);
+    if(T === null || c3 === null || c4 === null) return null;
+    const total = c3 + c4;
+    if(!(total > 0)) return null;
+    const wC3 = c3 / total;
+    const rhoT  = _rhoMixAtT(T, wC3);
+    const rho15 = _rhoMixAtT(15, wC3);
+    if(!rhoT || !rho15) return null;
+    const factor = rhoT / rho15;
+    const totalT = total * factor;
+    const diff = total - totalT;   /* duong = COQ@15 dang tinh DU */
+    return {
+      fc3T: totalT * wC3,
+      fc4T: totalT * (1 - wC3),
+      factor: factor,
+      diffTon: diff,
+      diffPct: 100 * diff / total
+    };
+  }
+
+  /* Ghi vao chinh dong `r` (mutate in place), CHI 5 cot [75]-[79].
+     KHONG dung [0]-[74]. Tra ve true neu da tinh & ghi, false neu thieu
+     du lieu (khi do xoa sach 5 cot -- tranh de lai so cu khi Temp/COQ bi
+     sua mat). */
+  function _tempAdjApply(r){
+    if(!r) return false;
+    const calc = _tempAdjCalc(r[31], r[A_QC3], r[A_QC4]);
+    if(!calc){
+      r[T_FC3] = r[T_FC4] = r[T_FACTOR] = r[T_DIFF] = r[T_DIFFPCT] = '';
+      return false;
+    }
+    r[T_FC3]     = parseFloat(calc.fc3T.toFixed(3));
+    r[T_FC4]     = parseFloat(calc.fc4T.toFixed(3));
+    r[T_FACTOR]  = parseFloat(calc.factor.toFixed(4));
+    r[T_DIFF]    = parseFloat(calc.diffTon.toFixed(3));
+    r[T_DIFFPCT] = parseFloat(calc.diffPct.toFixed(2));
+    return true;
+  }
+
+  /* v4.159 -- so quy doi nhiet do cua 1 dong de HIEN THI: uu tien so da
+     luu [75]/[76]; chua luu thi tinh tam tren may (live=true, hien mo).
+     Gap T-adj (kg) = Adj ST [71]/[72] (so nhap WMS) - Quy doi x 1000
+     -> nhin thang: sau khi quy doi nhiet do, WMS con lech COQ bao nhieu. */
+  function _tadjView(r){
+    let t3 = _num(r[T_FC3]), t4 = _num(r[T_FC4]), pct = _num(r[T_DIFFPCT]), live = false;
+    if(t3 === null || t4 === null){
+      const c = _tempAdjCalc(r[31], r[A_QC3], r[A_QC4]);
+      if(c){ t3 = c.fc3T; t4 = c.fc4T; pct = c.diffPct; live = true; }
+    }
+    const a3 = _num(r[S_ADJ3]), a4 = _num(r[S_ADJ4]);
+    return { t3, t4, pct, live,
+             g3: (t3 === null || a3 === null) ? null : a3 - t3*1000,
+             g4: (t4 === null || a4 === null) ? null : a4 - t4*1000 };
+  }
+  function _gapKg(v){
+    if(v === null || v === undefined) return '\u2014';
+    const r = Math.round(v);
+    return (r > 0 ? '+' : r < 0 ? '\u2212' : '') + Math.abs(r).toLocaleString('en-US');
+  }
+  function _tadjTds(c){
+    /* v4.160 -- cum @T LAM MO (chi tham khao), khung net dut; Gap giu mau
+       xanh/do nhung nhat, khong dam -- tranh nham voi cum Adj ST. */
+    const v = _tadjView(c);
+    const tip = v.live ? ' title="Computed on this machine (not saved yet) -- open Temp-adj audit and press FILL to store it."' : '';
+    const lv = v.live ? ' gt-live' : '';
+    const g = (x, last) => '<td class="td-r gt gt-gap'+(x === null ? '' : Math.abs(x) < 1 ? '' : x > 0 ? ' p' : ' m')
+      + (last ? ' gt-r' : '') + '" title="WMS (Adj ST) - COQ@T (kg)">' + _gapKg(x) + '</td>';
+    return '<td class="td-r gt gt-l'+lv+'"'+tip+'>'+(v.t3===null?'\u2014':_fmtNum(v.t3,3))+'</td>'
+         + '<td class="td-r gt'+lv+'"'+tip+'>'+(v.t4===null?'\u2014':_fmtNum(v.t4,3))+'</td>'
+         + '<td class="td-r gt'+lv+'"'+tip+'>'+(v.pct===null?'\u2014':((v.pct>=0?'+':'')+_fmtNum(v.pct,2)+'%'))+'</td>'
+         + g(v.g3, false) + g(v.g4, true);
+  }
+
+
   /* ROWS — display-ordered array of 34-col row arrays. Each row also
      carries a non-enumerable `_rid` (base36 random) used as Firebase key.
      RID_MAP[rid] points at the SAME row object, so all reads share state.
@@ -151,9 +284,37 @@ const ENG = (function(){
      whole node once and switches the listeners to the full ref.
      NOTE: firebase.rules.json needs  "eng_tkmix": { ".indexOn": ["_ts"] }
      so the limit query is served server-side (bandwidth saving). */
-  const INIT_LOTS = 10;
+  /* v4.161 -- CUA SO NAP DOI SANG KHOA THU TU LOT (_ord).
+     LOI CU: cua so nap la orderByChild('_ts').limitToLast(N), ma _ts duoc
+     gan Date.now() o MOI lan ghi (sua o trong modal, go 6 o doi chieu
+     WMS/Gap/Adj ST, tick ST, CALC/IMPORT COQ, back-fill Temp-adj hang
+     loat...). Nghia la "N lot moi nhat" thuc chat la "N lot duoc GHI gan
+     nhat": cham vao mot lot cu la day lot do len dau cua so va hat mot lot
+     THAT SU MOI ra ngoai. Bang lai sap xep theo SO LOT nen nhin vao thay
+     lien mach, khong co dau hieu nao bao thieu lot o giua -- va moi module
+     doc ENG.ROWS (MC._prevCoq lay trang thai DAU, MC._autoFillCr,
+     checkDupLot, upsertRow/pasteText do rid theo Lot|Tank, SCALE latest
+     lot, ODOR tong thang...) deu tinh tren tap thieu do MA KHONG BAO GI.
+     NAY: moi ban ghi mang them _ord = _lotKey(lot) (nam*1e6 + so lot), la
+     con so ON DINH khong doi khi sua. Cua so nap theo _ord => dung N lot
+     co SO LOT lon nhat. _ts van ghi de biet lan sua cuoi, nhung khong con
+     quyet dinh cua so nua.
+     BAT BUOC: firebase.rules.json phai co
+         "eng_tkmix": { ".indexOn": ["_ord"] }
+     neu khong Firebase se tai ca node roi sap xep tren may (van chay
+     dung nhung mat het y nghia tiet kiem bang thong). */
+  const ORD_KEY = '_ord';
+  const INIT_LOTS = 25;
   let _allLoaded = false;
   let _query = null;                // live limitToLast window (partial mode)
+  let _ordFilled = false;           // da thu back-fill _ord trong phien nay chua
+  let _orphanQ = null;              // v4.167 — cua so rieng cho dong THIEU _ord
+  /* Khoa thu tu cua mot dong = _lotKey cua o Lot. Khong doc duoc thi 0
+     (dong do se nam duoi day cua so -- se bi bat o dai canh bao). */
+  function _ordOfCells(cells){
+    const k = _lotKey(cells && cells[1]);
+    return (typeof k === 'number' && isFinite(k) && k > 0) ? k : 0;
+  }
 
   /* ---------- base36 random rid (collision-safe across offline devices) ---------- */
   function _genRid(){
@@ -217,7 +378,8 @@ const ENG = (function(){
   function _pushRowFb(rid, cells, cb){
     if(!_fbRef){ if(typeof cb==='function') cb(false, 'no-firebase-ref'); return; }
     _suppressEcho++;
-    _fbRef.child(rid).set({ cells: cells.slice(0, ROW_W), _ts: Date.now() })
+    _fbRef.child(rid).set({ cells: cells.slice(0, ROW_W), _ts: Date.now(),
+                            [ORD_KEY]: _ordOfCells(cells) })
       .then(()=>{ if(typeof cb==='function') cb(true, null); })
       .catch(e => {
         console.warn('[ENG] fb push row', e);
@@ -239,7 +401,8 @@ const ENG = (function(){
     let count = 0;
     for(const rid in updates){
       const v = updates[rid];
-      payload[rid] = v ? { cells: v.slice(0, ROW_W), _ts: Date.now() } : null;
+      payload[rid] = v ? { cells: v.slice(0, ROW_W), _ts: Date.now(),
+                          [ORD_KEY]: _ordOfCells(v) } : null;
       count++;
     }
     if(!count) return;
@@ -262,6 +425,24 @@ const ENG = (function(){
       return String(m[1]).padStart(2,'0')+'/'+String(m[2]).padStart(2,'0')+'/'+yr;
     }
     return s;
+  }
+  /* v4.161 -- O DATE HONG PHAI NHIN LA THAY.
+     _fmtDate tra nguyen chuoi khi khong khop mau nao, nen mot o go sai
+     (vi du go "02:35" vao o Date -> mask xoa dau ":" -> con "0235") hien
+     ra y nhu mot o binh thuong. Ma _ymOf("0235") = null, nghia la lot do
+     bi LOAI khoi MOI tong theo thang: tong thang cua Tank Log, bang
+     Odorant (mau so LPG thieu => ppm cao gia tao), dropdown chon thang,
+     loc theo thang, Range delete. Khong mot cho nao bao gi.
+     Nay: o nao khong doc duoc thanh thang thi to do + gach chan net dut. */
+  function _dateCell(v){
+    const s = String(v == null ? '' : v).trim();
+    if(!s) return '';
+    const txt = _fmtDate(s);
+    if(_ymOf(s)) return txt;
+    return '<span style="color:#dc2626;font-weight:700;text-decoration:underline dotted 2px"'
+         + ' title="Invalid date \u2014 this lot is excluded from every monthly total'
+         + ' (\u03a3 month, Odorant ppm). Open the row and fix the Date cell.">'
+         + _esc(txt) + ' \u26a0</span>';
   }
   function _fmtNum(v, d){
     const n = parseFloat(String(v||'').replace(/,/g,''));
@@ -312,6 +493,60 @@ const ENG = (function(){
     return null;
   }
   function _ymLabelEng(ym){ const p = ym.split('-'); return p[1]+'/'+p[0]; }
+
+  /* ================================================================
+     v4.161 -- KIEM TRA & CHUAN HOA O DATE
+     ----------------------------------------------------------------
+     Truoc day o Date khong he duoc kiem tra o BAT KY duong ghi nao:
+       - Modal sua dong: _editDateMask CHI loc ky tu ngoai [0-9/]. Go
+         "02:35" thi dau ":" bi xoa, con lai "0235" va saveEdit ghi thang
+         chuoi do len Firebase (cot 3 nam trong strCols).
+       - Paste Data: cot date chep nguyen.
+       - Panel Mix: MC.fmtDateBlur co chuan hoa, nhung nhanh 4 chu so tra
+         ve "dd/mm" KHONG CO NAM va khong chan mm > 12.
+     _dateOk  -> ngay co that hay khong (bat ca 31/02).
+     _dateNorm-> CHI tu them dau "/" khi chuoi la 6 hoac 8 chu so VA tach
+                 ra mot ngay co that. Tuyet doi khong "chua" mot chuoi la
+                 thanh cai trong giong ngay: go "0235" ma tu bien thanh
+                 "02/35" con nguy hiem hon la de nguyen cho nguoi ta thay. */
+  function _dateOk(v){
+    const s = String(v == null ? '' : v).trim();
+    if(!s) return false;
+    let d, m, y;
+    let mt = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    if(mt){ y = +mt[1]; m = +mt[2]; d = +mt[3]; }
+    else{
+      mt = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+      if(!mt) return !!_ymOf(s);            // dang dd-Mon-yy
+      d = +mt[1]; m = +mt[2]; y = +mt[3];
+      if(y < 100) y += 2000;
+    }
+    if(!(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return false;
+    const dt = new Date(y, m - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+  }
+  function _dateNorm(v){
+    const s = String(v == null ? '' : v).trim();
+    if(/^\d+$/.test(s) && (s.length === 6 || s.length === 8)){
+      const cand = s.slice(0, 2) + '/' + s.slice(2, 4) + '/' + s.slice(4);
+      if(_dateOk(cand)) return cand;
+    }
+    return s;
+  }
+  /* onblur cua o Date trong modal sua dong: chuan hoa neu chuan hoa duoc,
+     va TO DO ngay tai cho neu van khong phai mot ngay co that. Van cho luu
+     -- day chi la canh bao. */
+  function _editDateBlur(el){
+    if(!el) return;
+    const v = _dateNorm(el.value);
+    if(v !== el.value) el.value = v;
+    const bad = String(v).trim() !== '' && !_dateOk(v);
+    el.style.borderColor = bad ? '#dc2626' : '';
+    el.style.background  = bad ? '#fef2f2' : '';
+    el.title = bad
+      ? 'Not a real date \u2014 this lot will be dropped from every monthly total (\u03a3 month, Odorant ppm). Expected DD/MM/YY.'
+      : '';
+  }
 
   /* ---------- main render ---------- */
   function render(){
@@ -377,7 +612,7 @@ const ENG = (function(){
         '<td class="td-c" style="color:var(--ink-3)">'+(idx+1)+'</td>' +
         '<td class="td-c" style="font-weight:700">'+_esc(c[1])+'</td>' +
         '<td class="td-c '+tkCls+'">'+_esc(c[2])+'</td>' +
-        '<td>'+_fmtDate(c[3])+'</td>' +
+        '<td>'+_dateCell(c[3])+'</td>' +
         '<td>'+st+'</td>' +
         '<td style="'+(overnight?'color:#7b2d8e;font-weight:600':'')+'" title="'+(overnight?'Ends next day':'')+'">'+fi+(overnight?' +1':'')+'</td>' +
         '<td class="td-r">'+_fmtNum(c[10],3)+'</td>' +
@@ -417,6 +652,8 @@ const ENG = (function(){
         _reconTd(c, S_WMS3, realIdx) + _reconTd(c, S_WMS4, realIdx) +
         _reconTd(c, S_GAP3, realIdx) + _reconTd(c, S_GAP4, realIdx) +
         _reconTd(c, S_ADJ3, realIdx) + _reconTd(c, S_ADJ4, realIdx) +
+        /* v4.159 -- 5 cot tham khao nhiet do thuc + Gap WMS vs COQ quy doi */
+        _tadjTds(c) +
         '<td class="td-r">'+_fmtNum(c[6],3)+'</td>' +
         '<td class="td-r" style="font-weight:700;color:var(--green)">'+_fmtNum(c[7],2)+'</td>' +
         '<td class="td-r td-c3" style="font-weight:600">'+_fmtPct(c[8])+'</td>' +
@@ -476,10 +713,16 @@ const ENG = (function(){
           '<td class="td-c" style="font-size:9px;color:var(--green)">'+T.stOn+'/'+filtered.length+'</td>' +
           /* v4.111 — Gap là số TẠI MỘT MỐC của từng lot ⇒ không cộng dồn.
              Số chuyển kho đã điều chỉnh thì cộng được (tổng kg đã post). */
-          _totNoSum('td-stx td-stx-w') + _totNoSum('td-stx td-stx-w') +
+          _totNoSum('td-stx td-stx-w g-l') + _totNoSum('td-stx td-stx-w') +
           _totNoSum('td-stx td-stx-g') + _totNoSum('td-stx td-stx-g') +
-          '<td class="td-r td-stx td-stx-a">'+(T.nAdj ? Math.round(T.adj3).toLocaleString('en-US') : '—')+'</td>' +
-          '<td class="td-r td-stx td-stx-a">'+(T.nAdj ? Math.round(T.adj4).toLocaleString('en-US') : '—')+'</td>' +
+          '<td class="td-r td-stx td-stx-a g-adj g-adj-l">'+(T.nAdj ? Math.round(T.adj3).toLocaleString('en-US') : '—')+'</td>' +
+          '<td class="td-r td-stx td-stx-a g-adj g-adj-r">'+(T.nAdj ? Math.round(T.adj4).toLocaleString('en-US') : '—')+'</td>' +
+          /* v4.159 -- tong quy doi nhiet do + tong Gap T-adj */
+          '<td class="td-r gt gt-l">'+(T.nT ? _fmtNum(T.t3,3) : '—')+'</td>' +
+          '<td class="td-r gt">'+(T.nT ? _fmtNum(T.t4,3) : '—')+'</td>' +
+          '<td class="gt"></td>' +
+          '<td class="td-r gt gt-gap">'+(T.nG ? _gapKg(T.g3) : '—')+'</td>' +
+          '<td class="td-r gt gt-gap gt-r">'+(T.nG ? _gapKg(T.g4) : '—')+'</td>' +
           '<td class="td-r">'+_fmtNum(T.vol,3)+'</td>' +
           '<td class="td-r" style="color:var(--green)">'+_fmtNum(T.qty,2)+'</td>' +
           '<td colspan="11"></td>' +
@@ -504,9 +747,80 @@ const ENG = (function(){
           + '</span>';
       }
       html += (_allLoaded ? '' :
-           ' <span style="color:var(--orange);font-weight:600">· '+INIT_LOTS+' lot mới nhất — bấm 📥 Load All để tải toàn bộ</span>');
+           ' <span style="color:var(--orange);font-weight:600">\u00b7 highest '+INIT_LOTS
+           +' lots by lot number \u2014 press \ud83d\udce5 Load All for the whole table</span>');
+      /* v4.161 — dai canh bao du lieu, dat ngay duoi dong thong ke */
+      const warns = _dataWarn();
+      if(warns.length)
+        html += '<div style="margin-top:4px;padding:5px 8px;border-radius:5px;'
+              + 'background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;'
+              + 'font-size:11px;font-weight:600;line-height:1.55">'
+              + warns.join('<br>') + '</div>';
       stats.innerHTML = html;
     }
+  }
+
+  /* ================================================================
+     v4.161 -- DAI CANH BAO DU LIEU (CANH BAO, KHONG CHAN LUU)
+     ----------------------------------------------------------------
+     Ba loai loi truoc day IM LANG hoan toan:
+       1) LO HONG TRONG DAY SO LOT dang nap. Bang sap xep theo so lot nen
+          "416, 415, 412, 411..." nhin nhu lien mach; thuc ra 413/414
+          khong nam trong RAM, va MC._prevCoq se lay trang thai DAU cua
+          lot 412 cho lot 415 -- sai tu goc ma khong bao gi.
+       2) O DATE khong doc duoc thanh thang -> lot bi loai khoi moi tong
+          theo thang.
+       3) O DATE de trong, hoac o Lot trong/khong doc duoc so.
+     ================================================================ */
+  /* So lot bi THIEU trong tap dang co trong RAM (lo hong giua min..max).
+     Tach rieng de MC dung lai: truoc khi lay trang thai DAU cua mot lot,
+     phai biet co lot nao GIUA lot truoc va lot dang tron ma chua nap hay
+     khong -- neu co thi con so lay ve gan nhu chac chan sai bon. */
+  function _lotGaps(){
+    const byYear = Object.create(null);
+    let noLot = 0;
+    ROWS.forEach(r=>{
+      const m = String(r[1]||'').match(/(?:LPG-)?(\d{4})-?(\d+)/i);
+      if(!m){ noLot++; return; }
+      const n = parseInt(m[2]);
+      if(!isFinite(n)) { noLot++; return; }
+      (byYear[m[1]] || (byYear[m[1]] = Object.create(null)))[n] = 1;
+    });
+    const miss = [];
+    Object.keys(byYear).forEach(y=>{
+      const ks = Object.keys(byYear[y]).map(Number).sort((a,b)=>a-b);
+      if(ks.length < 2) return;
+      const mn = ks[0], mx = ks[ks.length-1];
+      if(mx - mn > 2000) return;                 // day qua rong -> bo qua
+      for(let k = mn; k <= mx; k++) if(!byYear[y][k]) miss.push(k);
+    });
+    miss.sort((a,b)=>a-b);
+    return { miss: miss, noLot: noLot };
+  }
+
+  function _dataWarn(){
+    const out = [];
+    const g = _lotGaps();
+    const miss = g.miss, noLot = g.noLot;
+    if(miss.length){
+      const show = miss.slice(0, 12).join(', ') + (miss.length > 12 ? ', \u2026' : '');
+      out.push(_allLoaded
+        ? '\u26a0 Lot ' + show + ' missing from the Tank Log (' + miss.length + ')'
+        : '\u26a0 Lot ' + show + ' NOT loaded (' + miss.length + ') \u2014 the window shows the '
+          + INIT_LOTS + ' highest lot numbers only. Press \ud83d\udce5 Load All before COQ / reconciliation work.');
+    }
+    /* (2) ngay hong */
+    const bad = ROWS.filter(r=> String(r[3]||'').trim() !== '' && !_ymOf(r[3]));
+    if(bad.length)
+      out.push('\u26a0 Invalid date on ' + bad.length + ' lot' + (bad.length > 1 ? 's' : '') + ': '
+        + bad.slice(0, 4).map(r=> String(r[1]||'?') + ' = "' + _esc(String(r[3])) + '"').join(' \u00b7 ')
+        + (bad.length > 4 ? ' \u2026' : '')
+        + ' \u2014 excluded from \u03a3 month and from the Odorant ppm base. Open the row and fix the Date cell.');
+    /* (3) thieu ngay / thieu lot */
+    const noDate = ROWS.filter(r=> String(r[3]||'').trim() === '').length;
+    if(noDate) out.push('\u26a0 ' + noDate + ' lot' + (noDate > 1 ? 's' : '') + ' with an empty Date cell');
+    if(noLot)  out.push('\u26a0 ' + noLot + ' row' + (noLot > 1 ? 's' : '') + ' with no readable Lot number');
+    return out;
   }
 
   /* v4.63 — populate month dropdown from ROWS (giữ nguyên lựa chọn hiện tại) */
@@ -679,19 +993,25 @@ const ENG = (function(){
   function _reconTd(c, col, realIdx){
     const isWms = (col === S_WMS3 || col === S_WMS4);
     const isGap = (col === S_GAP3 || col === S_GAP4);
+    const isAdj = (col === S_ADJ3 || col === S_ADJ4);   /* v4.158 -- so nhap WMS, can noi bat */
     const isC3  = (col === S_WMS3 || col === S_GAP3 || col === S_ADJ3);
     const cls = 'td-r td-stx td-stx-ed '
               + (isWms ? 'td-stx-w' : isGap ? 'td-stx-g' : 'td-stx-a')
-              + (isC3 ? ' k3' : ' k4');
+              + (isC3 ? ' k3' : ' k4')
+              + (isAdj ? ' td-stx-adj-hl g-adj' + (col === S_ADJ3 ? ' g-adj-l' : ' g-adj-r') : '')
+              + (col === S_WMS3 ? ' g-l' : '');   /* v4.160 -- khung cum doi chieu */
     /* v4.131 — mọi ô đối chiếu đều SỬA ĐƯỢC TAY. onclick phải chặn nổi bọt,
        không thì cú bấm chạy tiếp lên <tr> và mở hẳn form sửa cả lot. */
     const edAttr = (realIdx === undefined || realIdx === null) ? ''
       : ' onclick="event.stopPropagation();ENG.stxEdit(' + realIdx + ',' + col + ',this)"';
+    /* v4.158 -- ADJ ST la con so THUC NHAP VAO WMS -- ghim dam + nen vang
+       ngay tren bang chinh de nhin la thay, khong can mo modal nao khac. */
+    const hlAttr = '';   /* v4.160 -- style dua sang class g-adj trong core.css */
     /* v4.133 — GIAO DIỆN V4 LÀ TIẾNG ANH (chú thích mã vẫn tiếng Việt). */
     const tipEd = '\nClick the cell to edit · Enter saves · Esc cancels · leave it EMPTY and press Enter to clear.';
     const v = _num(c[col]);
     if(v === null)
-      return '<td class="' + cls + ' td-stx-na"' + edAttr + ' title="' + _esc(
+      return '<td class="' + cls + ' td-stx-na"' + edAttr + hlAttr + ' title="' + _esc(
         'This lot has not been reconciled yet. Open 📏 Stock-transfer reconciliation '
         + '(or press ✅ on the Tank Mix notification) to write the figures here.' + tipEd)
         + '">·</td>';
@@ -702,7 +1022,7 @@ const ENG = (function(){
       ? ((r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r).toLocaleString('en-US'))
       : r.toLocaleString('en-US');
     const scls = isGap ? (Math.abs(v) < 1 ? ' z' : (v > 0 ? ' p' : ' m')) : '';
-    return '<td class="' + cls + scls + '"' + edAttr + ' title="' + _esc(
+    return '<td class="' + cls + scls + '"' + edAttr + hlAttr + ' title="' + _esc(
       (isWms ? 'SYSTEM opening stock (kg) — the exact WMS/SAP figure the gap was computed from. '
                + 'Gap = actual opening stock − this cell.'
      : isGap ? 'Gap at opening (kg) = ACTUAL opening stock (measured × COQ basis) − SYSTEM opening stock (SAP). '
@@ -925,9 +1245,15 @@ const ENG = (function(){
     const T = { fc3:0, fc4:0, flpg:0, vol:0, qty:0, odo:0, stOn:0, n:0,
                 qc3:0, qc4:0, oc3:0, oc4:0, nGc:0,
                 /* v4.111 — tổng số chuyển kho đã điều chỉnh (kg) + số lot đã đối chiếu */
-                adj3:0, adj4:0, nAdj:0 };
+                adj3:0, adj4:0, nAdj:0,
+                /* v4.159 -- tong quy doi nhiet do + Gap T-adj */
+                t3:0, t4:0, nT:0, g3:0, g4:0, nG:0 };
     (list||[]).forEach(r=>{
       T.n++;
+      { const v = _tadjView(r);
+        if(v.t3 !== null){ T.t3 += v.t3; T.t4 += v.t4; T.nT++; }
+        if(v.g3 !== null){ T.g3 += v.g3; T.nG++; }
+        if(v.g4 !== null){ T.g4 += v.g4; } }
       const a = _num(r[13]); if(a !== null) T.fc3  += a;
       const b = _num(r[14]); if(b !== null) T.fc4  += b;
       /* v4.107 — Σ LPG cộng theo ĐÚNG con số đang hiện trên cột (COQ, lùi GC) */
@@ -1045,10 +1371,19 @@ const ENG = (function(){
       if(k !== '|' && r._rid) lotTankToRid[k] = r._rid;
     });
     let upd = 0, add = 0;
+    /* v4.161 -- dan xong phai biet ngay co dong nao mang ngay hong khong.
+       Truoc day cot date duoc chep NGUYEN, khong kiem tra gi; mot dong
+       ngay hong la lot do bien mat khoi moi tong theo thang ma khong ai
+       hay. Chuan hoa duoc thi chuan hoa, con lai thi gom lai canh bao. */
+    const badDates = [];
     const fbUpdates = {};
     newRows.forEach(raw=>{
       const cells = raw.slice();
       while(cells.length < ROW_W) cells.push('');
+      cells[3]  = _dateNorm(cells[3]);
+      cells[36] = _dateNorm(cells[36]);
+      if(String(cells[3]||'').trim() !== '' && !_dateOk(cells[3]))
+        badDates.push(String(cells[1]||'?') + ' = "' + String(cells[3]) + '"');
       const k = String(cells[1]||'').trim() + '|' + String(cells[2]||'').trim();
       let rid;
       if(k !== '|' && lotTankToRid[k]){
@@ -1081,6 +1416,11 @@ const ENG = (function(){
     if(upd) parts.push(upd+' updated');
     if(add) parts.push(add+' new');
     toast('✅ Tank Mix Info: '+parts.join(' · ')+' (total: '+ROWS.length+')', 'ok');
+    if(badDates.length)
+      toast('\u26a0 ' + badDates.length + ' pasted row' + (badDates.length > 1 ? 's' : '')
+          + ' with an invalid Date: ' + badDates.slice(0, 4).join(' \u00b7 ')
+          + (badDates.length > 4 ? ' \u2026' : '')
+          + ' \u2014 they stay out of every monthly total until fixed','er');
     render();
   }
 
@@ -1180,6 +1520,20 @@ const ENG = (function(){
       const prev = RID_MAP[rid];
       if(prev){
         [S_WMS3, S_WMS4, S_GAP3, S_GAP4, S_ADJ3, S_ADJ4].forEach(col=>{
+          if(String(safe[col] == null ? '' : safe[col]).trim() === '' && prev[col] !== '' && prev[col] != null)
+            safe[col] = prev[col];
+        });
+      }
+    }
+    /* v4.156 -- cung ly do voi khoi tren: mixctrl.js dung mang ROW_W rieng
+       (con o 73, chua theo kip 75->80) nen 5 cot THAM KHAO [75]-[79] luon
+       la rong khi Mix Cal goi upsertRow tren mot lot da tinh roi. Khong
+       sua ROW_W ben mixctrl.js (ngoai pham vi thay doi lan nay) -- chi
+       giu lai so cu tu `prev`, giong het cach lam voi WMS/Gap/Adj o tren. */
+    {
+      const prev = RID_MAP[rid];
+      if(prev){
+        [T_FC3, T_FC4, T_FACTOR, T_DIFF, T_DIFFPCT].forEach(col=>{
           if(String(safe[col] == null ? '' : safe[col]).trim() === '' && prev[col] !== '' && prev[col] != null)
             safe[col] = prev[col];
         });
@@ -1585,7 +1939,12 @@ const ENG = (function(){
             + ' onfocus="this.select()" oninput="ENG._timeMask(this)"';
     else if(f.type === 'date')
       extra = ' placeholder="DD/MM/YY" maxlength="10"'
-            + ' onfocus="this.select()" oninput="ENG._dateMask(this)"';
+            + ' onfocus="this.select()" oninput="ENG._dateMask(this)"'
+            + ' onblur="ENG._dateBlur(this)"'
+            + (String(raw||'').trim() !== '' && !_dateOk(raw)
+                ? ' style="border-color:#dc2626;background:#fef2f2"'
+                  + ' title="Not a real date \u2014 this lot is dropped from every monthly total. Expected DD/MM/YY."'
+                : '');
     return '<div class="eng-edit-fld"' + span + '>'
       + '<label class="eng-edit-lbl">' + f.label + '</label>'
       + '<input data-col="' + f.col + '" data-type="' + (f.type || 'num') + '"'
@@ -1781,6 +2140,7 @@ const ENG = (function(){
       r[A_QC4] = x.calc.fC4;
       if(!MTH[String(r[A_MTH]||'').trim().toLowerCase()]) r[A_MTH] = 'gc';
       if(alsoPick) r[A_MTH] = 'coq';
+      _tempAdjApply(r);   /* v4.156 -- tu dien 5 cot tham khao [75]-[79] cung luc */
       _pushRowFb(r._rid, r);
       try{ logAudit('eng:tank_log:coq_backfill', r._rid, 'coqFilled', '',
                     x.calc.fC3+'/'+x.calc.fC4, 'COQ audit back-fill'); }catch(_){}
@@ -1811,6 +2171,178 @@ const ENG = (function(){
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
     toast('⬇ Exported COQ audit ('+_coqScanCache.length+' rows)','ok');
+  }
+
+  /* ================================================================
+     v4.156 -- TEMP-ADJ AUDIT (giao dien) -- xem khoi cong thuc o tren
+     ----------------------------------------------------------------
+     Quet moi dong DANG NAP da co Filled C3/C4 theo COQ [66]/[67]:
+       upToDate    -- da tinh khop voi COQ + Temp hien tai
+       readyToFill -- co COQ + Temp, CHUA co (hoac so cu) o [75]-[79]
+       noTemp      -- co COQ nhung thieu Temp [31] -- khong tinh duoc
+       noCoq       -- chua co COQ, khong thuoc pham vi tinh nang nay
+     ================================================================ */
+  function _tempScan(){
+    const out = [];
+    ROWS.slice().sort((a,b)=> _lotKey(b[1]) - _lotKey(a[1])).forEach(r=>{
+      const fc3 = _num(r[A_QC3]), fc4 = _num(r[A_QC4]);
+      if(fc3 === null && fc4 === null){
+        out.push({ r, lot:String(r[1]||''), tank:String(r[2]||''), date:String(r[3]||''), state:'noCoq' });
+        return;
+      }
+      const calc = _tempAdjCalc(r[31], fc3, fc4);
+      const rec = { r, lot:String(r[1]||''), tank:String(r[2]||''), date:String(r[3]||''),
+                    temp:_num(r[31]), fc3, fc4, calc,
+                    /* v4.157 -- so sanh voi so THUC DUNG DE NHAP WMS */
+                    adj3:_num(r[S_ADJ3]), adj4:_num(r[S_ADJ4]),
+                    gap3:_num(r[S_GAP3]), gap4:_num(r[S_GAP4]) };
+      /* v4.159 -- Gap T-adj = Adj ST (WMS) - COQ quy doi nhiet do (kg) */
+      rec.tg3 = (calc && rec.adj3 !== null) ? rec.adj3 - calc.fc3T*1000 : null;
+      rec.tg4 = (calc && rec.adj4 !== null) ? rec.adj4 - calc.fc4T*1000 : null;
+      if(!calc){ rec.state = 'noTemp'; out.push(rec); return; }
+      const cur3 = _num(r[T_FC3]), cur4 = _num(r[T_FC4]);
+      const same = cur3 !== null && cur4 !== null
+        && Math.abs(cur3 - calc.fc3T) < 0.001 && Math.abs(cur4 - calc.fc4T) < 0.001;
+      rec.state = same ? 'upToDate' : 'readyToFill';
+      out.push(rec);
+    });
+    return out;
+  }
+
+  let _tempScanCache = [];
+
+  function tempAudit(){
+    const list = _tempScan();
+    _tempScanCache = list;
+    const nUp  = list.filter(x=>x.state==='upToDate').length;
+    const nFix = list.filter(x=>x.state==='readyToFill').length;
+    const nNoT = list.filter(x=>x.state==='noTemp').length;
+    const nNoC = list.filter(x=>x.state==='noCoq').length;
+    const _gcls = v => v === null || v === undefined ? '' : Math.abs(v) < 1 ? '' : (v > 0 ? 'tg-p' : 'tg-m');
+    const rows = list.filter(x=>x.state!=='noCoq').map((x,i)=>{
+      const c = x.calc;
+      return '<tr class="cqa-r-'+(x.state==='upToDate'?'ok':x.state==='readyToFill'?'fix':'miss')+'">'
+        + '<td>'+(i+1)+'</td>'
+        + '<td style="font-weight:700">'+_esc(x.lot)+'</td>'
+        + '<td>'+_esc(x.tank)+'</td>'
+        + '<td>'+_fmtDate(x.date)+'</td>'
+        + '<td class="td-r">'+(x.temp==null?'\u2014':_fmtNum(x.temp,1))+'</td>'
+        + '<td class="td-r tadj-hl">'+(x.adj3==null?'\u2014':_fmtNum(x.adj3,0))+'</td>'
+        + '<td class="td-r tadj-hl">'+(x.adj4==null?'\u2014':_fmtNum(x.adj4,0))+'</td>'
+        + '<td class="td-r">'+(x.gap3==null?'\u2014':_fmtNum(x.gap3,0))+'</td>'
+        + '<td class="td-r">'+(x.gap4==null?'\u2014':_fmtNum(x.gap4,0))+'</td>'
+        + '<td class="td-r">'+_fmtNum(x.fc3,3)+'</td>'
+        + '<td class="td-r">'+_fmtNum(x.fc4,3)+'</td>'
+        + '<td class="td-r tadj-mute">'+(c?_fmtNum(c.fc3T,3):'\u2014')+'</td>'
+        + '<td class="td-r tadj-mute">'+(c?_fmtNum(c.fc4T,3):'\u2014')+'</td>'
+        + '<td class="td-r tadj-gap '+_gcls(x.tg3)+'">'+_gapKg(x.tg3)+'</td>'
+        + '<td class="td-r tadj-gap '+_gcls(x.tg4)+'">'+_gapKg(x.tg4)+'</td>'
+        + '<td class="td-r">'+(c?_fmtNum(c.diffTon,3):'\u2014')+'</td>'
+        + '<td class="td-r">'+(c?((c.diffPct>=0?'+':'')+_fmtNum(c.diffPct,2)+'%'):'\u2014')+'</td>'
+        + '<td>'+(x.state==='upToDate'?'<span class="cqa-b cqa-ok">DA CO</span>'
+                : x.state==='readyToFill'?'<span class="cqa-b cqa-fix">CO THE DIEN</span>'
+                : '<span class="cqa-b cqa-miss">THIEU TEMP [31]</span>')+'</td>'
+        + '</tr>';
+    }).join('');
+    let bg = document.getElementById('engTempAuditBg');
+    if(!bg){
+      bg = document.createElement('div');
+      bg.id = 'engTempAuditBg';
+      bg.className = 'eng-edit-bg';
+      bg.onclick = e => { if(e.target === bg) closeTempAudit(); };
+      document.body.appendChild(bg);
+    }
+    bg.innerHTML =
+      '<style>#engTempAuditBg .tadj-hl{font-weight:800;font-size:12px;color:#0b2a6b;background:#ffe39a}'
+      + '#engTempAuditBg .tadj-mute{color:#94a3b8}'
+      + '#engTempAuditBg .tadj-gap{font-weight:600;background:#fbfaf7}'
+      + '#engTempAuditBg .tg-p{color:#4d9a6a}#engTempAuditBg .tg-m{color:#c07070}</style>'
+      + '<div class="eng-edit-modal cqa-modal" onclick="event.stopPropagation()">'
+      + '<h3>Temp-adj audit -- Filled C3/C4 quy doi theo nhiet do thuc (THAM KHAO)</h3>'
+      + '<div class="cqa-sum">'
+        + '<span class="cqa-b cqa-ok">'+nUp+' da co</span>'
+        + '<span class="cqa-b cqa-fix">'+nFix+' co the dien</span>'
+        + '<span class="cqa-b cqa-miss">'+nNoT+' thieu Temp</span>'
+        + '<span style="flex:1"></span>'
+        + '<span class="cqa-scope">'+nNoC+' lot chua co COQ (khong thuoc pham vi nay)'
+          +(_allLoaded ? '' : ' \u00b7 chi '+ROWS.length+' lot moi nhat -- bam Load All de du')+'</span>'
+      + '</div>'
+      + '<div class="cqa-note"><b>CHI DE THAM KHAO / THU THAP SO LIEU</b> -- khong thay doi Filled C3/C4 '
+        + 'chinh thuc [13][14][66][67], khong doi Quality, khong gui Scale. '
+        + '<code>Quy doi = COQ@15C x rho_mix(T thuc)/rho_mix(15C)</code>, '
+        + 'T lay tu cot Temp luc ket thuc tron. Day la uoc tinh ky thuat dua tren duong cong ty trong '
+        + 'propane/butane theo nhiet do (NIST), KHONG phai bang chuan GPA TP-27 chinh thuc. '
+        + '<b class="tadj-hl">Adj ST C3/C4</b> ([71][72]) la so THUC DUNG DE NHAP WMS cho lot do -- '
+        + 'ghim dam de de doi chieu. <b>Gap C3/C4</b> ([69][70]) la do lech WMS-vs-thuc te da co san '
+        + 'tren Tank Log (WMS - COQ@15C). <b class="tadj-gap">WMS - COQ@T C3/C4</b> = Adj ST - COQ quy doi ve nhiet do thuc (COQ@T, kg): '
+        + 'so lech CON LAI sau khi hieu chinh nhiet do -- cang gan 0 thi nhiet do cang giai thich duoc do lech.</div>'
+      + '<div class="cqa-wrap"><table class="cqa-tbl"><thead><tr>'
+        + '<th>#</th><th>Lot</th><th>Tank</th><th>Date</th><th>Temp C</th>'
+        + '<th class="tadj-hl">Adj ST C3 (kg)</th><th class="tadj-hl">Adj ST C4 (kg)</th>'
+        + '<th>Gap C3 (kg)</th><th>Gap C4 (kg)</th>'
+        + '<th>COQ C3</th><th>COQ C4</th><th class="tadj-mute">COQ@T C3</th><th class="tadj-mute">COQ@T C4</th>'
+        + '<th class="tadj-gap" title="Adj ST C3 (WMS) - Quy doi C3 x 1000">WMS - COQ@T C3 (kg)</th>'
+        + '<th class="tadj-gap" title="Adj ST C4 (WMS) - Quy doi C4 x 1000">WMS - COQ@T C4 (kg)</th>'
+        + '<th>Chenh (t)</th><th>Chenh (%)</th><th>Trang thai</th>'
+      + '</tr></thead><tbody>'+rows+'</tbody></table></div>'
+      + '<div class="eng-edit-foot">'
+        + '<button type="button" class="btn" onclick="ENG.tempAuditCsv()">Export CSV</button>'
+        + '<span style="flex:1"></span>'
+        + '<button type="button" class="btn" onclick="ENG.closeTempAudit()">CLOSE</button>'
+        + '<button type="button" class="btn btn-blue"'+(nFix?'':' disabled')
+          +' onclick="ENG.tempBackfill()">DIEN '+nFix+' LOT</button>'
+      + '</div>'
+      + '</div>';
+    bg.classList.add('on');
+  }
+
+  function closeTempAudit(){
+    document.getElementById('engTempAuditBg')?.classList.remove('on');
+  }
+
+  function tempBackfill(){
+    if(typeof canWrite === 'function' && !canWrite('eng_tkmix')){
+      toast('No permission to edit the Tank Log','er'); return;
+    }
+    const fix = _tempScanCache.filter(x=>x.state==='readyToFill');
+    if(!fix.length){ toast('Khong co gi de dien','warn'); return; }
+    if(!confirm('Dien cot THAM KHAO (quy doi theo nhiet do thuc) cho '+fix.length+' lot?\n\n'
+      + 'Chi ghi 5 cot moi [75]-[79]. KHONG dung bat ky cot nao khac (Filled C3/C4 chinh thuc, '
+      + 'Quality, Scale... giu nguyen).')) return;
+    let n = 0;
+    fix.forEach(x=>{
+      if(_tempAdjApply(x.r)){ _pushRowFb(x.r._rid, x.r); n++; }
+    });
+    _saveCache();
+    render();
+    toast('Da dien cot quy doi nhiet do cho '+n+' lot (chi tham khao)','ok');
+    tempAudit();
+  }
+
+  function tempAuditCsv(){
+    const H = ['Lot','Tank','Date','Temp_C','AdjST_C3_kg','AdjST_C4_kg','Gap_C3_kg','Gap_C4_kg',
+               'COQ_C3','COQ_C4','COQatT_C3','COQatT_C4','WMS_minus_COQatT_C3_kg','WMS_minus_COQatT_C4_kg','Diff_ton','Diff_pct','Status'];
+    const lines = [H.join(',')];
+    const q = v => { let t = String(v == null ? '' : v); return /[",\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
+    _tempScanCache.filter(x=>x.state!=='noCoq').forEach(x=>{
+      const c = x.calc;
+      lines.push([x.lot, x.tank, x.date, x.temp==null?'':x.temp,
+        x.adj3==null?'':x.adj3, x.adj4==null?'':x.adj4, x.gap3==null?'':x.gap3, x.gap4==null?'':x.gap4,
+        x.fc3==null?'':x.fc3, x.fc4==null?'':x.fc4,
+        c?c.fc3T.toFixed(3):'', c?c.fc4T.toFixed(3):'',
+        x.tg3==null?'':Math.round(x.tg3), x.tg4==null?'':Math.round(x.tg4),
+        c?c.diffTon.toFixed(3):'', c?c.diffPct.toFixed(2):'',
+        x.state].map(q).join(','));
+    });
+    const blob = new Blob(['\uFEFF'+lines.join('\n')], {type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const d = new Date();
+    const p2 = n=>String(n).padStart(2,'0');
+    a.href = url;
+    a.download = 'temp_adj_audit_'+d.getFullYear()+p2(d.getMonth()+1)+p2(d.getDate())+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   /* v4.85 — 3 nút chọn phương pháp; nút nào chưa có số thì khoá lại. */
@@ -1881,6 +2413,22 @@ const ENG = (function(){
         r[col] = (!isNaN(num) && val !== '') ? num : val;
       }
     });
+
+    /* v4.161 -- chuan hoa 2 o ngay roi CANH BAO neu van khong phai ngay
+       co that. Khong chan luu (theo yeu cau van hanh), nhung phai noi ro
+       hau qua de nhan vien quay lai sua. */
+    r[3]  = _dateNorm(r[3]);
+    r[36] = _dateNorm(r[36]);
+    {
+      const bad = [];
+      [[3,'Date'],[36,'Analysis Date']].forEach(p=>{
+        const v = String(r[p[0]] == null ? '' : r[p[0]]).trim();
+        if(v && !_dateOk(v)) bad.push(p[1] + ' = "' + v + '"');
+      });
+      if(bad.length)
+        toast('\u26a0 Invalid ' + bad.join(' \u00b7 ')
+            + ' \u2014 saved as typed, but this lot stays out of \u03a3 month and the Odorant ppm base until it is fixed','er');
+    }
 
     /* v4.55 — auto re-evaluate Quality vs the spec table whenever
        parameters are edited (only for rows already judged Pass/Fail;
@@ -1966,6 +2514,7 @@ const ENG = (function(){
     r[A_QC3] = q.fC3;
     r[A_QC4] = q.fC4;
     if(!MTH[String(r[A_MTH]||'').trim().toLowerCase()]) r[A_MTH] = 'gc';
+    _tempAdjApply(r);   /* v4.156 -- tu dien 5 cot tham khao [75]-[79] cung luc */
     _saveCache();
     _pushRowFb(_editingRid, r);
     try{ logAudit('eng:tank_log:calc_coq', _editingRid, 'coqFilled', '',
@@ -2461,8 +3010,10 @@ const ENG = (function(){
       'IniCoqDensity','IniCoqC3wt','IniCoqSource','FilledC3_COQ','FilledC4_COQ','NotifyMethod',
       /* v4.111 — 4 cột đối chiếu chuyển kho, đơn vị KG */
       'ReconGapC3_kg','ReconGapC4_kg','AdjTransferC3_kg','AdjTransferC4_kg',
-      /* v4.131 — tồn đầu hệ thống (WMS/SAP), kg */
-      'WmsOpenC3_kg','WmsOpenC4_kg'];
+      /* v4.131 -- ton dau he thong (WMS/SAP), kg */
+      'WmsOpenC3_kg','WmsOpenC4_kg',
+      /* v4.156 -- 5 cot THAM KHAO quy doi theo nhiet do thuc */
+      'TempAdjFilledC3_ton','TempAdjFilledC4_ton','TempAdjFactor','TempAdjDiff_ton','TempAdjDiff_pct'];
     const csvLines = [headers.join(',')];
     /* v4.63 — export theo thứ tự lot MỚI NHẤT → CŨ NHẤT (khớp bảng) */
     const ordered = ROWS.slice().sort((a,b)=> _lotKey(b[1]) - _lotKey(a[1]));
@@ -2523,12 +3074,76 @@ const ENG = (function(){
     });
   }
 
+  /* ══ ⭐⭐ v4.167 — LOT MỚI DO BẢN CŨ GHI BỊ TÀNG HÌNH ═══════════════════
+     ────────────────────────────────────────────────────────────────────
+     CA THẬT 18/09: kỹ sư lưu lot 417 (draft, chưa có COQ) trên máy đang
+     chạy bản PUBLISH 4.160. Bản 4.160 có trước v4.161 nên nó KHÔNG ghi
+     khoá _ord. Máy chạy bản mới nạp Tank Log bằng
+         orderByChild('_ord').limitToLast(25)
+     Firebase xếp giá trị null LÊN ĐẦU ⇒ 25 dòng CAO NHẤT trả về đều là
+     dòng CÓ _ord ⇒ lot 417 nằm ngoài cửa sổ, và listener child_added
+     cũng gắn trên chính cửa sổ đó nên KHÔNG BAO GIỜ nổ. Kết quả: lot 417
+     có thật trên Firebase mà bản mới không thấy — Tank Log không có,
+     thẻ tank không nhảy lot, Safe Fill không có density, và KHÔNG CÓ một
+     dòng báo lỗi nào. Đúng họ lỗi "im lặng" của [[v4-stale-build-cache]].
+     Back-fill một lần của v4.161 KHÔNG cứu được ca này: nó chỉ soi các
+     dòng TRONG cửa sổ, mà cửa sổ thì đã sạch _ord từ lần chạy trước.
+
+     NAY: một cửa sổ SỐNG riêng bắt đúng những dòng thiếu _ord
+     (equalTo(null) — Firebase hiểu là "khoá này rỗng hoặc không có").
+       ① nạp thẳng dòng đó vào RAM ⇒ hiện ngay, kể cả tài khoản chỉ xem
+       ② có quyền ghi thì vá _ord cho nó ⇒ lần sau vào cửa sổ chính
+     Hai việc TÁCH RỜI: đọc không phụ thuộc quyền ghi. limitToLast(30)
+     để máy chưa từng back-fill không kéo cả lịch sử về RAM — ca đó đã
+     có nhánh back-fill hàng loạt lo.
+     ⚠ Cần '.indexOn': ['_ord'] trên node eng_tkmix (đã khai từ v4.161). */
+  function _attachOrphanWatch(){
+    if(!_fbRef || _orphanQ || _allLoaded) return;
+    let q = null;
+    try{ q = _fbRef.orderByChild(ORD_KEY).equalTo(null).limitToLast(30); }
+    catch(e){ console.warn('[ENG] orphan watch unsupported', e); return; }
+    _orphanQ = q;
+    const take = snap=>{
+      if(_suppressEcho > 0) return;
+      const rid = snap.key, v = snap.val();
+      if(!v || !Array.isArray(v.cells)) return;
+      const isNew = !RID_MAP[rid];
+      _setRowLocal(rid, v.cells);
+      _saveCache();
+      try{ render(); }catch(_){}
+      if(isNew){
+        console.warn('[ENG] v4.167 — lot thiếu _ord, nạp bù: ' + (v.cells[1] || rid));
+        try{ if(typeof SCALE!=='undefined' && SCALE.refreshLotFromTankLog) SCALE.refreshLotFromTankLog(); }catch(_){}
+      }
+      _ordFix(rid, v.cells);
+    };
+    try{ q.on('child_added', take); q.on('child_changed', take); }
+    catch(e){ console.warn('[ENG] orphan watch attach', e); _orphanQ = null; }
+  }
+  /* Vá _ord cho ĐÚNG một dòng. Không có quyền ghi thì thôi — dòng vẫn đã
+     hiện ở bước ① rồi. Mỗi rid chỉ thử MỘT lần mỗi phiên. */
+  const _ordTried = Object.create(null);
+  function _ordFix(rid, cells){
+    if(_ordTried[rid]) return;
+    _ordTried[rid] = 1;
+    try{ if(typeof canWrite === 'function' && !canWrite('eng_tkmix')) return; }catch(_){ return; }
+    const want = _ordOfCells(cells);
+    if(!(want > 0)) return;          /* ô Lot hỏng ⇒ dải cảnh báo lot đã lo */
+    _fbRef.child(rid).child(ORD_KEY).set(want)
+      .catch(e=> console.warn('[ENG] _ord fix', rid, e));
+  }
+  function _detachOrphanWatch(){
+    if(!_orphanQ) return;
+    try{ _orphanQ.off(); }catch(_){}
+    _orphanQ = null;
+  }
+
   /* v4.62 — PARTIAL initial load: only the INIT_LOTS newest rows (by _ts).
      Replaces the old full once('value'). Legacy-array schema is detected
      from the window contents and falls back to loadAll() (migration path). */
   function _initialLoadAndAttach(){
     if(!_fbRef) return;
-    _query = _fbRef.orderByChild('_ts').limitToLast(INIT_LOTS);
+    _query = _fbRef.orderByChild(ORD_KEY).limitToLast(INIT_LOTS);
     _query.once('value').then(snap=>{
       const val = snap.val();
       if(!val){
@@ -2541,6 +3156,7 @@ const ENG = (function(){
         }
         render();
         _attachChildListeners(_query);
+        _attachOrphanWatch();   /* v4.167 — node "rỗng" có thể chỉ là mọi dòng đều thiếu _ord */
       } else {
         /* legacy array schema? children are plain arrays (no .cells) */
         let legacy = false;
@@ -2550,6 +3166,18 @@ const ENG = (function(){
           break;
         }
         if(legacy){ loadAll(); return; }
+        /* v4.161 — ban ghi CU chua co _ord. Firebase xep gia tri null len
+           DAU, nen limitToLast se tra ve nham dong (dung nhung dong khong
+           co khoa thu tu). Phat hien ngay tai day roi back-fill MOT LAN --
+           chi ghi dung path '<rid>/_ord', khong dung toi cells / _ts nen
+           khong lam hong du lieu nao. Chi thu MOT lan moi phien de khong
+           lap vo tan khi khong co quyen ghi. */
+        let _needOrd = false;
+        for(const rid in val){
+          const v = val[rid];
+          if(!v || typeof v[ORD_KEY] !== 'number'){ _needOrd = true; break; }
+        }
+        if(_needOrd && !_ordFilled){ _ordFilled = true; _ordBackfill(); return; }
         /* NEW SCHEMA — window replaces the local cache (partial truth) */
         ROWS = []; RID_MAP = Object.create(null);
         for(const rid in val){
@@ -2561,9 +3189,54 @@ const ENG = (function(){
         render();
         _attachChildListeners(_query);
       }
+      _attachOrphanWatch();     /* v4.167 — bắt lot do bản cũ ghi (thiếu _ord) */
       /* SCALE: refresh active tank's lot from latest tank-log row */
       try{ if(typeof SCALE!=='undefined' && SCALE.refreshLotFromTankLog) SCALE.refreshLotFromTankLog(); }catch(_){}
     }).catch(e=> console.warn('[ENG] partial load fail', e));
+  }
+
+  /* v4.161 — BACK-FILL _ord MOT LAN cho toan bo node.
+     Doc ca node dung MOT lan (chi lan dau tien sau khi len ban 4.161 --
+     may nao chay truoc thi cac may sau khong con phai chay nua), roi ghi
+     multi-path CHI cac o '<rid>/_ord'. Payload rat nho vi khong gui lai
+     cells. Xong thi goi lai _initialLoadAndAttach() de nap dung cua so. */
+  function _ordBackfill(){
+    if(!_fbRef) return;
+    try{ if(typeof toast === 'function')
+      toast('\u23f3 Tank Log: indexing lot order (one-time)\u2026','warn'); }catch(_){}
+    _fbRef.once('value').then(snap=>{
+      const val = snap.val();
+      if(!val || Array.isArray(val)){ loadAll(); return; }
+      const payload = {};
+      let n = 0;
+      for(const rid in val){
+        const v = val[rid];
+        if(!v || !Array.isArray(v.cells)) continue;
+        const want = _ordOfCells(v.cells);
+        if(v[ORD_KEY] === want) continue;
+        payload[rid + '/' + ORD_KEY] = want;
+        n++;
+      }
+      if(!n){ _initialLoadAndAttach(); return; }
+      _suppressEcho++;
+      _fbRef.update(payload)
+        .then(()=>{ try{ if(typeof toast === 'function')
+          toast('\u2705 Tank Log: lot order indexed for ' + n + ' lots','ok'); }catch(_){} })
+        .catch(e=>{ console.warn('[ENG] _ord backfill write', e);
+          try{ if(typeof toast === 'function')
+            toast('\u26a0 Tank Log: could not index lot order \u2014 press \ud83d\udce5 Load All to see every lot','er'); }catch(_){} })
+        .finally(()=>{
+          /* doi qua cua so chan doi-am (_suppressEcho) roi moi nap lai, de
+             child_added cua may khac khong bi nuot trong luc do */
+          setTimeout(()=>{
+            _suppressEcho = Math.max(0, _suppressEcho - 1);
+            _initialLoadAndAttach();
+          }, 900);
+        });
+    }).catch(e=>{
+      console.warn('[ENG] _ord backfill read', e);
+      _initialLoadAndAttach();
+    });
   }
 
   /* v4.62 — LOAD ALL: one-shot full read (keeps the old migration logic),
@@ -2572,6 +3245,7 @@ const ENG = (function(){
   function loadAll(done){
     if(_allLoaded || !_fbRef){ if(typeof done==='function') done(); return; }
     if(_query){ try{ _query.off(); }catch(_){} _query = null; }
+    _detachOrphanWatch();   /* v4.167 — Load All nghe cả node, khỏi cần cửa sổ bù */
     _fbRef.once('value').then(snap=>{
       const val = snap.val();
       if(Array.isArray(val) && val.length){
@@ -2589,7 +3263,7 @@ const ENG = (function(){
             const cells = [];
             for(let i = 0; i < ROW_W; i++) cells[i] = rowArr[i] != null ? rowArr[i] : '';
             const rid = _genRid();
-            migrated[rid] = { cells, _ts: Date.now() };
+            migrated[rid] = { cells, _ts: Date.now(), [ORD_KEY]: _ordOfCells(cells) };
             _setRowLocal(rid, cells);
           });
           _suppressEcho++;
@@ -3415,7 +4089,8 @@ const ENG = (function(){
     calcSave, calcSaveClick, notifyScale, openGc,
     importCoq, coqChosen,       /* v4.61 — COQ import in the edit modal */
     calcSaveNotify: calcSave,   /* legacy alias (pre-v4.60 callers) */
-    _timeMask: _editTimeMask, _dateMask: _editDateMask,
+    _timeMask: _editTimeMask, _dateMask: _editDateMask, _dateBlur: _editDateBlur,
+    dateOk: _dateOk, dateNorm: _dateNorm,
     toggleLotSort, exportXlsx,
     upsertRow, findRowByLotTank,
     /* v4.68 — Stock Transfer (đồng bộ chuyển kho WMS) */
@@ -3433,11 +4108,16 @@ const ENG = (function(){
     /* v4.86 — rà soát & back-fill kết quả theo COQ */
     coqAudit, closeCoqAudit, coqBackfill, coqAuditCsv, coqNeed: _coqNeed, coqScan: _coqScan,
     calcCoqOnly,      /* v4.86.1 — nút ◈ CALC COQ trong modal sửa dòng */
+    /* v4.156 -- Temp-adj audit (tham khao, quy doi Filled C3/C4 theo nhiet do thuc) */
+    tempAudit, closeTempAudit, tempBackfill, tempAuditCsv,
+    tempAdjCalc: _tempAdjCalc, tempAdjCols: { fc3:T_FC3, fc4:T_FC4, factor:T_FACTOR, diff:T_DIFF, diffPct:T_DIFFPCT },
     coqProblems: _coqProblems, coqCheckModal: _coqCheckModal,   /* v4.87 */
     ALT_COLS: { A_MID, A_T3, A_P3, A_T4, A_P4, A_DC3, A_DC4,
                 A_IDEN, A_IW3, A_ISRC, A_QC3, A_QC4, A_MTH },
     loadAll,                          /* v4.62 — fetch full Tank Log on demand */
     get allLoaded(){ return _allLoaded; },
+    /* v4.161 — { miss:[so lot thieu], noLot:n } tren tap dang co trong RAM */
+    lotGaps: _lotGaps,
     get ROWS(){ return ROWS; }
   };
 })();

@@ -35,6 +35,7 @@ const TKC = (function(){
 
   let _sloc = '2100';
   let _tab  = 'stock';
+  let _lotQ = '';          /* v4.165 — ô tìm lot của bảng tick "Batches on top" */
   /* giá trị nạp vào mấy ô nhập SAU khi innerHTML dựng xong — ô sinh ra rỗng,
      điền bằng .value chứ KHÔNG nhét vào chuỗi HTML (nhét vào chuỗi thì mỗi
      lượt vẽ lại là một lần ghi đè thứ người ta đang gõ). */
@@ -253,6 +254,68 @@ const TKC = (function(){
       +   ((A && A.ok) ? ' ' + _btn('↺','initReset()', 'Take it again from ' + A.txt) : '')
       + '</td></tr>';
 
+    /* ⭐ v4.165 — TICK LOT: lớp người dùng đè lên suy đoán của app.
+       Chuyện "End Stock SAP đã gồm lot nào" đã qua ba đời luật mà lần nào
+       cũng có một ca thật làm nó sai, vì đây là chuyện NGƯỜI biết chứ máy
+       không suy chắc được. Nên cho tick thẳng: tick = SAP CHƯA có lot này
+       ⇒ cộng thêm vào tồn đầu; bỏ tick = SAP đã có ⇒ không cộng. Không
+       đụng tới thì app tự chạy như thường (dấu ƒ). */
+    const LA = (function(){ try{ return INV.lotAddList(_sloc, null, _lotQ) || []; }
+                            catch(_){ return []; } })();
+    const laOn  = LA.filter(function(x){ return x.on; });
+    const laOff = LA.filter(function(x){ return !x.on; }).slice(0, 20);
+    const laTip = 'The batches counted into this tank right now. A batch that finished BEFORE today '
+                + 'opened is added on top of the SAP End Stock; one that finished TODAY is added as a '
+                + 'cavern receipt. Untick to drop a batch, or pick one from the list on the right to '
+                + 'add it. Saved the moment you click \u2014 no Save button. The \u0192 mark means the app '
+                + 'chose it; \u21ba hands the choice back to the app.';
+    const laChip = function(x){
+      const own = x.ov !== null;
+      return '<label class="tkc-lotchk' + (own ? ' own' : '') + (x.today ? ' now' : '') + '"'
+           + ' title="' + esc('Lot ' + x.lot + (x.when ? ' \u00b7 finished ' + x.when : '')
+               + (x.filled !== null ? ' \u00b7 filled ' + x.filled.toLocaleString('en-US') + ' kg'
+                                    : ' \u00b7 no COQ figure yet')
+               + ' \u00b7 ' + (x.today ? 'finished today \u2014 counted as a cavern receipt'
+                                      : 'added on top of the SAP End Stock')
+               + ' \u00b7 ' + (own ? 'you set this' : 'the app chose this (\u0192)')) + '">'
+           + '<input type="checkbox" checked'
+           + ' onchange="TKC.lotAdd(\'' + esc(x.lot) + '\', this.checked)">'
+           + '<b>' + esc(_shortLot(x.lot)) + '</b>'
+           + (x.today ? '<span class="tg">today</span>' : '')
+           + '<span class="d">' + esc(x.when || '') + '</span>'
+           + (x.filled !== null ? '<span class="d">' + x.filled.toLocaleString('en-US') + '</span>' : '')
+           + (own ? '<span class="rst" title="Back to the app\u2019s own choice"'
+                    + ' onclick="event.preventDefault();TKC.lotAdd(\'' + esc(x.lot) + '\', null)">\u21ba</span>'
+                  : '<span class="mk">\u0192</span>')
+           + '</label>';
+    };
+    const laItems = laOn.length ? laOn.map(laChip).join('')
+      : '<span class="tkc-lotnone">No batch added \u2014 the SAP End Stock stands on its own</span>';
+    /* Danh sách thả xuống: các mẻ CHƯA được cộng, mới nhất trước. Chọn một
+       cái là cộng luôn và lưu luôn — không có nút Save cho hàng này. */
+    let laOpts = '<option value="">' + esc(laOff.length ? '\uff0b add batch\u2026'
+                                                       : (_lotQ ? 'no match' : 'nothing to add')) + '</option>';
+    laOff.forEach(function(x){
+      laOpts += '<option value="' + esc(x.lot) + '">' + esc(_shortLot(x.lot))
+             + ' \u00b7 ' + esc(x.when || '')
+             + (x.filled !== null ? ' \u00b7 ' + x.filled.toLocaleString('en-US') : '')
+             + (x.today ? ' \u00b7 today' : '') + '</option>';
+    });
+    h += '<tr class="r-edit"><td class="lbl" title="' + esc(laTip) + '">Batches added</td>'
+      + '<td class="n" colspan="3"><div class="tkc-lotchks">' + laItems + '</div></td>'
+      + '<td class="src"><div class="tkc-lotadd">'
+      +   '<select class="tkc-sel tkc-lotsel" id="tkcLotAddSel"'
+      +     ' title="' + esc('Batches of this tank that are NOT counted in, newest first. '
+                           + 'Pick one to add it \u2014 it is saved straight away.') + '"'
+      +     ' onchange="TKC.lotPick(this.value)">' + laOpts + '</select>'
+      +   '<input class="tkc-inp tkc-lot" id="tkcLotQ" type="text" autocomplete="off"'
+      +     ' value="' + esc(_lotQ) + '" placeholder="search lot"'
+      +     ' title="' + esc('Type a lot number (e.g. 413) and press Enter to reach batches older than '
+                           + '30 days. Clear it to go back to the recent ones.') + '"'
+      +     ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}"'
+      +     ' onchange="TKC.lotSearch(this.value)">'
+      + '</div></td></tr>';
+
     h += '<tr class="r-edit"><td class="lbl" title="'
       +   esc('The C3 share WMS holds for this tank — what WMS uses to split any LPG quantity. '
             + 'Left alone the app works it out from the initial stock plus the adjusted transfer '
@@ -317,6 +380,23 @@ const TKC = (function(){
       + '<td class="n">' + _txt('tkcXfNewNote','note','Optional note kept with this entry') + '</td>'
       + '<td class="src">' + _btn('Add', "xfSave('')", 'Record this transfer on both tanks') + '</td></tr>';
 
+    /* ⭐⭐⭐ v4.170 — mẻ trong ngày đã có COQ ⇒ tồn đi theo END của Tank Log.
+       Dòng này là phần bù RAM để cột vẫn cộng đúng, KHÔNG phải bản ghi —
+       không có nút Save / 🗑 vì không có gì trên Firebase để sửa hay xoá. */
+    if(c.cavApp){
+      const A = c.cavApp, aT = num(A.c3) + num(A.c4);
+      h += _row('r-sub', '+ From cavern · lot ' + esc(_shortLot(A.lot)),
+                'Worked out in memory, not stored: the app takes the END STATE of batch '
+              + A.lot + ' from the Tank Log (' + kg(num(A.endC3) + num(A.endC4)) + ' kg measured) '
+              + 'and deducts what has already been loaded from that batch ('
+              + kg(num(A.soldC3) + num(A.soldC4)) + ' kg, ' + A.rows + ' truck(s) in TL Data). '
+              + 'This line is whatever it takes for the column to land on that figure. '
+              + 'Every machine works it out for itself from the same Tank Log and TL Data — '
+              + 'nothing is written to the database, so two machines can never overwrite each other. '
+              + 'Untick the batch above to go back to plain bookkeeping.',
+                sgn(A.c3), sgn(A.c4), sgn(aT),
+                _chip('app','f app','Worked out by the app in memory — not stored, not entered by anyone.'));
+    }
     h += _row('', '- Sold today',
               'Net weight of every truck loaded from this tank today, taken from TL Data.',
               giT ? sgn(-c.gi.c3) : '—', giT ? sgn(-c.gi.c4) : '—', giT ? sgn(-giT) : '—',
@@ -695,6 +775,22 @@ const TKC = (function(){
     const t = $('tkcWtLot'); if(t) t.value = '';
     _lotApplied();
   }
+  /* v4.165 — tick / bỏ tick / trả về cho app (on = true | false | null) */
+  function lotAdd(lot, on){
+    try{ INV.lotAddSet(_sloc, lot, (on === null || on === undefined) ? null : !!on); }
+    catch(e){ console.warn('[TKC] lotAdd', e); }
+  }
+  /* Chọn trong danh sách thả xuống = cộng mẻ đó vào, lưu luôn. */
+  function lotPick(v){
+    const lot = String(v == null ? '' : v).trim();
+    const sel = $('tkcLotAddSel'); if(sel) sel.value = '';
+    if(!lot) return;
+    lotAdd(lot, true);
+  }
+  function lotSearch(v){
+    _lotQ = String(v == null ? '' : v).trim();
+    _lotApplied();
+  }
   function wtSave(){
     const w = _pct(_val('tkcWt'));
     if(w === null || w <= 0 || w > 100){ _say('Invalid %wt C3 (0–100)','er'); return; }
@@ -967,6 +1063,8 @@ const TKC = (function(){
   return { init, open, close, tank, tab, render, run,
            /* v4.146 — gõ thẳng trên bảng, không phải mở thêm hộp thoại */
            initEdit, initSave, initReset, wtEdit, wtSave, wtLot, wtLotPick,
+           /* v4.165 — tick lot nào được cộng lên nền SAP */
+           lotAdd, lotSearch, lotPick,
            sysEdit, sysReset, stxSave, reconLot, reconLotPick,
            expToggle, expAll,
            /* v4.147 — sổ cavern / liên bồn · WMS check · bảng export ngay trên bảng */

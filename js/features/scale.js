@@ -661,18 +661,57 @@ const SCALE = (function(){
       try{ if(typeof SCX2!=='undefined' && SCX2.renderDens) SCX2.renderDens(); }catch(_){}
     },250);
   }
-  /* External helper — called by ENG init or whenever Tank Log changes.
-     Refreshes the active tank's lot from latest Tank Log entry. */
+  /* Khoá so sánh của một lot: năm×1e6 + số lot. Phải kèm NĂM, nếu không
+     thì sang năm lot 001 sẽ bị coi là cũ hơn lot 417 của năm ngoái. */
+  function _lotOrd(lotStr){
+    const s0 = String(lotStr||'').trim();
+    if(!s0) return 0;
+    const m = s0.match(/LPG-(\d{4})-(\d+)/i);
+    if(m) return parseInt(m[1],10)*1e6 + parseInt(m[2],10);
+    const n = parseInt(s0,10);
+    return isNaN(n) ? 0 : (new Date().getFullYear()*1e6 + n);
+  }
+  /* ══ ⭐⭐ v4.167 — THẺ TANK PHẢI NHẢY LÊN LOT MỚI NHẤT CỦA CẢ HAI BỒN ══
+     ────────────────────────────────────────────────────────────────────
+     Người dùng chốt lại luật gốc: "thực tế trong bồn đã có hàng của lot
+     mới và SẼ BÁN kể cả khi chưa có COQ; có COQ thì mới lưu và tính toán
+     các thứ liên quan". Nghĩa là mẻ vừa FINISH — dù Tank Log mới là bản
+     nháp, chưa density, chưa COQ — đã là lot đang nằm trong bồn.
+
+     LỖI CŨ: hàm này chỉ đụng tới bồn ĐANG ĐƯỢC CHỌN
+     (`SC_TK_CFG.tk1.selected ? … : null`). Ca thật 18/09: lot 417 trộn ở
+     TK-3502 trong khi trạm đang chọn TK-3501 ⇒ thẻ TK-3502 đứng yên ở
+     415 mãi, và vì thẻ đứng yên nên khối density, Safe Fill Allow và
+     mọi phiếu in của bồn đó vẫn nói lot cũ. Không có cảnh báo nào.
+     NAY: quét CẢ HAI bồn, mỗi bồn tự lấy lot mới nhất của chính nó.
+     Ba chốt giữ cho nó không phá việc người đang làm:
+       ① Bồn để MANUAL là người đã GHIM lot — tuyệt đối không động.
+       ② CHỈ TIẾN, KHÔNG LÙI: lot nhỏ hơn lot đang có thì bỏ qua (ca xoá
+          nhầm một dòng Tank Log không được kéo trạm về lot cũ).
+       ③ Đang gõ trong chính ô LOT đó thì hoãn — _renderTankBar ghi đè
+          ô đang gõ là mất con trỏ (cùng họ lỗi [[v4-stx-input-focus-fix]]). */
   function refreshLotFromTankLog(){
-    const key=SC_TK_CFG.tk1.selected?'tk1':SC_TK_CFG.tk2.selected?'tk2':null;
-    if(!key) return;
-    const n = key==='tk1' ? 1 : 2;
-    const latest = _latestLotForTank(n);
-    if(latest && latest !== SC_TK_CFG[key].lot){
-      SC_TK_CFG[key].lot = latest;
-      _tkSaveToFb();
-      _renderTankBar();
-    }
+    let changed = false;
+    [1,2].forEach(n=>{
+      const key = 'tk' + n;
+      const cfg = SC_TK_CFG[key]; if(!cfg) return;
+      if((cfg.mode||'auto') !== 'auto') return;              /* ① MANUAL: người ghim */
+      const latest = _latestLotForTank(n);
+      if(!latest || latest === cfg.lot) return;
+      if(_lotOrd(latest) <= _lotOrd(cfg.lot)) return;         /* ② chỉ tiến */
+      try{                                                    /* ③ đừng cướp ô đang gõ */
+        const inp = document.getElementById(n===2 ? 'scLotInp2' : 'scLotInp1');
+        if(inp && document.activeElement === inp) return;
+      }catch(_){}
+      cfg.lot = latest;
+      cfg.lotSrc = 'auto';
+      changed = true;
+    });
+    if(!changed) return;
+    _tkSaveToFb();
+    _renderTankBar();
+    /* khối ρ dưới quả cầu đọc theo lot ⇒ đổi lot là phải vẽ lại */
+    try{ if(typeof SCX2!=='undefined' && SCX2.renderDens) SCX2.renderDens(); }catch(_){}
   }
   function _tkSaveToFb(){
     if(!FB_SC) return;

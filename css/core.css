@@ -4615,6 +4615,33 @@ table.tkc-led tr.r-edit td{background:var(--panel-2)}
   font-size:12px;font-weight:800;border-right:1.5px solid var(--line)}
 .tkc-wtfld .tkc-inp{border:0;border-radius:0;max-width:78px;background:transparent}
 .tkc-wtfld .tkc-inp:focus{box-shadow:none}
+
+/* ⭐ v4.165 — TICK LOT "Batches on top of SAP" (tab Stock của Tank Console).
+   Tick = SAP chưa có lot này ⇒ cộng thêm vào tồn đầu; bỏ tick = SAP đã có.
+   Ô nào người tự đặt thì viền đậm + nút ↺ trả về cho app; ô app tự quyết
+   mang dấu ƒ mờ, giống quy ước ƒ/✎ đang dùng ở các ô khác của bảng. */
+.tkc-lotchks{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:1px 0}
+.tkc-lotchk{display:inline-flex;align-items:center;gap:5px;cursor:pointer;
+  border:1px solid var(--border,#e2e8f0);border-radius:7px;padding:3px 7px;
+  background:#fff;font-size:11px;line-height:1.35;white-space:nowrap}
+.tkc-lotchk:hover{border-color:#94a3b8}
+.tkc-lotchk input{margin:0;cursor:pointer}
+.tkc-lotchk b{font-weight:700;font-size:11.5px}
+.tkc-lotchk .d{color:var(--ink-3,#64748b);font-size:10px}
+.tkc-lotchk .mk{color:#94a3b8;font-size:10px;font-style:italic}
+.tkc-lotchk .rst{color:#b45309;font-size:12px;cursor:pointer;padding:0 1px}
+.tkc-lotchk .rst:hover{color:#78350f}
+.tkc-lotchk.own{border-color:#f59e0b;background:#fffbeb}
+.tkc-lotnone{color:var(--ink-3,#64748b);font-size:11px;font-style:italic}
+/* v4.166 — cột phải của hàng "Batches added": danh sách thả xuống + ô tìm */
+.tkc-lotadd{display:flex;flex-direction:column;gap:4px;min-width:150px}
+.tkc-lotadd .tkc-lotsel{max-width:100%}
+.tkc-lotadd .tkc-lot{max-width:100%}
+/* mẻ trộn TRONG NGÀY (ghi thành cavern receipt) — phân biệt với mẻ cộng lên nền SAP */
+.tkc-lotchk.now{border-color:#7dd3fc;background:#f0f9ff}
+.tkc-lotchk.now.own{border-color:#f59e0b;background:#fffbeb}
+.tkc-lotchk .tg{font-size:9px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;
+  color:#0369a1;background:#e0f2fe;border-radius:4px;padding:1px 4px}
 .tkc-wtfld .pc{padding-right:8px;font-size:11.5px;color:var(--ink-3)}
 .tkc-wtfld.k-user{background:#fffaf1;border-color:#d9a441}
 .tkc-wtfld.k-user .mk{background:#fbf0d9;border-right-color:#d9a441;color:#8a5a06}
@@ -4725,3 +4752,19 @@ table.tkc-exp tfoot td[id="tkcExpCnt"]{font-size:10px;letter-spacing:.5px;
 .tkc-lotpick{display:inline-flex;gap:4px;align-items:center}
 .tkc-lotsel{max-width:138px;font-weight:700;color:var(--navy);cursor:pointer}
 .tkc-lotbar .tkc-lot,.tkc-lotpick .tkc-lot{max-width:78px}
+
+/* ── v4.160 — Tank Log: khung cụm cột + Adj ST nổi bật + cụm COQ@T làm mờ ── */
+.eng-tbl .g-l{border-left:2px solid #475569 !important;}
+.eng-tbl .g-adj{background:#ffe39a !important;color:#0b2a6b !important;font-weight:800 !important;
+  border-left:1px solid #1e40af !important;border-right:1px solid #1e40af !important;}
+.eng-tbl td.g-adj{font-size:11.5px !important;}
+.eng-tbl .g-adj-l{border-left:2px solid #1e40af !important;}
+.eng-tbl .g-adj-r{border-right:2px solid #475569 !important;box-shadow:inset -2px 0 0 #1e40af;}
+.eng-tbl thead th.g-adj{background:#ffd666 !important;}
+.eng-tbl .gt{background:#fafbfc !important;color:#9aa6b2 !important;font-weight:400 !important;}
+.eng-tbl thead th.gt{color:#8a96a3 !important;font-weight:500 !important;}
+.eng-tbl .gt-l{border-left:2px dashed #b6c0cb !important;}
+.eng-tbl .gt-r{border-right:2px dashed #b6c0cb !important;}
+.eng-tbl td.gt-live{font-style:italic;}
+.eng-tbl td.gt-gap.p{color:#6fa383 !important;}
+.eng-tbl td.gt-gap.m{color:#c98a8a !important;}

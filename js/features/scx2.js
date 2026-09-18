@@ -223,7 +223,6 @@ const SCX2 = (function(){
       tip += '  %wt C3 ' + wt + (i.wtSrc==='coq' ? ' from the COQ of lot ' + i.lot
             : i.wtSrc==='near' ? ' borrowed from lot ' + i.refLot : '') + '.';
     }
-
     el.className = 'scx2-tkd ' + cls;
     el.title = tip;
     el.innerHTML =
