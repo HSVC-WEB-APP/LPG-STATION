@@ -52,6 +52,13 @@ window.AUTH = (function () {
       /^plan_tomorrow(\/|$)/,
       /^plan_today_version$/,
       /^plan_tomorrow_version$/,
+      /* v4.183 — sale dán plan ⇒ kế hoạch đầu ngày + sổ ghi chú sale đi kèm lần dán */
+      /^plan_day\/[^/]+\/first$/,
+      /^sale_notes(\/|$)/,
+      /* v4.184 — sổ quyết định đề xuất ghi chú sale (push lúc dán) */
+      /^ai_log\/[^/]+$/,
+      /* v4.187 — xe biến mất khỏi Today Plan đã xác nhận lúc dán */
+      /^plan_cx\/[^/]+\/[^/]+$/,
       /* v4.130 — CHỈ ô Phone của tab DRIVER (kèm dấu vết sửa của đúng dòng đó).
          Hẹp tới từng ô: ghi sang cột khác hay sang tab tanklorry/tractor/rmooc/
          twavg đều rơi ra ngoài mấy regex này. */
@@ -81,7 +88,7 @@ window.AUTH = (function () {
     /* v4.142 — ODOR.exportCsv đã bỏ; tab Odorant xuất qua ODORXL (module này CÓ
        gán window.ODORXL nên _lockFn chạm được thật). */
     'ODORXL.open', 'ODORXL.run',
-    'CAV.exportReport', 'INV.openExport', 'TLXK.run', 'TLXK.open',
+    'CAV.exportReport', 'SWR.exportFile', 'INV.openExport', 'TLXK.run', 'TLXK.open',
     'pfPrint', 'pfPrint3DN', 'pttOvPrint', 'dnOvPrint', 'dnOvPrint3',
     'ktPrint', 'ENG.openPrint', 'ENG.doPrint', 'SCALE.techPrintDone',
     'PTT_EARLY.open', 'PTT_EARLY.openFor', 'KTPTVC.open'

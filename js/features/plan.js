@@ -23,7 +23,47 @@
 
 /* TODO[P5C]: dán thân module PLAN (V4-54 dòng 9951–12568) vào đây. */
 
-/* ===== BÓC TỪ V4-54 dòng 9940–12568 ===== */
+/* ===== v4.188 (25/09/2026) =====
+   • ĐỐI CHIẾU TỔNG KHỐI LƯỢNG VỚI FILE SALE: dòng tổng cuối bảng của sale (cột Quantity, dòng
+     không có No — vd. 172.500) được đọc lúc dán. Tổng kế hoạch SAU KHI áp các lựa chọn (link ALT
+     tính một lần, MULTI-DO theo MT đã chia, dòng huỷ không tính) phải BẰNG số đó. Bảng duyệt và hộp
+     diff hiện ✓ khớp / ⚠ lệch (tính lại ngay khi tick / đổi kiểu / sửa MT); dải Plan của Ledger giữ
+     cảnh báo cho tới lần dán sau (RAM, không ghi Firebase).
+   ===== v4.187 (25/09/2026) =====
+   • CANCEL NHÓM "1 trong các xe": các dòng cancel cùng khách, liền nhau, CÙNG XE khác tài xế (hoặc
+     đã cùng nhóm 🔗 ALT) gộp thành MỘT mục duyệt = MỘT chuyến huỷ; áp dụng thì huỷ cả nhóm và link ALT
+     để mọi tổng / Cancel List chỉ đếm 1. Một xe trong nhóm đã nạp ⇒ xe còn lại KHÔNG tính huỷ.
+   • XE BIẾN MẤT KHỎI TODAY PLAN (chỉ Today — Tomorrow chưa bán nên được đổi tự do): dán plan mới mà
+     xe của plan cũ (cùng ngày) không còn, không ghi cancel ⇒ bảng duyệt thêm mục 🕳 "Missing from the
+     new plan" (tick sẵn = tính là chuyến huỷ). Xe được thay bằng xe mới ghi "Change TL / đổi xe / thay xe"
+     cùng khách ⇒ KHÔNG tính (hiện, không tick). Quyết định ghi Firebase plan_cx/<ngày> (push, không
+     listener) — chỉ máy làm báo cáo / gửi email P2 mới đọc; xoá khi đã gửi email P2 VÀ xuất báo cáo
+     (hoặc tự dọn sau 3 ngày).
+   ===== v4.184 (25/09/2026) =====
+   • BƯỚC DUYỆT GHI CHÚ SALE (📋 Sale note review): sau hộp diff, mọi việc app định tự làm từ ghi chú
+     sale hiện thành MỘT BẢNG đủ thông tin (khách, No, xe, rơ-moóc, tài xế, MT, DO, loại hàng, note, lý do)
+     — tick để làm, bỏ tick để giữ nguyên. Gồm: 🚫 Cancel (nhiều kiểu chữ: cancel/cxl/hủy/không lấy hàng/
+     no show/postpone…, có loại trừ phủ định "không hủy"), ↺ trả về AUTO, 🔗 ALT (một trong các xe/tài xế
+     sẽ lấy hàng) và 🔗 MULTI-DO (một xe nhiều DO — ô Quantity gộp). MULTI-DO đề xuất chia MT theo note
+     (vd. 7.52 MT 50:50 + phần còn lại 70:30), sửa được; số đã chia mang cờ _qtyFix nên dán lại (Update)
+     không bị ô gộp điền đè lại.
+   • AILOG (Firebase ai_log): ghi lại MỌI đề xuất + người dùng nhận/bỏ/sửa gì — CHỈ GHI, app không đọc lại.
+     ⚙ (admin) ▸ tải JSON / xoá sạch.
+   ===== v4.204 (28/09/2026) =====
+   • PLANDAY TỰ GHI (_pdayAuto): Today Plan có dòng của HÔM NAY mà plan_day/<hôm nay>/first chưa có ⇒ 30 s
+     sau đợt đồng bộ app tự chụp (src 'auto'), không cần bấm 📌. Biến ngày _pdayDay đổi lúc qua nửa đêm ⇒ reset;
+     máy mở qua đêm kiểm lại 5 phút/lần. Dán / promote vẫn ghi ngay như cũ.
+   ===== v4.183 (25/09/2026) =====
+   • SALE NOTE "CANCEL": lúc dán, dòng có ghi chú Cancel/Hủy được GỢI Ý chuyển 🚫 Cancelled ngay
+     trong hộp xác nhận (tick bỏ được). Ghi chú điền-xuống từ ô gộp chỉ tính khi xe chưa có DO và
+     Allow load = NO. Dán lại mà sale gỡ chữ cancel ⇒ gợi ý trả về AUTO (chỉ dòng do dán huỷ: _cxPaste).
+     Promote Tomorrow → Today GIỮ trạng thái cancel.
+   • PLANDAY (plan_day/<ngày>/first): ảnh chụp KẾ HOẠCH ĐẦU NGÀY — ghi MỘT lần ở lần dán / promote
+     đầu tiên của ngày (transaction, không ghi đè). Kế hoạch CUỐI = RAM lúc làm báo cáo (không lưu).
+     Email P2 dùng để điền Daily plan + danh sách xe huỷ (kể cả xe bị gỡ khỏi plan).
+   • SNOTE (sale_notes/<khoá mẫu>): sổ gom GHI CHÚ CỦA SALE (cột M) theo mẫu — để sau này dạy app
+     hiểu note (vd. một xe hai loại hàng, cố định số tấn một loại). Chỉ gom, chưa tự xử lý.
+   ===== BÓC TỪ V4-54 dòng 9940–12568 ===== */
 function _makePlanModule(opts){
   /* destructure once for readability (these are CONSTANT for the lifetime
      of the instance, so it is safe to capture them in closures) */
@@ -366,6 +406,7 @@ function _makePlanModule(opts){
     let lastNote='';                                              /* v4.22.17 — merged-note fill-down */
     let subGroupIdx = 0, prevNo = 0, lastCustForSubgroup = '';
     let foundValidRow = false;
+    let sheetTotal = null;                                        /* v4.188 */
     /* v4.55.4 — global paste-order index. Stamped on every emitted row in the
        exact order it appears in the pasted/Excel sheet, so TABLE VIEW can keep
        that order verbatim (NOT customer-grouped, NOT no-sorted) for 1:1 visual
@@ -384,7 +425,10 @@ function _makePlanModule(opts){
       const looksData = !!(r[4] || r[5] || r[6] || r[11]);
 
       /* table-end detection — a numeric col7 with no vehicle data is the total line */
-      if(foundValidRow && !noRaw && col7 && !isNaN(parseFloat(col7)) && !looksData) break;
+      if(foundValidRow && !noRaw && col7 && !isNaN(parseFloat(col7)) && !looksData){
+        sheetTotal = parseFloat(String(col7).replace(/,/g,''));        /* v4.188 — tổng MT của sale */
+        break;
+      }
       if(!noValid){
         if(looksData){
           prevNo += 1;                                           /* keep suggested numbers unique & increasing */
@@ -441,6 +485,8 @@ function _makePlanModule(opts){
         allowLoad:   loadRaw === 'OK' ? 'OK' : 'NO',
         doNum:       cleanDO(r[11]||''),                          /* strip WMS leading zeros (V406 parity) */
         note:        r[12] || lastNote,                            /* v4.22.17 — fill-down */
+        __noteOwn:   r[12] || '',                                  /* v4.183 — note của CHÍNH dòng (không điền xuống) */
+        __qtyOwn:    r[7]  || '',                                  /* v4.184 — MT của CHÍNH dòng (trống = ô Quantity gộp) */
         _subGroup:   subGroupIdx,
         _seq:        gseq++,                                       /* v4.55.4 — paste/Excel source order */
         _status:     '',
@@ -449,7 +495,7 @@ function _makePlanModule(opts){
         _forDate:    planDate
       });
     }
-    return { rows: out, skipped };
+    return { rows: out, skipped, total: sheetTotal };
   }
 
   /* -------- Diff computation --------
@@ -934,18 +980,474 @@ function _makePlanModule(opts){
     diff.changed.forEach(c=>{ if(c.old._oid === c.new._oid) _stampSeq(c.new._oid, c.new._seq); });
     (diff.unchanged||[]).forEach(u=>{ _stampSeq(u.new._oid, u.new._seq); });
 
+    /* v4.183 — sale note Cancel ⇒ trạng thái (đã được người dán xác nhận trong hộp diff) */
+    const cxN = _cxApply(diff, payload);
+    writes += cxN;
+
     if(!writes){ toast('No changes to write','ok'); return; }
 
     bumpVersion(payload);
     _fbUpdate(payload)
       .then(()=>{
-        toast(`${UILABEL} ${reason}: ${diff.added.length}+ / ${diff.removed.length}- / ${diff.changed.length}~`, 'ok');
+        toast(`${UILABEL} ${reason}: ${diff.added.length}+ / ${diff.removed.length}- / ${diff.changed.length}~`+(cxN ? ` · 🚫 ${cxN} by sale note` : ''), 'ok');
       })
       .catch(e=>{ console.error('plan push', e); toast(UILABEL+': Firebase write failed','er'); });
 
     if(table) rebuildTableData();
     refreshCounts();
     refreshBadge();
+  }
+
+  /* ═══ v4.183 — SALE NOTE "CANCEL" ⇒ gợi ý 🚫 Cancelled ngay lúc dán ═══
+     Sale đánh dấu xe huỷ bằng chữ "Cancel. Customer change plan" ở cột Note (M),
+     kèm Quantity trống, Allow gate/load = NO, không DO. App KHÔNG tự đoán thêm:
+     chỉ liệt kê trong hộp xác nhận dán, tick sẵn, người dán bỏ tick nếu sai.
+       own  = chính ô Note của dòng có chữ cancel/hủy
+       down = chữ cancel đến từ ô gộp (điền xuống) ⇒ chỉ nhận khi xe chưa có DO
+              thật và Allow load ≠ OK (dòng thật đang chạy không bị kéo theo)   */
+  /* v4.184 — NHIỀU KIỂU CHỮ để không sót: cancel/cancelled/canceled/cancellation/cxl/canc,
+     hủy/huỷ/huy chuyến/huy xe, không lấy/nhận/đến/vào (hàng), no show, not come/load/take,
+     won't/will not…, bỏ chuyến/xe/đơn, postpone/hoãn/dời ngày. Loại trừ PHỦ ĐỊNH:
+     "không hủy", "not cancel", "no cancel", "un-cancel", "cancel lại/revoke cancel".       */
+  const CX_RES = [
+    /\bcan+cel+(?:l?ed|ling|lation)?\b/i, /\bcxl\b/i, /\bcanc\b/i, /\bcnl\b/i,
+    /h[uủ][yỷ]\s*(?:chuy[eếẾ]n|xe|[đd][oơ]n|l[aấ]y|h[aà]ng|k[eế]\s*ho[aạ]ch|plan)/i, /(?:^|[^a-zà-ỹ])h(?:ủy|uỷ)(?![a-zà-ỹ])/i,
+    /kh[oô]ng\s*(?:l[aấ]y\s*h[aà]ng|nh[aậ]n\s*h[aà]ng|(?:[đd][eế]n|t[oớ]i|v[aà]o)\s*l[aấ]y|ch[aạ]y|n[aạ]p\s*h[aà]ng|l[aấ]y\s*n[uữ]a|[đd][eế]n\s*n[uữ]a)/i, /\bko\s*(?:l[aấ]y|ch[aạ]y)\b/i,
+    /\bno[\s-]*show\b/i, /\bnot\s*(?:come|coming|arrive|arriving|take\s*(?:the\s*)?cargo)\b/i,
+    /\b(?:won'?t|will\s*not|wont)\s*(?:come|arrive|take\s*(?:the\s*)?cargo)\b/i,
+    /\bb[oỏ]\s*(?:chuy[eế]n|xe|[đd][oơ]n)\b/i,
+    /\bpostpone[ds]?\b/i, /ho[ãÃ]n/i, /d[oờ]i\s*(?:ng[aà]y|l[iị]ch|sang)/i
+  ];
+  const CX_NEG = /(?:kh[oô]ng|ko|chưa|not|no|un-?|đừng)\s*(?:c[aầ]n\s*)?(?:h[uủ][yỷ]|cancel)|cancel\s*(?:l[aạ]i|revoked?)|revoke\s*cancel|re-?(?:instate|activate)/i;
+  function cxText(t){
+    const s = String(t || '');
+    if(!s.trim() || CX_NEG.test(s)) return false;
+    return CX_RES.some(re => re.test(s));
+  }
+  const CX_RE = { test: cxText };   /* giữ tên cũ cho các chỗ đang gọi CX_RE.test */
+  function _cxWhy(r){
+    if(!r) return '';
+    const own = String(r.__noteOwn == null ? r.note || '' : r.__noteOwn).trim();
+    if(own) return cxText(own) ? 'own' : '';
+    if(cxText(String(r.note||'')) && !isRealDO(r.doNum) && String(r.allowLoad||'').toUpperCase() !== 'OK') return 'down';
+    return '';
+  }
+  /* ── v4.184 — 🔗 GỢI Ý LINK TỪ Ô GỘP + GHI CHÚ ─────────────────────────
+     Sale gộp ô Quantity (H) qua nhiều dòng ⇒ TSV chỉ dòng đầu có MT, các dòng sau trống.
+     Khối = dòng có MT riêng + các dòng NGAY SAU cùng khách/cùng nhóm mà MT trống (không
+     tính dòng cancel). Ngoài ra ghi chú gộp (M) kiểu "1 driver/truck will take cargo",
+     "1 trong các xe sẽ lấy hàng" cũng lập khối dù mỗi dòng có MT.
+     Chọn kiểu:
+       note một xe nhiều DO / chia tấn (SNOTE.parseSplit) ............ MDO
+       note "1 trong các xe / 1 driver / 1 truck / one of / either" .. ALT
+       cùng xe, cùng tài xế, ≥2 DO .................................... MDO
+       cùng xe, khác tài xế ........................................... ALT (một trong các tài xế)
+       khác xe, ≤1 DO ................................................. ALT (một trong các xe)
+       khác xe, mỗi xe có DO riêng .................................... ALT nhưng KHÔNG tick sẵn
+     Người dùng đổi kiểu / bỏ tick trong bảng duyệt.                                        */
+  const ALT_RE = /\b(?:1|one|m[oộ]t)\s+(?:of\s+(?:the\s+)?|in\s+|trong\s+(?:c[aá]c\s+|s[oố]\s+|nh[uữ]ng\s+)?)?(?:\d+\s+)?(?:drivers?|trucks?|t[aà]i\s*x[eế]|xe|t\/?l)\b|\beither\b|\bone\s+of\b|ch[iỉ]\s*(?:1|m[oộ]t)\s*(?:xe|t[aà]i)|\balternat/i;
+  const MDO_RE = /(?:1|m[oộ]t|one)\s*(?:xe|truck|t\/?l)\s*(?:\d+|hai|two|nhi[eề]u|several|2)\s*(?:do|lo[aạ]i|types?|cargo|[đd][oơ]n)|multi[\s-]*do|nhi[eề]u\s*do\b|\b[2-9]\s*dos?\b|\btwo\s*dos?\b|gh[eé]p\s*(?:do|[đd][oơ]n)/i;
+  const _npl = v => String(v||'').replace(/[-.\s]/g,'').toUpperCase();
+  const _ndr = v => String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase().replace(/[^a-z]/g,'');
+  function _qn(v){ const x = parseFloat(String(v==null?'':v).replace(/,/g,'')); return isFinite(x) ? x : 0; }
+  function _rowInfo(r){
+    return { oid:String(r._oid||''), cust:r.customer||'', no:String(r.no||''), plate:r.plate||'', rmooc:r.rmooc||'', driver:r.driver||'',
+             qty:r.qty||'', qtyOwn:String(r.__qtyOwn==null?r.qty||'':r.__qtyOwn), doNum:isRealDO(r.doNum)?String(r.doNum).trim():'', type:r.type||'',
+             note:String(r.note||''), noteOwn:String(r.__noteOwn==null?'':r.__noteOwn) };
+  }
+  function _lkScan(diff, mode){
+    const list = [].concat(diff.added || [], (diff.changed||[]).map(c => c.new), (diff.unchanged||[]).map(u => u.new))
+      .filter(r => r && r._oid).sort((a, b) => (a._seq||0) - (b._seq||0));
+    const blocks = [], used = new Set();
+    /* ① ô Quantity gộp */
+    let cur = null;
+    list.forEach(r => {
+      const own = String(r.__qtyOwn == null ? r.qty || '' : r.__qtyOwn).trim();
+      const same = cur && r.customer === cur.cust && r._subGroup === cur.sg;
+      if(own){ cur = { cust:r.customer, sg:r._subGroup, rows:[r], total:_qn(own), src:'qty' }; blocks.push(cur); }
+      else if(same && !_cxWhy(r)) cur.rows.push(r);
+      else if(!same) cur = null;
+    });
+    /* ② ô Note gộp có chữ "1 trong các xe…" */
+    let nb = null; const nblocks = [];
+    list.forEach(r => {
+      const own = String(r.__noteOwn || '').trim();
+      if(own){ nb = { note:own, cust:r.customer, rows:[r], src:'note' }; nblocks.push(nb); return; }
+      if(nb && r.customer === nb.cust && String(r.note||'').trim() === nb.note) nb.rows.push(r); else nb = null;
+    });
+    const out = [];
+    const noteOf = rows => { const o = rows.map(r => String(r.__noteOwn||'').trim()).find(Boolean); return o || String(rows[0].note||'').trim(); };
+    const mk = (b) => {
+      const rows = b.rows.filter(r => !used.has(r._oid));
+      if(rows.length < 2) return;
+      if(rows.some(r => lnkIsLinked(PLAN[r._oid] || r) || lnkIsLinked(r))) return;          /* đã link (mang qua re-paste) */
+      const busy = rows.filter(r => { const st = String(getEffectiveStatus(PLAN[r._oid] || r)||'').toLowerCase(); return st === 'loading' || st === 'done'; });
+      if(busy.length > 1) return;
+      const note = noteOf(rows);
+      const plates = new Set(rows.map(r => _npl(r.plate)).filter(Boolean));
+      const drivers = new Set(rows.map(r => _ndr(r.driver)).filter(Boolean));
+      const dos = new Set(rows.map(r => isRealDO(r.doNum) ? String(r.doNum).trim() : '').filter(Boolean));
+      const px = (typeof SNOTE !== 'undefined') ? SNOTE.parseSplit(note) : null;
+      let kind = 'alt', why = '', on = true;
+      if(MDO_RE.test(note) || px){ kind = 'mdo'; why = 'Sale note: one truck, several DOs / cargo types'; }
+      else if(ALT_RE.test(note)){ kind = 'alt'; why = 'Sale note: only one of these ' + (plates.size > 1 ? 'trucks' : 'drivers') + ' will take the cargo'; }
+      else if(b.src === 'note') return;                                                 /* ô note gộp thường — không phải link */
+      else if(plates.size === 1 && drivers.size <= 1 && dos.size >= 2){ kind = 'mdo'; why = 'Merged quantity · same truck and driver · ' + dos.size + ' DOs'; }
+      else if(plates.size === 1 && drivers.size > 1){ kind = 'alt'; why = 'Merged quantity · same truck, ' + drivers.size + ' drivers — one of them will come'; }
+      else if(plates.size > 1 && dos.size <= 1){ kind = 'alt'; why = 'Merged quantity · ' + plates.size + ' trucks — one of them will come'; }
+      else if(plates.size <= 1){ kind = 'mdo'; why = 'Merged quantity · same truck'; }
+      else { kind = 'alt'; on = false; why = 'Merged quantity but ' + plates.size + ' trucks each with a DO — check with sales'; }
+      rows.forEach(r => used.add(r._oid));
+      const total = b.total || _qn(rows[0].__qtyOwn || rows[0].qty);
+      /* MDO: đề xuất chia MT — theo note nếu đọc được, nếu không dòng đầu = cả khối, còn lại 0 */
+      const q = {};
+      rows.forEach((r, i) => { q[r._oid] = String(r.__qtyOwn == null ? r.qty || '' : r.__qtyOwn).trim(); });
+      const qm = {};
+      if(b.src === 'qty'){
+        let rest = total; const left = [];
+        rows.forEach(r => {
+          const ty = String(r.type||''), dn = String(r.doNum||'').trim();
+          const f = px && (px.fixed||[]).find(x => (x.type && ty.indexOf(x.type) >= 0 && !Object.values(qm).some(v => v.f === x)) || (px.dos||[]).indexOf(dn) >= 0);
+          if(f && isFinite(f.mt)){ qm[r._oid] = { v:f.mt, f }; rest -= f.mt; } else left.push(r);
+        });
+        if(px && left.length === 1 && (px.fixed||[]).length) qm[left[0]._oid] = { v:Math.round(rest * 1000) / 1000 };
+        if(!px || !Object.keys(qm).length){ rows.forEach((r, i) => { qm[r._oid] = { v: i === 0 ? total : 0 }; }); }
+        rows.forEach(r => { if(!qm[r._oid]) qm[r._oid] = { v:0 }; });
+      }
+      const mdoQ = {}; Object.keys(qm).forEach(k => { mdoQ[k] = String(qm[k].v); });
+      out.push({ act:'link', kind, sugKind:kind, why, on, sugOn:on, src:b.src, total, note, px:px || null,
+                 oids:rows.map(r => r._oid), rows:rows.map(_rowInfo), mdoQ, sugQ:Object.assign({}, mdoQ) });
+    };
+    blocks.filter(b => b.rows.length > 1).forEach(mk);
+    nblocks.filter(b => b.rows.length > 1).forEach(mk);
+    return out;
+  }
+  /* ── v4.187 — gộp CANCEL của nhóm "1 trong các xe/tài xế" thành MỘT chuyến ── */
+  function _cxGroup(items, diff){
+    const byOid = {};
+    [].concat(diff.added || [], (diff.changed||[]).map(c => c.new), (diff.unchanged||[]).map(u => u.new)).forEach(r => { if(r && r._oid) byOid[r._oid] = r; });
+    const cx = items.filter(x => x.act === 'cancel').sort((a, b) => ((byOid[a.oid]||{})._seq||0) - ((byOid[b.oid]||{})._seq||0));
+    const altG = x => { const o = PLAN[x.oid]; return (o && lnkKind(o) === LNK_ALT) ? lnkGid(o) : ''; };
+    const out = [], done = new Set();
+    cx.forEach((x, i) => {
+      if(done.has(x)) return;
+      const r = byOid[x.oid] || {}, grp = [x];
+      for(let j = i + 1; j < cx.length; j++){
+        const y = cx[j], q = byOid[y.oid] || {};
+        const sameAlt = altG(x) && altG(x) === altG(y);
+        const sameTruck = _npl(r.plate) && _npl(q.plate) === _npl(r.plate) && q.customer === r.customer && _ndr(q.driver) !== _ndr(r.driver);
+        if(sameAlt || sameTruck){ grp.push(y); done.add(y); } else if(!altG(x)) break;
+      }
+      done.add(x);
+      if(grp.length > 1){
+        out.push(Object.assign({}, x, { oids:grp.map(g => g.oid), rows:grp.map(g => g.rows[0]), alt:true, busy:grp.some(g => g.busy),
+          on:!grp.some(g => g.busy), sugOn:!grp.some(g => g.busy),
+          why:(x.why === 'down' ? 'Cancel note (merged cell)' : 'Sale note says cancel') + ' · one of ' + grp.length + ' drivers / trucks — counts as ONE cancelled trip' }));
+      } else out.push(x);
+    });
+    return out.concat(items.filter(x => x.act !== 'cancel'));
+  }
+  /* ── v4.187 — XE BIẾN MẤT khỏi Today Plan (không ghi cancel) ─────────────────────
+     Plan cũ của ngày đó (RAM, đã quét lại Firebase trước khi dán) ↔ các dòng vừa dán.
+     Khớp: _oid · DO thật · xe + khách · (không xe, không DO) khách + No.
+     Không tính: xe đã Cancelled / đang nạp / đã xong / dòng ALT bị park; nhóm ALT còn
+     một xe trong plan mới; xe được thay bằng xe mới cùng khách ghi Change TL / đổi xe.  */
+  const CHG_RE = /change\s*t\/?l|chg\s*t\/?l|[đd][oổ]i\s*xe|thay\s*xe|thay\s*t\/?l|replace(?:d)?\s*(?:by|truck|t\/?l)|swap\s*truck/i;
+  function _vanishScan(diff, mode){
+    if(ID !== 'tp') return [];
+    const date = _pasteDateForBatch || planDate;
+    const olds = Object.values(PLAN).filter(r => r && !_isJunkRow(r) && (r._forDate || planDate) === date);
+    if(!olds.length) return [];
+    const news = [].concat(diff.added || [], (diff.changed||[]).map(c => c.new), (diff.unchanged||[]).map(u => u.new), diff.blocked || []).filter(Boolean);
+    const _ncu = v => _ndr(v).slice(0, 12);
+    const used = new Set();
+    const findNew = o => news.findIndex((n, i) => !used.has(i) && (
+      (o._oid && n._oid === o._oid) ||
+      (isRealDO(o.doNum) && String(n.doNum||'').trim() === String(o.doNum).trim()) ||
+      (_npl(o.plate) && _npl(n.plate) === _npl(o.plate) && _ncu(n.customer) === _ncu(o.customer)) ||
+      (!_npl(o.plate) && !isRealDO(o.doNum) && _ncu(n.customer) === _ncu(o.customer) && String(n.no||'') === String(o.no||''))));
+    const matched = new Set(), gone = [];
+    olds.forEach(o => { const i = findNew(o); if(i >= 0){ used.add(i); matched.add(o._oid); } else gone.push(o); });
+    const st = o => String(getEffectiveStatus(o)||'').toLowerCase();
+    let cand = gone.filter(o => { const s2 = st(o); return s2 !== 'cancel' && s2 !== 'done' && s2 !== 'loading' && !o._altSkip; });
+    /* nhóm ALT: còn một xe trong plan mới ⇒ cả nhóm không tính */
+    cand = cand.filter(o => !(lnkKind(o) === LNK_ALT && lnkMembers(lnkGid(o)).some(m => matched.has(m._oid))));
+    /* xe mới ghi Change TL cùng khách thay cho xe biến mất */
+    const repl = news.map((n, i) => ({ n, i })).filter(x => !used.has(x.i) && CHG_RE.test(String(x.n.__noteOwn || x.n.note || '')));
+    const replOf = {};
+    cand.forEach(o => {
+      const k = repl.findIndex(x => _ncu(x.n.customer) === _ncu(o.customer) && (String(x.n.no||'') === String(o.no||'') || String(x.n.type||'') === String(o.type||'')));
+      if(k >= 0){ replOf[o._oid] = repl[k].n; repl.splice(k, 1); }
+    });
+    /* gộp nhóm: cùng ALT, hoặc liền nhau cùng khách + cùng xe khác tài xế */
+    cand.sort((a, b) => (a._seq||0) - (b._seq||0));
+    const out = [], taken = new Set();
+    cand.forEach((o, i) => {
+      if(taken.has(o._oid)) return;
+      const grp = [o]; taken.add(o._oid);
+      cand.slice(i + 1).forEach(q => {
+        if(taken.has(q._oid)) return;
+        const sameAlt = lnkKind(o) === LNK_ALT && lnkGid(o) === lnkGid(q);
+        const sameTruck = _npl(o.plate) && _npl(q.plate) === _npl(o.plate) && q.customer === o.customer && _ndr(q.driver) !== _ndr(o.driver);
+        if(sameAlt || sameTruck){ grp.push(q); taken.add(q._oid); }
+      });
+      const rp = grp.map(g => replOf[g._oid]).find(Boolean);
+      const info = grp.map(g => Object.assign(_rowInfo(g), { qtyOwn:String(g.qty||''), noteOwn:String(g.note||'') }));
+      out.push({ act:'vanish', oids:grp.map(g => g._oid), oid:grp[0]._oid, rows:info, alt:grp.length > 1, date,
+        on:!rp, sugOn:!rp, replacedBy:rp ? (rp.plate||'') : '',
+        why:rp ? 'Replaced by ' + (rp.plate || 'a new truck') + ' (' + String(rp.__noteOwn || rp.note || '').trim() + ') — not a cancellation'
+               : 'Was in the plan, missing from the new paste and not marked cancel' + (grp.length > 1 ? ' · one of ' + grp.length + ' drivers / trucks — ONE trip' : '') });
+    });
+    return out;
+  }
+  /* ── v4.188 — tổng MT của plan SAU KHI áp các lựa chọn đang tick (so với dòng tổng của sale) ── */
+  let _sheetChk = null;              /* { date, total } — lần dán gần nhất (RAM) */
+  function _simTotal(diff){
+    const rows = [].concat(diff.added || [], (diff.changed||[]).map(c => c.new), (diff.unchanged||[]).map(u => u.new), diff.blocked || []).filter(Boolean);
+    const key = (r, i) => String(r._oid || ('#' + i));
+    const q = {}, grp = {}, out = new Set();
+    rows.forEach((r, i) => {
+      const k = key(r, i); q[k] = _qn(r.qty);
+      const old = PLAN[r._oid];
+      if(old && old._autoSync === false && old._status === 'cancel') out.add(k);
+      if(r._lnkG && String(r._lnkK||'') === LNK_ALT) grp[k] = 'old:' + r._lnkG;
+    });
+    (diff.cx || []).forEach((x, n) => {
+      const oids = x.oids || [x.oid];
+      if(x.act === 'restore' && x.on) oids.forEach(o => out.delete(o));
+      if(!x.on) return;
+      if(x.act === 'cancel') oids.forEach(o => out.add(o));
+      if(x.act === 'link'){
+        if(x.kind === LNK_ALT) oids.forEach(o => { grp[o] = 'new:' + n; });
+        else if(x.src === 'qty' && x.mdoQ) oids.forEach(o => { if(x.mdoQ[o] != null) q[o] = _qn(x.mdoQ[o]); });
+      }
+    });
+    let tot = 0; const gmax = {};
+    rows.forEach((r, i) => {
+      const k = key(r, i);
+      /* dòng huỷ: file sale vẫn cộng số MT GHI TRÊN CHÍNH DÒNG đó (thường để trống) */
+      if(out.has(k)){ tot += _qn(r.__qtyOwn == null ? 0 : r.__qtyOwn); return; }
+      if(grp[k]){ gmax[grp[k]] = Math.max(gmax[grp[k]] || 0, q[k]); return; }
+      tot += q[k];
+    });
+    Object.values(gmax).forEach(v => { tot += v; });
+    return Math.round(tot * 1000) / 1000;
+  }
+  function _totHtml(diff){
+    const T = _pendingPaste && _pendingPaste.total;
+    if(T == null || !isFinite(T)) return '<div class="nr-tot">ℹ No total line found under the sales table — quantity check skipped.</div>';
+    const S = _simTotal(diff), d = Math.round((S - T) * 1000) / 1000;
+    return Math.abs(d) < 0.0005
+      ? '<div class="nr-tot ok">✓ Plan total after these actions <b>'+S.toFixed(3)+' MT</b> = sales sheet total <b>'+T.toFixed(3)+' MT</b></div>'
+      : '<div class="nr-tot bad">⚠ Plan total after these actions <b>'+S.toFixed(3)+' MT</b> ≠ sales sheet total <b>'+T.toFixed(3)+' MT</b> (Δ '+(d > 0 ? '+' : '')+d.toFixed(3)+' MT) — check the links (a wrong 🔗 ALT / multi-DO, a merged quantity counted twice, or a cancelled row left unticked).</div>';
+  }
+  /* v4.188 — tổng lệch mà chỉ khớp khi tick các nhóm "khác xe, mỗi xe một DO" ⇒ tick sẵn các nhóm đó */
+  function _autoTickByTotal(diff){
+    const T = _pendingPaste && _pendingPaste.total;
+    if(T == null || !isFinite(T) || !diff.cx) return;
+    if(Math.abs(_simTotal(diff) - T) < 0.0005) return;
+    const off = diff.cx.filter(x => x.act === 'link' && !x.on && !x.sugOn);
+    if(!off.length) return;
+    off.forEach(x => { x.on = true; });
+    if(Math.abs(_simTotal(diff) - T) < 0.0005){
+      off.forEach(x => { x.sugOn = true; x.why += ' · ticked: the sales sheet total ('+T.toFixed(3)+' MT) only matches when these rows are ONE order'; });
+    } else off.forEach(x => { x.on = false; });
+  }
+  /* mọi việc định tự làm từ ghi chú sale cho lần dán này */
+  function _actScan(diff, mode){
+    let cx = _cxScan(diff, mode);
+    try{ cx = _cxGroup(cx, diff); }catch(e){ console.warn('[plan] cancel group', e); }
+    try{ cx = cx.concat(_vanishScan(diff, mode)); }catch(e){ console.warn('[plan] vanish scan', e); }
+    let lk = [];
+    try{ lk = _lkScan(diff, mode); }catch(e){ console.warn('[plan] link scan', e); }
+    const cxOids = new Set(cx.filter(x => x.act === 'cancel').map(x => x.oid));
+    cx.forEach(x => (x.oids || []).forEach(o => cxOids.add(o)));
+    lk = lk.filter(x => !x.oids.some(o => cxOids.has(o)));
+    return cx.concat(lk);
+  }
+  function _cxScan(diff, mode){
+    const out = [], seen = {};
+    const push = (r, oid, oldOid) => {
+      if(!r || !oid || seen[oid]) return; seen[oid] = 1;
+      const old = mode === 'replace' ? null : (PLAN[oldOid || oid] || null);
+      const oldSt = old ? String(getEffectiveStatus(old)||'').toLowerCase() : '';
+      const busy = oldSt === 'loading' || oldSt === 'done';
+      const why = _cxWhy(r);
+      const base = { oid, plate:r.plate||'', cust:r.customer||'', no:r.no||'', note:String(r.note||''), qty:r.qty||'', rows:[_rowInfo(r)] };
+      if(why){
+        if(old && old._autoSync === false && old._status === 'cancel') return;     /* đã huỷ sẵn */
+        out.push(Object.assign(base, { act:'cancel', why, busy, on:!busy, sugOn:!busy }));
+      } else if(old && old._cxPaste && old._autoSync === false && old._status === 'cancel'){
+        out.push(Object.assign(base, { act:'restore', on:true, sugOn:true }));
+      }
+    };
+    diff.added.forEach(r => push(r, r._oid));
+    diff.changed.forEach(c => push(c.new, c.new._oid, c.old && c.old._oid));
+    (diff.unchanged||[]).forEach(u => push(u.new, (u.new && u.new._oid) || (u.old && u.old._oid), u.old && u.old._oid));
+    return out;
+  }
+  function _cxHtml(cx){
+    const nC = cx.filter(x => x.act === 'cancel').length, nR = cx.length - nC;
+    let h = `<div class="tp-diff-section rem"><h4><span class="badge">🚫 SALE NOTE</span> `
+          + (nC ? `${nC} row(s) marked <b>Cancel</b> by sales — will be set to 🚫 Cancelled` : '')
+          + (nC && nR ? ' · ' : '') + (nR ? `${nR} row(s) no longer say cancel — back to AUTO` : '')
+          + `</h4><div class="tp-diff-list">`;
+    cx.forEach((x, i) => {
+      h += `<label class="tp-diff-item" style="display:flex;gap:6px;align-items:center;cursor:pointer">`
+         + `<input type="checkbox"${x.on ? ' checked' : ''} onchange="${G}.cxTick(${i},this.checked)">`
+         + `<span class="who">${escapeHtml(x.plate||'(no truck)')}</span> · ${escapeHtml(x.cust)} · No ${escapeHtml(x.no)} `
+         + `<span class="field">${x.act === 'cancel' ? '→ Cancelled' : '→ AUTO'}</span>`
+         + `<span class="nv" title="Sale note">${escapeHtml(x.note||'(no note)')}</span>`
+         + (x.why === 'down' ? ` <span class="stat-tag" title="The note comes from a merged cell above; accepted because this truck has no DO and Allow load = NO">merged note</span>` : '')
+         + (x.busy ? ` <span class="stat-tag" style="background:#fee;color:#a32a1f">already loading / done — not ticked</span>` : '')
+         + `</label>`;
+    });
+    return h + '</div></div>';
+  }
+  function cxTick(i, on){ if(_pendingDiff && _pendingDiff.diff && _pendingDiff.diff.cx && _pendingDiff.diff.cx[i]) _pendingDiff.diff.cx[i].on = !!on; }
+  /* ═══ v4.184 — 📋 BẢNG DUYỆT GHI CHÚ SALE (bước riêng, sau hộp diff) ═══ */
+  let _revEl = null;
+  function _revItems(){ return (_pendingDiff && _pendingDiff.diff && _pendingDiff.diff.cx) || []; }
+  function _revRender(){
+    if(!_revEl) return;
+    const L = _revItems();
+    const lbl = x => x.act === 'cancel' ? '🚫 Cancel' + (x.alt ? ' · 1 trip' : '') : x.act === 'restore' ? '↺ Back to AUTO'
+                   : x.act === 'vanish' ? '🕳 Missing from new plan → cancelled' + (x.alt ? ' · 1 trip' : '')
+                   : x.kind === 'mdo' ? '🔗 One truck · multi-DO' : '🔗 One order · alternate trucks';
+    const cls = x => x.act === 'cancel' ? 'cx' : x.act === 'restore' ? 'rs' : x.act === 'vanish' ? 'vn' : x.kind;
+    let h = '<table class="nr-tbl"><tr><th></th><th>Action</th><th>Customer</th><th>No</th><th>Truck</th><th>Romooc</th><th>Driver</th><th>MT</th><th>DO</th><th>Cargo type</th><th>Sale note</th><th>Why</th></tr>';
+    L.forEach((x, i) => {
+      const n = x.rows.length;
+      x.rows.forEach((r, j) => {
+        h += '<tr class="nr-'+cls(x)+(x.on ? '' : ' off')+(j === 0 ? ' nr-first' : '')+'">';
+        if(j === 0){
+          h += '<td rowspan="'+n+'"><input type="checkbox"'+(x.on ? ' checked' : '')+' onchange="'+G+'.revTick('+i+',this.checked)"></td>'
+             + '<td rowspan="'+n+'">'+(x.act === 'link'
+                 ? '<select onchange="'+G+'.revKind('+i+',this.value)"><option value="alt"'+(x.kind === 'alt' ? ' selected' : '')+'>🔗 One order · alternate trucks (count once)</option><option value="mdo"'+(x.kind === 'mdo' ? ' selected' : '')+'>🔗 One truck · multi-DO</option></select>'
+                   + (x.kind === 'mdo' && x.src === 'qty' ? '<div class="nr-sum">Merged MT '+(x.total||0)+' · split Σ <b>'+Object.values(x.mdoQ).reduce((a,v)=>a+_qn(v),0).toFixed(3)+'</b></div>' : '')
+                 : '<b>'+lbl(x)+'</b>'+(x.busy ? '<div class="nr-warn">already loading / done</div>' : ''))+'</td>';
+        }
+        const qCell = (x.act === 'link' && x.kind === 'mdo' && x.src === 'qty')
+          ? '<input class="nr-q" value="'+escapeHtml(x.mdoQ[r.oid])+'" onchange="'+G+'.revQty('+i+',\''+escapeHtml(r.oid)+'\',this.value)" title="MT of this DO (the merged cell holds the whole truck)">'
+          : escapeHtml(r.qtyOwn || (r.qty ? r.qty+' ⇣' : ''));
+        h += '<td>'+escapeHtml(r.cust)+'</td><td>'+escapeHtml(r.no)+'</td><td>'+escapeHtml(r.plate||'—')+'</td><td>'+escapeHtml(r.rmooc)+'</td><td>'+escapeHtml(r.driver)+'</td>'
+           + '<td>'+qCell+'</td><td>'+escapeHtml(r.doNum||'—')+'</td><td>'+escapeHtml(r.type)+'</td>'
+           + '<td class="nr-note">'+escapeHtml(r.noteOwn || (r.note ? r.note+' (merged)' : ''))+'</td>';
+        if(j === 0) h += '<td rowspan="'+n+'" class="nr-why">'+escapeHtml(x.act === 'cancel' ? (x.why === 'down' ? 'Cancel note from a merged cell; truck has no DO and Allow load = NO' : 'Sale note says cancel')
+                                                                     : x.act === 'restore' ? 'Was cancelled by a sale note; the note no longer says cancel' : x.why)
+                                                   + (x.act === 'cancel' && x.alt ? ' · one of '+n+' drivers / trucks — counts as ONE cancelled trip' : '')+'</td>';
+        h += '</tr>';
+      });
+    });
+    h += '</table>';
+    const on = L.filter(x => x.on).length;
+    _revEl.querySelector('.nr-bd').innerHTML =
+      '<div class="nr-cap">The app read these actions from the sales notes (column M) and merged cells. <b>Ticked</b> = do it · <b>unticked</b> = leave the row as pasted. Every choice is logged to help improve the rules.'
+      + (L.some(x => x.act === 'vanish') ? '<br>🕳 <b>Missing from new plan</b>: trucks of the current Today Plan that the new paste drops without a cancel note. <b>Ticked</b> = count as a cancelled trip in today\'s Daily report (Cancel List / mail P2).' : '') + '</div>' + h;
+    _revEl.querySelector('.nr-go').textContent = '✓ Apply ' + on + ' ticked & save plan';
+    const tb = _revEl.querySelector('.nr-totbox'); if(tb) tb.innerHTML = _totHtml(_pendingDiff.diff);   /* v4.188 */
+  }
+  function _revOpen(){
+    if(!_revEl){
+      _revEl = document.createElement('div'); _revEl.className = 'nr-ov';
+      _revEl.innerHTML = '<div class="nr-box"><div class="nr-hd"><b>📋 Sale note review — ' + UILABEL + '</b><span style="flex:1"></span></div><div class="nr-bd"></div>'
+        + '<div class="nr-ft"><div class="nr-totbox" style="flex:1"></div><button class="btn" onclick="'+G+'.revBack()">← Back</button>'
+        + '<button class="btn" onclick="'+G+'.revApply(false)" title="Save the plan exactly as pasted — no cancel, no link">Save plan without these</button>'
+        + '<button class="btn nr-go" style="background:#0d6e3a;color:#fff;border-color:#0d6e3a" onclick="'+G+'.revApply(true)">✓ Apply</button></div></div>';
+      document.body.appendChild(_revEl);
+    }
+    _revRender();
+    _revEl.classList.add('on');
+  }
+  function _revClose(){ if(_revEl) _revEl.classList.remove('on'); }
+  function revTick(i, on){ const x = _revItems()[i]; if(x){ x.on = !!on; _revRender(); } }
+  function revKind(i, k){ const x = _revItems()[i]; if(x && (k === 'alt' || k === 'mdo')){ x.kind = k; _revRender(); } }
+  function revQty(i, oid, v){ const x = _revItems()[i]; if(x && x.mdoQ){ x.mdoQ[oid] = String(v).trim(); _revRender(); } }
+  function revBack(){ _revClose(); }
+  function revApply(doIt){
+    if(!_pendingDiff) { _revClose(); return; }
+    const d = _pendingDiff.diff;
+    if(!doIt) (d.cx||[]).forEach(x => { x.on = false; });
+    d.__reviewed = true;
+    _revClose();
+    confirmDiff();
+  }
+  /* ghi các lựa chọn cancel/restore vào CÙNG payload của lần dán */
+  function _cxApply(diff, payload){
+    let n = 0;
+    (diff.cx||[]).forEach(x => {
+      if(!x.on || (x.act !== 'cancel' && x.act !== 'restore')) return;
+      const oids = x.oids || [x.oid];
+      const altGid = (x.act === 'cancel' && x.alt && oids.length > 1 && !oids.some(o => PLAN[o] && lnkIsLinked(PLAN[o]))) ? lnkNewGid() : '';
+      oids.forEach(oid => {
+        const row = PLAN[oid]; if(!row) return;
+        const whole = !!payload[`${FBN}${oid}`];          /* dòng ghi nguyên cục ⇒ sửa chính object, không thêm path con */
+        const set = (f, v) => { if(v === null) delete row[f]; else row[f] = v; if(!whole) payload[`${FBN}${oid}/${f}`] = v; };
+        if(x.act === 'cancel'){ set('_autoSync', false); set('_status', 'cancel'); set('_actualQty', computeActualFromState(row) || ''); set('_cxPaste', 1); }
+        else { set('_autoSync', true); set('_status', ''); set('_actualQty', ''); set('_cxPaste', null); }
+        if(altGid){ set('_lnkG', altGid); set('_lnkK', LNK_ALT); set('_lnkPrint', null); }   /* v4.187 — nhóm "1 trong các xe" huỷ = 1 chuyến */
+        if(!whole) _stampWho(payload, oid);
+        n++;
+      });
+    });
+    /* v4.184 — 🔗 link (ALT / MDO) + MT đã chia của MDO, cùng payload */
+    (diff.cx||[]).forEach(x => {
+      if(x.act !== 'link' || !x.on) return;
+      const rows = x.oids.map(o => PLAN[o]).filter(Boolean);
+      if(rows.length < 2 || rows.some(lnkIsLinked)) return;
+      const gid = lnkNewGid();
+      rows.forEach(row => {
+        const oid = String(row._oid);
+        const whole = !!payload[`${FBN}${oid}`];
+        const set = (f, v) => { if(v === null) delete row[f]; else row[f] = v; if(!whole) payload[`${FBN}${oid}/${f}`] = v; };
+        set('_lnkG', gid); set('_lnkK', x.kind); set('_lnkPrint', x.kind === LNK_MDO ? 'combined' : null); set('_altSkip', null);
+        if(x.kind === LNK_MDO && x.src === 'qty' && x.mdoQ && x.mdoQ[oid] != null && String(x.mdoQ[oid]) !== String(row.qty||'')){
+          set('qty', String(x.mdoQ[oid])); set('_qtyFix', 1);
+        }
+        if(!whole) _stampWho(payload, oid);
+        n++;
+      });
+    });
+    return n;
+  }
+  /* v4.184 — MT đã chia tay cho MDO (_qtyFix) KHÔNG bị ô gộp điền đè ở lần dán Update sau */
+  function _keepQtyFix(diff){
+    const keep = [];
+    (diff.changed||[]).forEach(c => {
+      if(!c.old || !c.old._qtyFix || String(c.new.__qtyOwn||'').trim()) { keep.push(c); return; }
+      c.new.qty = c.old.qty; c.new._qtyFix = 1;
+      c.diffs = (c.diffs||[]).filter(d => d.field !== 'qty');
+      if(c.diffs.length || c.old._oid !== c.new._oid) keep.push(c);
+      else (diff.unchanged = diff.unchanged || []).push({ old:c.old, new:c.new });
+    });
+    diff.changed = keep;
+    return diff;
+  }
+  /* v4.183 — ảnh chụp kế hoạch ĐẦU NGÀY (chỉ Today Plan) */
+  function _pdayRecord(date, src){
+    if(ID !== 'tp' || typeof PLANDAY === 'undefined' || !date) return;
+    const rows = Object.values(PLAN).filter(r => r && !_isJunkRow(r) && (r._forDate || planDate) === date);
+    PLANDAY.recordFirst(date, rows, r => String(getEffectiveStatus(r)||'').toLowerCase(), lnkTotals, src);
+  }
+  /* ⭐ v4.204 — TỰ GHI kế hoạch đầu ngày, không cần ai bấm 📌.
+     Biến _pdayDay = NGÀY HÔM NAY của máy; sang ngày mới là biến đổi ⇒ tự "reset" và ghi cho ngày mới.
+     Chỉ cho HÔM NAY (ngày cũ không biết kế hoạch đầu là gì). Plan của hôm nay đã có trong RAM (dán / promote
+     từ hôm trước / máy khác nhập) mà plan_day/<hôm nay>/first chưa có ⇒ chờ 30 s cho dữ liệu lắng rồi ghi
+     (transaction, không ghi đè). Tốn tối đa 1 lần đọc + 1 lần ghi nhỏ mỗi ngày mỗi máy. */
+  let _pdayDay = '', _pdayT = null;
+  function _pdayAuto(){
+    if(ID !== 'tp' || typeof PLANDAY === 'undefined' || !_loaded) return;
+    const d = _isoToday();
+    if(d !== _pdayDay){ _pdayDay = d; }                /* sang ngày mới ⇒ reset */
+    if(PLANDAY.get(d)) return;                        /* hôm nay đã có kế hoạch đầu ngày */
+    clearTimeout(_pdayT);
+    _pdayT = setTimeout(() => {
+      _pdayT = null;
+      if(_isoToday() !== _pdayDay) return;            /* vừa qua nửa đêm ⇒ lượt sau lo */
+      const has = Object.values(PLAN).some(r => r && !_isJunkRow(r) && (r._forDate || planDate) === _pdayDay);
+      if(!has) return;
+      PLANDAY.load(_pdayDay).then(f => { if(!f && _isoToday() === _pdayDay) _pdayRecord(_pdayDay, 'auto'); });
+    }, 30000);
   }
 
   /* strip runtime-only props before sending to Firebase */
@@ -1820,6 +2322,8 @@ function _makePlanModule(opts){
   function attachFirebase(){
     if(typeof firebase === 'undefined') return;
     FB_DB = firebase.database();
+    /* v4.204 — app để mở qua đêm: 5 phút xem lại một lần ⇒ sang ngày mới là tự ghi kế hoạch đầu ngày mới */
+    if(ID === 'tp') setInterval(() => { try{ _pdayAuto(); }catch(_){} }, 300000);
 
     FB_DB.ref(VERK).on('value', s=>{
       const v = s.val()||0;
@@ -1886,6 +2390,7 @@ function _makePlanModule(opts){
         });
         _loaded = true; _loadErr = false;
         if(junk.length) _purgeJunk(junk);
+        try{ _pdayAuto(); }catch(e){ console.warn('[PLANDAY] auto', e); }   /* v4.204 */
         if(dropped || refreshed){
           console.warn(`[${PERMK}] resync(${reason||''}): -${dropped} ghost · ${refreshed} row(s) taken from Firebase`);
         }
@@ -1975,6 +2480,7 @@ function _makePlanModule(opts){
         if(table) rebuildTableData();
         refreshCounts(); refreshBadge();
         try{ if(typeof FCHECK!=='undefined') FCHECK.recompute(); }catch(_){}
+        try{ _pdayAuto(); }catch(e){ console.warn('[PLANDAY] auto', e); }   /* v4.204 */
       }, 100);
     };
     ref.on('child_added', snap=>{
@@ -2802,7 +3308,7 @@ function _makePlanModule(opts){
     const proceed = (finalRows)=>{
       if(!finalRows.length){ toast('No valid plan rows detected','er'); return; }
       closePaste();
-      _pendingPaste = { rows: finalRows, forDate: pickedDate };
+      _pendingPaste = { rows: finalRows, forDate: pickedDate, total: parsed.total };
       _pasteDateForBatch = pickedDate;
       /* show choice modal */
       document.getElementById(ID + 'PchoiceCount').textContent    = finalRows.length;
@@ -2871,7 +3377,7 @@ function _makePlanModule(opts){
   /* LƯỢT HAI — tính diff thật, mang theo câu trả lời của nhân viên. */
   function _runDiffWith(decisions, mode){
     if(!_pendingPaste) return;
-    const diff = computeDiff(_rowsCopy(), mode, _pendingPaste.forDate, { decisions: decisions || null });
+    const diff = _keepQtyFix(computeDiff(_rowsCopy(), mode, _pendingPaste.forDate, { decisions: decisions || null }));
     _pendingDiff = { diff, mode };
     showDiff(diff, mode);
   }
@@ -2894,6 +3400,15 @@ function _makePlanModule(opts){
     html += `<div class="tp-diff-stat chg"><div class="v">${diff.changed.length}</div><div class="l">Changed</div></div>`;
     html += `<div class="tp-diff-stat same"><div class="v">${diff.unchanged.length}</div><div class="l">Unchanged</div></div>`;
     html += '</div>';
+
+    /* v4.183 — xe sale ghi Cancel ⇒ tick để chuyển 🚫 Cancelled */
+    if(!diff.cx){ diff.cx = _actScan(diff, mode); try{ _autoTickByTotal(diff); }catch(_){} }
+    try{ html += _totHtml(diff); }catch(_){}                               /* v4.188 */
+    if(diff.cx.length){
+      const c = t => diff.cx.filter(x => x.act === t).length;
+      html += `<div class="tp-diff-warn" style="background:#fff7e6;border-color:#ffc266;color:#7c2d12">📋 The sales notes ask for <b>${diff.cx.length}</b> action(s)`
+            + ` — ${c('cancel')} cancel · ${c('restore')} back to AUTO · ${c('link')} link group(s). You will review them in the next step before anything is saved.</div>`;
+    }
 
     /* v4.139 — dong bi CHAN vi tren bang da co dong y het (chong ghi trung) */
     if(diff.blocked && diff.blocked.length){
@@ -2962,7 +3477,7 @@ function _makePlanModule(opts){
       }
       html += '</div></div>';
     }
-    if(!diff.added.length && !diff.removed.length && !diff.changed.length){
+    if(!diff.added.length && !diff.removed.length && !diff.changed.length && !(diff.cx||[]).some(x=>x.on)){
       html += '<div class="tp-diff-warn" style="background:var(--green-soft);border-color:#bfe3cc;color:#157a40">✓ No changes detected — paste is identical to the current plan.</div>';
     }
     document.getElementById(ID + 'DiffBody').innerHTML = html;
@@ -2976,9 +3491,22 @@ function _makePlanModule(opts){
   function confirmDiff(){
     if(!_pendingDiff){ closeDiff(); return; }
     const { diff, mode } = _pendingDiff;
+    /* v4.184 — có việc từ ghi chú sale ⇒ BƯỚC DUYỆT trước, chưa ghi gì */
+    if(!diff.cx) diff.cx = _actScan(diff, mode);
+    if(diff.cx.length && !diff.__reviewed){ _revOpen(); return; }
     const pastedDate = _pasteDateForBatch || planDate;
+    const pastedRows = (_pendingPaste && _pendingPaste.rows) ? _pendingPaste.rows.slice() : [];
+    /* v4.188 — nhớ tổng của sale để dải Plan cảnh báo nếu lệch */
+    _sheetChk = (_pendingPaste && _pendingPaste.total != null && isFinite(_pendingPaste.total)) ? { date:pastedDate, total:_pendingPaste.total, ownQ:{} } : null;
+    if(_sheetChk) [].concat(diff.added || [], (diff.changed||[]).map(c => c.new), (diff.unchanged||[]).map(u => u.new)).forEach(r => { if(r && r._oid) _sheetChk.ownQ[r._oid] = _qn(r.__qtyOwn == null ? r.qty : r.__qtyOwn); });
     applyDiff(diff, mode, mode==='replace'?'replace':'update');
     closeDiff();
+    if((diff.cx||[]).some(x => x.act === 'link' && x.on)) setTimeout(()=>{ try{ lnkSyncAlt(); renderLedger(); }catch(_){} }, 60);
+    try{ if(diff.cx.length && typeof AILOG !== 'undefined') AILOG.paste(UILABEL, pastedDate, mode, diff.cx); }catch(e){ console.warn('[AILOG]', e); }
+    try{ const vn = (diff.cx||[]).filter(x => x.act === 'vanish'); if(vn.length && typeof PLANCX !== 'undefined') PLANCX.record(pastedDate, vn); }catch(e){ console.warn('[PLANCX]', e); }
+    /* v4.183 — kế hoạch đầu ngày (một lần) + sổ ghi chú sale */
+    try{ _pdayRecord(pastedDate, 'paste'); }catch(e){ console.warn('[PLANDAY]', e); }
+    try{ if(typeof SNOTE !== 'undefined') SNOTE.collect(pastedRows, pastedDate); }catch(e){ console.warn('[SNOTE]', e); }
     /* If the user pasted under a different date than the one currently shown,
        switch the toolbar to that date so the new rows are visible. */
     if(pastedDate !== planDate) setPlanDate(pastedDate);
@@ -3435,6 +3963,16 @@ function _makePlanModule(opts){
       + (_tot.altSaved>0
           ? '<span class="pv-sum-alt" title="'+_tot.altSaved+' row(s) belong to a 🔗 ALT group (one order, several possible trucks) and are NOT counted a second time.">🔗 −'+_tot.altSaved+' alt row'+(_tot.altSaved===1?'':'s')+'</span>'
           : '')
+      + (function(){                                                         /* v4.188 — so với dòng tổng file sale */
+          if(!_sheetChk) return '';
+          const dRows = Object.values(PLAN).filter(r => r && !_isJunkRow(r) && (r._forDate || planDate) === _sheetChk.date);
+          /* như file sale: plan (ALT một lần) + MT ghi trên chính các dòng đã huỷ */
+          const pm = lnkTotals(dRows).planMT + dRows.filter(r => String(getEffectiveStatus(r)||'').toLowerCase() === 'cancel').reduce((a, r) => a + (_sheetChk.ownQ[r._oid] || 0), 0);
+          const dd = Math.round((pm - _sheetChk.total) * 1000) / 1000;
+          return Math.abs(dd) < 0.0005
+            ? '<span class="pv-sum-sheet ok" title="Plan total of '+_sheetChk.date+' = total line of the last pasted sales sheet">✓ sheet '+_fmtMT(_sheetChk.total)+'</span>'
+            : '<span class="pv-sum-sheet bad" title="Plan total of '+_sheetChk.date+' ('+_fmtMT(pm)+' MT) differs from the total line of the last pasted sales sheet — check 🔗 links, merged quantities and cancelled rows">⚠ sheet '+_fmtMT(_sheetChk.total)+' (Δ '+(dd > 0 ? '+' : '')+dd.toFixed(3)+')</span>';
+        })()
       + '</span>'
       + '</div>';
 
@@ -3961,6 +4499,11 @@ function _makePlanModule(opts){
     dedupOpen, dedupClose, dedupApply, dedupScan, _identKey, _isJunkRow,
     /* v4.140 — hộp thoại xác nhận "một đơn hay hai đơn" */
     ambSet, ambSetAll, ambConfirm, ambCancel,
+    cxTick, _cxScan, _cxWhy, _cxApply, _parse: parsePlanSheet,   /* v4.183 */
+    revTick, revKind, revQty, revBack, revApply, _actScan, _lkScan, _keepQtyFix, _cxText: cxText,   /* v4.184 */
+    _vanishScan, _cxGroup,   /* v4.187 */
+    _simTotal, _totHtml, _autoTickByTotal, _setPendingTotal(t){ _pendingPaste = Object.assign(_pendingPaste || {}, { total:t }); },   /* v4.188 */
+    _revTest(diff){ _pendingDiff = { diff, mode:'replace' }; _revOpen(); return _revEl; },
     _computeDiff: computeDiff,   /* test: kiem dinh luoi chan ghi trung */
     /* v4 — exposed so WMS GI can reuse the SAME plate/driver matchers (handles
        WMS reversed driver name + combined truck/rmooc plate). Logic unchanged. */
@@ -3984,6 +4527,7 @@ function _makePlanModule(opts){
     lnkLinkMdo(oids, mode){ const r = lnkLinkMdo(oids, mode); if(r) setTimeout(_lnkRender, 120); return r; },
     lnkMembers, lnkTotals, lnkCollapse, lnkKind, lnkGid,
     lnkIsLinked, lnkIsParked, lnkBadgeHtml, lnkSyncAlt,
+    _pdayAuto, _setLoaded:v => { _loaded = !!v; },   /* v4.204 — test: tự ghi kế hoạch đầu ngày */
     getEffectiveActual,   /* RAM-only ACTUAL loaded (kg) for a row from TL weights.
                               Dùng cho PLAN card donut (SCALE._updateRow1) để LOADED
                               lấy ĐÚNG khối lượng cân thực, không dùng plan qty. */
@@ -4026,6 +4570,394 @@ const TMR = _makePlanModule({
   defaultDate: _isoTomorrow,
   minFuture: true        /* Tomorrow Plan only accepts dates AFTER today */
 });
+
+/* ═══════════════════════════════════════════════════════════════════
+   v4.183 — PLANDAY · KẾ HOẠCH ĐẦU NGÀY  (Firebase plan_day/<YYYY-MM-DD>/first)
+   -------------------------------------------------------------------
+   Báo cáo Daily cần "Daily plan" = kế hoạch sale gửi ĐẦU NGÀY, và danh sách
+   xe huỷ = xe có trong kế hoạch đầu ngày mà cuối ngày bị huỷ HOẶC bị gỡ khỏi
+   plan (sale gửi mail mới không còn dòng đó ⇒ dán Replace là mất dấu).
+   Kế hoạch đầu ngày KHÔNG tính lại được sau khi bị sửa ⇒ PHẢI lưu (một lần
+   mỗi ngày, ~3 KB, transaction nên hai máy dán cùng lúc cũng chỉ một bản).
+   Kế hoạch CUỐI = Today Plan trong RAM lúc làm báo cáo ⇒ KHÔNG lưu.
+   Tổng tấn dùng CHUNG TP.lnkTotals (hiểu 🔗 ALT) như dải Plan của Ledger.
+   rows[]: o=_oid c=khách t=loại hàng n=No p=xe m=rơ-moóc d=tài xế q=MT
+           do=DO thật x=1 nếu đã huỷ ngay lúc chụp nt=ghi chú              */
+const PLANDAY = (function(){
+  const FB = 'plan_day';
+  const C = {};                    /* ngày → bản chụp | null (đã đọc, chưa có) */
+  const _db = () => (typeof firebase !== 'undefined' && firebase.database) ? firebase.database() : null;
+  const _num = v => { const x = parseFloat(String(v == null ? '' : v).replace(/,/g, '')); return isFinite(x) ? x : 0; };
+  const _who = () => { try{ return (CURRENT_USER && (CURRENT_USER.name || CURRENT_USER.email)) || '?'; }catch(_){ return '?'; } };
+  const _emit = d => { try{ document.dispatchEvent(new CustomEvent('planday:changed', { detail:d })); }catch(_){} };
+  function _pack(r, st){
+    const dn = String(r.doNum || '').trim();
+    return { o:String(r._oid||''), c:String(r.customer||''), t:String(r.type||''), n:String(r.no||''), p:String(r.plate||''),
+             m:String(r.rmooc||''), d:String(r.driver||''), q:_num(r.qty), do:/^\d{7,}$/.test(dn) ? dn : '',
+             x:st === 'cancel' ? 1 : 0, nt:String(r.note||'').slice(0, 160),
+             g:(String(r._lnkK||'') === 'alt' && r._lnkG) ? String(r._lnkG) : '' };     /* v4.187 — nhóm ALT = 1 chuyến */
+  }
+  function build(date, rows, stOf, totals, src){
+    const t = totals ? totals(rows) : null;
+    return { at:Date.now(), by:_who(), src:src || '', date, n:t ? t.planCnt : rows.length,
+             mt:Math.round((t ? t.planMT : 0) * 1000) / 1000, rows:rows.map(r => _pack(r, stOf ? stOf(r) : '')) };
+  }
+  /* ghi MỘT lần — đã có thì thôi (không bao giờ ghi đè kế hoạch đầu ngày) */
+  function recordFirst(date, rows, stOf, totals, src, force){
+    const db = _db();
+    if(!db || !date || !rows || !rows.length) return Promise.resolve(null);
+    if(C[date] && !force) return Promise.resolve(C[date]);
+    const snap = build(date, rows, stOf, totals, src);
+    const ref = db.ref(FB + '/' + date + '/first');
+    if(!force && typeof ref.transaction !== 'function') return Promise.resolve(null);
+    const p = force ? ref.set(snap).then(() => ({ committed:true, snapshot:{ val:() => snap } }))
+                    : ref.transaction(cur => cur ? undefined : snap);
+    return p.then(res => {
+      C[date] = res.snapshot.val() || null;
+      if(res.committed){ try{ logAudit('plan_day:first', date, 'first', '', snap.mt + ' MT · ' + snap.n + ' orders', src); }catch(_){} }
+      _emit(date);
+      return C[date];
+    }).catch(e => { console.warn('[PLANDAY] record', e); return null; });
+  }
+  /* promote: dòng mang _forDate của chúng ⇒ chụp theo từng ngày */
+  function recordPromoted(rows){
+    const by = {};
+    (rows || []).forEach(r => { const d = String(r._forDate || ''); if(d) (by[d] = by[d] || []).push(r); });
+    const st = r => (r._autoSync === false && r._status === 'cancel') ? 'cancel' : '';
+    const tot = (typeof TP !== 'undefined' && TP.lnkTotals) ? TP.lnkTotals : null;
+    return Promise.all(Object.keys(by).map(d => recordFirst(d, by[d], st, tot, 'promote')));
+  }
+  /* ghi TAY từ Today Plan hiện tại (khi ngày đó chưa có, hoặc admin chụp lại) */
+  function recordNow(date, force){
+    if(typeof TP === 'undefined') return Promise.resolve(null);
+    const rows = Object.values(TP.PLAN || {}).filter(r => r && (!TP._isJunkRow || !TP._isJunkRow(r)) && String(r._forDate || date) === date);
+    if(!rows.length) return Promise.resolve(null);
+    return recordFirst(date, rows, r => String(TP.getEffectiveStatus(r)||'').toLowerCase(), TP.lnkTotals, force ? 'manual (re-record)' : 'manual', !!force);
+  }
+  function load(date){
+    const db = _db();
+    if(!db || !date) return Promise.resolve(null);
+    if(date in C) return Promise.resolve(C[date]);
+    return db.ref(FB + '/' + date + '/first').once('value')
+      .then(s => { C[date] = s.val() || null; _emit(date); return C[date]; })
+      .catch(e => { console.warn('[PLANDAY] load', e); return null; });
+  }
+  function get(date){ return C[date]; }       /* undefined = chưa đọc */
+  const _pl = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const _cu = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
+  /* xe có trong kế hoạch đầu ngày mà KHÔNG còn trong kế hoạch cuối (bị gỡ, không ghi cancel) */
+  function dropped(date, finalRows){
+    const f = C[date]; if(!f || !f.rows) return [];
+    const fr = finalRows || [];
+    const all = (Array.isArray(f.rows) ? f.rows : Object.values(f.rows)).filter(Boolean);
+    const inFinal = x => fr.some(g =>
+      (x.o && String(g._oid||'') === x.o) ||
+      (x.do && String(g.doNum||'').trim() === x.do) ||
+      (x.p && _pl(g.plate) === _pl(x.p) && _cu(g.customer) === _cu(x.c)) ||
+      (!x.p && !x.do && _cu(g.customer) === _cu(x.c) && String(g.no||'') === x.n && String(g.type||'') === x.t));
+    /* v4.187 — nhóm ALT: còn một xe trong plan cuối ⇒ không tính; mất cả nhóm ⇒ MỘT chuyến */
+    const liveG = new Set(all.filter(x => x.g && inFinal(x)).map(x => x.g));
+    const seenG = new Set();
+    return all.filter(x => {
+      if(x.x || inFinal(x)) return false;
+      if(x.g){ if(liveG.has(x.g) || seenG.has(x.g)) return false; seenG.add(x.g); x.grpN = all.filter(y => y.g === x.g).length; }
+      return true;
+    });
+  }
+  return { recordFirst, recordPromoted, recordNow, load, get, dropped, build, _cache:C };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════
+   v4.183 — SNOTE · SỔ GHI CHÚ CỦA SALE  (Firebase sale_notes/<khoá mẫu>)
+   -------------------------------------------------------------------
+   Mỗi lần dán Today/Tomorrow Plan, ghi chú ở cột Note (M) được gom theo MẪU
+   (chữ thường, số → #). Mỗi mẫu một bản ghi nhỏ: loại (kinds), số NGÀY gặp,
+   ngày đầu/cuối, và tối đa 12 ví dụ đủ ngữ cảnh (khách, loại hàng, xe, DO,
+   các dòng cùng ô gộp) để sau này dựng luật xử lý thông minh (vd. một xe hai
+   loại hàng — cố định số tấn một loại, GI phần còn lại vào loại kia).
+   Chỉ GOM + PHÂN LOẠI THÔ, chưa tự đổi dữ liệu nào (trừ Cancel ở trên).
+   Firebase: đọc cả node MỘT lần/phiên lúc dán đầu tiên; mỗi mẫu tối đa một
+   lần ghi mỗi ngày.                                                         */
+const SNOTE = (function(){
+  const FB = 'sale_notes', EG_MAX = 12;
+  const KINDS = [
+    ['cancel',      { test:s => (typeof TP !== 'undefined' && TP._cxText) ? TP._cxText(s) : /\bcancel|hủy|huỷ/i.test(s) }, 'Cancelled — truck will not come'],
+    ['split',       null,                                                'One truck, several cargo types / fixed tonnage'],
+    ['multi_trip',  /\b(?:1|one|m[oộ]t)\s+(?:of\s+|in\s+|trong\s+(?:c[aá]c\s+)?)?(?:\d+\s+)?(?:drivers?|trucks?|t[aà]i\s*x[eế]|xe)\b.*(?:take|l[aấ]y|will|s[eẽ])|\beither\b|\bone\s+of\b/i, 'Only one of the listed trucks / drivers will take the cargo (🔗 ALT)'],
+    ['arrived',     /\barrived\b/i,                                      'Truck has arrived'],
+    ['after_load',  /after\s*loading/i,                                  'Load after another truck / later'],
+    ['time',        /^\s*\d{1,2}\s*[hH:]\s*\d{0,2}\s*$/,                 'Arrival time'],
+    ['arrive_by',   /arrive\s*before|tới trước|toi truoc/i,             'Must arrive before a time'],
+    ['priority',    /ưu tiên|uu tien|priority/i,                         'Priority'],
+    ['overnight',   /ngủ lại|qua đêm|overnight/i,                        'Truck stays overnight in the plant'],
+    ['customs',     /hải quan|customs/i,                                 'Customs clearance'],
+    ['photo_print', /chụp hình|in thêm|photo|print/i,                    'Extra photo / extra printed ticket'],
+    ['wait_do',     /wait\s*for\s*do|get\s*do\b/i,                       'Waiting for DO'],
+    ['wait_sales',  /wait\s*for\s*sales|sales\s*confirm/i,              'Waiting for sales confirmation'],
+    ['add_later',   /add\s*later/i,                                      'Truck to be added later'],
+    ['add_tl',      /add\s*tl/i,                                         'Truck added'],
+    ['change_tl',   /change\s*tl/i,                                      'Truck changed']
+  ];
+  const TYPE_RE = /(\d{2})\s*:\s*(\d{2})|pure\s*c\s*[34]|propane|butane/gi;
+  /* "load 7.5MT 50:50 cargo and 15.5MT 70:30 cargo" · "GI cố định 7.52mt hàng 50:50 (DO: 86801837); còn lại hàng 70:30" */
+  function parseSplit(note){
+    const s = String(note || '');
+    const types = [];
+    s.replace(TYPE_RE, (m, a, b, i) => { const t = a ? (+a) + ':' + (+b) : m.replace(/\s+/g, '').toUpperCase(); if(!a || +a + +b === 100) types.push({ t, i }); return m; });
+    const distinct = Array.from(new Set(types.map(x => x.t)));
+    if(distinct.length < 2 && !/còn lại|con lai|remaining|the rest/i.test(s)) return null;
+    const fixed = [];
+    s.replace(/(\d+(?:[.,]\d+)?)\s*(?:mt|tấn|tan|ton)\b/gi, (m, v, i) => {
+      const nx = types.find(x => x.i > i && x.i - i < 40);
+      fixed.push({ mt:parseFloat(v.replace(',', '.')), type:nx ? nx.t : '' });
+      return m;
+    });
+    const rm = s.match(/(?:còn lại|con lai|remaining|the rest)[^0-9]{0,20}((\d{2})\s*:\s*(\d{2}))/i);
+    const dos = (s.match(/\b\d{8,}\b/g) || []);
+    if(!fixed.length && !rm) return null;
+    return { fixed, rest:rm ? (+rm[2]) + ':' + (+rm[3]) : '', types:distinct, dos };
+  }
+  function classify(note){
+    const s = String(note || '');
+    const k = [];
+    KINDS.forEach(([id, re]) => { if(id === 'split' ? !!parseSplit(s) : re.test(s)) k.push(id); });
+    return k.length ? k : ['other'];
+  }
+  function pattern(note){ return String(note || '').trim().replace(/\s+/g, ' ').toLowerCase().replace(/\d+([.,]\d+)?/g, '#'); }
+  function keyOf(pat){ let h = 5381; for(let i = 0; i < pat.length; i++) h = ((h << 5) + h + pat.charCodeAt(i)) >>> 0; return 'n' + h.toString(36); }
+  let C = null, _loading = null;
+  const _db = () => (typeof firebase !== 'undefined' && firebase.database) ? firebase.database() : null;
+  function load(){
+    if(C) return Promise.resolve(C);
+    if(_loading) return _loading;
+    const db = _db(); if(!db) return Promise.resolve({});
+    _loading = db.ref(FB).once('value').then(s => { C = s.val() || {}; return C; })
+      .catch(e => { console.warn('[SNOTE] load', e); C = null; return {}; })
+      .finally(() => { _loading = null; });
+    return _loading;
+  }
+  /* rows = dòng vừa dán (parsePlanSheet), theo thứ tự trong file. Gom khối ô gộp. */
+  function blocks(rows){
+    const out = [];
+    let cur = null;
+    (rows || []).forEach(r => {
+      const own = String(r.__noteOwn || '').trim();
+      if(own){ cur = { note:own, rows:[r] }; out.push(cur); return; }
+      if(cur && String(r.note || '').trim() === cur.note && r.customer === cur.rows[0].customer) cur.rows.push(r);
+      else cur = null;
+    });
+    return out;
+  }
+  function collect(rows, date){
+    const db = _db(); if(!db || !date) return Promise.resolve(0);
+    const bl = blocks(rows); if(!bl.length) return Promise.resolve(0);
+    return load().then(cache => {
+      if(!C) return 0;
+      const payload = {};
+      let n = 0;
+      bl.forEach(b => {
+        const pat = pattern(b.note), key = keyOf(pat), kinds = classify(b.note);
+        const r0 = b.rows[0], egk = date + '_' + (String(r0.plate || r0.no || 'x').replace(/[^A-Za-z0-9]/g, '') || 'x');
+        const eg = { d:date, c:String(r0.customer||''), t:String(r0.type||''), note:b.note,
+                     rows:b.rows.slice(0, 4).map(r => ({ no:String(r.no||''), p:String(r.plate||''), do:String(r.doNum||''), t:String(r.type||''), q:String(r.qty||'') })) };
+        const px = kinds.indexOf('split') >= 0 ? parseSplit(b.note) : null;
+        if(px) eg.px = px;
+        const rec = C[key];
+        if(!rec){
+          const nr = { pat, kinds:kinds.join(','), n:1, first:date, last:date, ex:b.note, eg:{ [egk]:eg } };
+          C[key] = nr; payload[FB + '/' + key] = nr; n++; return;
+        }
+        const egs = rec.eg || (rec.eg = {});
+        if(rec.last !== date && date > (rec.last || '')){ rec.n = (rec.n || 0) + 1; rec.last = date; payload[FB + '/' + key + '/n'] = rec.n; payload[FB + '/' + key + '/last'] = date; n++; }
+        if(!egs[egk] && Object.keys(egs).length < EG_MAX){ egs[egk] = eg; payload[FB + '/' + key + '/eg/' + egk] = eg; n++; }
+      });
+      if(!n) return 0;
+      return db.ref().update(payload).then(() => n).catch(e => { console.warn('[SNOTE] write', e); return 0; });
+    });
+  }
+  /* ── xem sổ (Today Plan ▸ 📝 Sale notes) ── */
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  let _el = null, _q = '', _open = {};
+  function open(){
+    if(!_el){
+      _el = document.createElement('div'); _el.className = 'sn-ov';
+      _el.innerHTML = '<div class="sn-box"><div class="sn-hd"><b>📝 Sale notes — collected from pasted plans</b>'+
+        '<input class="sn-q" placeholder="filter: cancel, split, customer…" oninput="SNOTE._filter(this.value)">'+
+        '<span style="flex:1"></span><button class="btn" onclick="SNOTE.close()">✕</button></div><div class="sn-bd" id="snBody">Loading…</div></div>';
+      document.body.appendChild(_el);
+      _el.addEventListener('mousedown', e => { if(e.target === _el) close(); });
+    }
+    _el.classList.add('on');
+    C = null; load().then(render);
+  }
+  function close(){ if(_el) _el.classList.remove('on'); }
+  function render(){
+    const b = document.getElementById('snBody'); if(!b) return;
+    const L = KINDS.reduce((o, k) => (o[k[0]] = k[2], o), { other:'Not classified yet' });
+    const order = KINDS.map(k => k[0]).concat(['other']);
+    const q = _q.toLowerCase();
+    const list = Object.keys(C || {}).map(k => Object.assign({ key:k }, C[k])).filter(r => !q ||
+      (r.pat + ' ' + r.kinds + ' ' + Object.values(r.eg || {}).map(e => e.c + ' ' + e.t).join(' ')).toLowerCase().indexOf(q) >= 0)
+      .sort((a, b) => order.indexOf(String(a.kinds).split(',')[0]) - order.indexOf(String(b.kinds).split(',')[0]) || (b.n || 0) - (a.n || 0));
+    if(!list.length){ b.innerHTML = '<i>No notes collected yet — they are gathered every time a plan is pasted.</i>'; return; }
+    b.innerHTML = '<div class="sn-cap">'+list.length+' note patterns · a pattern = same text with numbers replaced by #. Examples keep customer, cargo type, trucks and DOs of the merged cell.</div>'+
+      '<table class="sn-tbl"><tr><th>Kind</th><th>Note (latest wording)</th><th>Days</th><th>First → last</th><th>Examples</th></tr>'+
+      list.map(r => {
+        const eg = Object.values(r.eg || {}).sort((a, b) => a.d < b.d ? 1 : -1);
+        const on = !!_open[r.key];
+        return '<tr><td>'+String(r.kinds||'').split(',').map(k => '<span class="sn-k sn-'+esc(k)+'" title="'+esc(L[k]||k)+'">'+esc(k)+'</span>').join(' ')+'</td>'+
+          '<td>'+esc(r.ex || r.pat)+'</td><td style="text-align:center">'+(r.n||0)+'</td><td style="white-space:nowrap">'+esc(r.first)+' → '+esc(r.last)+'</td>'+
+          '<td><a href="#" onclick="SNOTE._tog(\''+r.key+'\');return false">'+eg.length+' ▾</a>'+(on ? eg.map(e =>
+            '<div class="sn-eg"><b>'+esc(e.d)+'</b> · '+esc(e.c)+' · '+esc(e.t)+'<br>'+(e.rows||[]).map(x => 'No '+esc(x.no)+' '+esc(x.p)+' DO '+esc(x.do||'—')+' '+esc(x.t)+' '+esc(x.q)+' MT').join('<br>')+
+            (e.px ? '<br><span class="sn-px">parsed: '+esc((e.px.fixed||[]).map(f => f.mt+' MT '+(f.type||'?')).join(' + '))+(e.px.rest ? ' · rest → '+esc(e.px.rest) : '')+'</span>' : '')+'</div>').join('') : '')+'</td></tr>';
+      }).join('')+'</table>';
+  }
+  function _filter(v){ _q = String(v||''); render(); }
+  function _tog(k){ _open[k] = !_open[k]; render(); }
+  return { collect, classify, parseSplit, pattern, keyOf, blocks, open, close, _filter, _tog, KINDS, _set:v => { C = v; } };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════
+   v4.187 — PLANCX · XE BIẾN MẤT KHỎI TODAY PLAN ĐÃ XÁC NHẬN  (Firebase plan_cx/<ngày>/<push>)
+   -------------------------------------------------------------------
+   Ghi lúc dán Today Plan (bước 📋 duyệt): cx=1 ⇒ tính là chuyến huỷ, cx=0 ⇒ người dùng
+   nói KHÔNG phải huỷ (vd. đổi xe). KHÔNG listener — chỉ máy làm báo cáo / gửi email P2
+   đọc (load) khi cần. Dọn: email P2 đã gửi (mail) VÀ file Daily đã xuất (rpt) ⇒ xoá ngày
+   đó; ngày cũ hơn 3 ngày tự xoá khi có máy đọc.                                         */
+const PLANCX = (function(){
+  const FB = 'plan_cx';
+  const C = {};                                   /* ngày → [bản ghi] (đã đọc) */
+  const _db = () => (typeof firebase !== 'undefined' && firebase.database) ? firebase.database() : null;
+  const _who = () => { try{ return (CURRENT_USER && (CURRENT_USER.name || CURRENT_USER.email)) || '?'; }catch(_){ return '?'; } };
+  const _iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  function record(date, items){
+    const db = _db(); if(!db || !date || !items || !items.length) return Promise.resolve(0);
+    const payload = {}, now = Date.now();
+    items.forEach(x => {
+      const r0 = x.rows[0] || {};
+      const key = db.ref(FB + '/' + date).push().key;
+      const rec = { at:now, by:_who(), cx:x.on ? 1 : 0, trips:1, n:x.rows.length, why:String(x.why||''), repl:String(x.replacedBy||''),
+                    c:r0.cust||'', p:x.rows.map(r => r.plate).filter(Boolean).join(' / '), m:r0.rmooc||'', d:x.rows.map(r => r.driver).filter(Boolean).join(' / '),
+                    q:parseFloat(String(r0.qtyOwn || r0.qty || '').replace(/,/g,'')) || 0, t:r0.type||'', no:r0.no||'', do:r0.doNum||'', nt:r0.noteOwn || r0.note || '',
+                    oids:(x.oids || [x.oid]).join(',') };
+      payload[FB + '/' + date + '/' + key] = rec;
+      if(C[date]) C[date].push(rec);
+    });
+    return db.ref().update(payload).then(() => items.length).catch(e => { console.warn('[PLANCX] write', e); return 0; });
+  }
+  function load(date, force){
+    const db = _db(); if(!db || !date) return Promise.resolve([]);
+    if(!force && C[date]) return Promise.resolve(C[date]);
+    return db.ref(FB + '/' + date).once('value').then(s => {
+      const v = s.val() || {};
+      C[date] = Object.keys(v).filter(k => k !== '_used' && v[k] && typeof v[k] === 'object').map(k => Object.assign({ key:k }, v[k]));
+      C[date]._used = v._used || {};
+      try{ _purgeOld(db); }catch(_){}
+      try{ document.dispatchEvent(new CustomEvent('plancx:changed', { detail:date })); }catch(_){}
+      return C[date];
+    }).catch(e => { console.warn('[PLANCX] load', e); return C[date] || []; });
+  }
+  let _purged = false;
+  function _purgeOld(db){
+    if(_purged) return; _purged = true;
+    const cut = new Date(); cut.setDate(cut.getDate() - 3);
+    db.ref(FB).orderByKey().endAt(_iso(cut)).limitToFirst(30).once('value')
+      .then(s => { const v = s.val() || {}; const p = {}; Object.keys(v).forEach(k => { p[FB + '/' + k] = null; }); if(Object.keys(p).length) return db.ref().update(p); })
+      .catch(() => {});
+  }
+  function get(date){ return C[date]; }
+  /* what = 'mail' | 'rpt' — cả hai đã xong ⇒ xoá dữ liệu ngày đó */
+  function markUsed(date, what){
+    const db = _db(); if(!db || !date) return Promise.resolve(false);
+    const u = Object.assign({}, (C[date] && C[date]._used) || {}); u[what] = Date.now();
+    if(u.mail && u.rpt){ delete C[date]; return db.ref(FB + '/' + date).remove().then(() => true).catch(() => false); }
+    if(C[date]) C[date]._used = u;
+    return db.ref(FB + '/' + date + '/_used/' + what).set(u[what]).then(() => false).catch(() => false);
+  }
+  return { record, load, get, markUsed, FB, _cache:C };
+})();
+
+/* ═══════════════════════════════════════════════════════════════════
+   v4.184 — AILOG · SỔ QUYẾT ĐỊNH CỦA NGƯỜI DÙNG  (Firebase ai_log/<push>)
+   -------------------------------------------------------------------
+   Mỗi lần dán có đề xuất từ ghi chú sale: một bản ghi gồm từng đề xuất
+   (loại, lý do, dòng, MT…) + người dùng NHẬN / BỎ / SỬA gì. CHỈ GHI — app
+   không bao giờ đọc lại (Spark). Admin: ⚙ ▸ tải JSON đưa Claude phân tích,
+   hoặc xoá sạch khi không cần nữa.                                          */
+const AILOG = (function(){
+  const FB = 'ai_log';
+  const _db = () => (typeof firebase !== 'undefined' && firebase.database) ? firebase.database() : null;
+  const _who = () => { try{ return (CURRENT_USER && (CURRENT_USER.name || CURRENT_USER.email)) || '?'; }catch(_){ return '?'; } };
+  const _role = () => { try{ return (CURRENT_USER && CURRENT_USER.role) || ''; }catch(_){ return ''; } };
+  function paste(area, date, mode, items){
+    const db = _db(); if(!db || !items || !items.length) return Promise.resolve(null);
+    const it = items.map(x => {
+      const o = { act:x.act, decision:x.on ? 'accepted' : 'rejected', why:String(x.why||''), rows:x.rows || [] };
+      if(x.act === 'link'){
+        o.kind = x.kind; o.sugKind = x.sugKind; o.src = x.src; o.total = x.total || 0; o.note = x.note || '';
+        o.sugOn = !!x.sugOn; o.kindChanged = x.kind !== x.sugKind;
+        if(x.kind === 'mdo'){ o.qty = x.mdoQ || {}; o.sugQty = x.sugQ || {}; o.qtyEdited = JSON.stringify(x.mdoQ||{}) !== JSON.stringify(x.sugQ||{}); }
+        if(x.px) o.px = x.px;
+      } else { o.sugOn = x.sugOn !== false; o.busy = !!x.busy; }
+      o.userChanged = (o.sugOn !== !!x.on) || !!o.kindChanged || !!o.qtyEdited;
+      return o;
+    });
+    const rec = { at:Date.now(), by:_who(), role:_role(), kind:'paste', area:String(area||''), date:String(date||''), mode:String(mode||''),
+                  n:it.length, accepted:it.filter(x => x.decision === 'accepted').length, items:JSON.parse(JSON.stringify(it)) };
+    return db.ref(FB).push(rec).then(() => true).catch(e => { console.warn('[AILOG] write', e); return false; });
+  }
+  function _dl(name, obj){
+    const b = new Blob([JSON.stringify(obj, null, 1)], { type:'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }
+  const _stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()); };
+  /* chỉ admin — đọc node MỘT lần khi bấm tải */
+  function download(node){
+    const db = _db(); if(!db) return Promise.resolve(0);
+    return db.ref(node).once('value').then(s => { const v = s.val() || {}; _dl(node + '_' + _stamp() + '.json', v); return Object.keys(v).length; });
+  }
+  function clear(node){ const db = _db(); if(!db) return Promise.reject(new Error('offline')); return db.ref(node).remove(); }
+  return { paste, download, clear, FB };
+})();
+
+/* v4.184 — ⚙ ADMIN SETTINGS (nút ⚙ trên thanh điều hướng) — chỉ admin mở được */
+const ADMSET = (function(){
+  let _el = null;
+  const isAdmin = () => { try{ return String((CURRENT_USER || {}).role || '') === 'admin'; }catch(_){ return false; } };
+  const NODES = [
+    ['ai_log',     '🧠 Sale-note decisions', 'Every suggestion made from sales notes at paste time (cancel, alternate trucks, multi-DO) and what the user accepted, rejected or edited. Write-only — the app never reads it back.'],
+    ['plan_cx',    '🕳 Trucks missing from Today Plan', 'Confirmed at Today Plan paste (counted as cancelled trips in the Daily report). Cleared automatically after the P2 mail is sent AND the Daily file is exported, or after 3 days.'],
+    ['sale_notes', '📝 Sale notes log',      'Sales notes (column M) grouped by pattern, with examples. Read when 📝 Sale notes is opened and at the first paste of a session.']
+  ];
+  function open(){
+    if(!isAdmin()){ try{ toast('⚙ Settings — administrators only', 'er'); }catch(_){} return; }
+    if(!_el){
+      _el = document.createElement('div'); _el.className = 'nr-ov';
+      _el.innerHTML = '<div class="nr-box" style="width:min(640px,94vw)"><div class="nr-hd"><b>⚙ Admin settings</b><span style="flex:1"></span><button class="btn" onclick="ADMSET.close()">✕</button></div><div class="nr-bd" id="admBody"></div></div>';
+      document.body.appendChild(_el);
+      _el.addEventListener('mousedown', e => { if(e.target === _el) close(); });
+    }
+    document.getElementById('admBody').innerHTML = NODES.map(([k, t, d]) =>
+      '<div class="adm-sec"><b>'+t+'</b> <code>'+k+'</code><div class="nr-cap">'+d+'</div>'+
+      '<button class="btn" onclick="ADMSET.dl(\''+k+'\')">⬇ Download JSON</button> '+
+      '<button class="btn" style="color:#b91c1c;border-color:#fecaca" onclick="ADMSET.del(\''+k+'\')">🗑 Delete all</button></div>').join('');
+    _el.classList.add('on');
+  }
+  function close(){ if(_el) _el.classList.remove('on'); }
+  function dl(k){
+    if(!isAdmin()) return;
+    AILOG.download(k).then(n => toast('⬇ ' + k + ': ' + n + ' record(s) downloaded', 'ok')).catch(e => toast('Download failed: ' + e.message, 'er'));
+  }
+  function del(k){
+    if(!isAdmin()) return;
+    if(!confirm('Delete ALL data in "' + k + '"?\n\nDownload it first if you may need it — this cannot be undone.')) return;
+    if(!confirm('Really delete every record of "' + k + '"?')) return;
+    AILOG.clear(k).then(() => { toast('🗑 ' + k + ' cleared', 'ok'); try{ if(k === 'sale_notes' && SNOTE._set) SNOTE._set(null); }catch(_){} })
+      .catch(e => toast('Delete failed: ' + e.message, 'er'));
+  }
+  return { open, close, dl, del, isAdmin };
+})();
 
 /* Tabulator-level shims used by Today Plan (mirrors fleet helpers) */
 function tpOpenPaste(){ TP.openPaste(); }
@@ -4175,6 +5107,13 @@ function _promoteClone(r){
   const cloned = {};
   Object.keys(r).forEach(k => { if(!k.startsWith('__')) cloned[k] = r[k]; });
   /* _forDate giữ NGUYÊN — nó là thứ nói cho phần mềm biết dòng này của ngày nào. */
+  /* v4.183 — xe ĐÃ HUỶ ở Tomorrow Plan (sale ghi Cancel / bấm tay) vẫn là xe huỷ sau promote */
+  if(r._autoSync === false && String(r._status||'') === 'cancel'){
+    cloned.lastBy   = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER.name) ? CURRENT_USER.name : 'system';
+    cloned.lastAt   = Date.now();
+    cloned.lastRole = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER.role) ? CURRENT_USER.role : '';
+    return cloned;
+  }
   cloned._status    = '';
   cloned._actualQty = '';
   /* v4.59 — dòng promote LUÔN về AUTO. Giữ lại khoá tay là cái bẫy: _status /
@@ -4257,14 +5196,15 @@ function tmrConfirmPromote(){
     const payload = {};
     let n = 0;
 
+    const clones = [];                                   /* v4.183 — cho ảnh chụp kế hoạch đầu ngày */
     if(ctx.mode === 'replace'){
       /* ⭐ THAY CẢ NODE. Không liệt kê khoá null, không phụ thuộc RAM. */
       const node = {};
-      ctx.take.forEach(r=>{ node[r._oid] = _promoteClone(r); n++; });
+      ctx.take.forEach(r=>{ node[r._oid] = _promoteClone(r); clones.push(Object.assign({}, node[r._oid], { _oid:r._oid })); n++; });
       payload['plan_today'] = node;
     } else {
       /* ⭐ CHỈ THÊM. Không đụng một dòng Today nào đang có. */
-      ctx.take.forEach(r=>{ payload['plan_today/' + r._oid] = _promoteClone(r); n++; });
+      ctx.take.forEach(r=>{ payload['plan_today/' + r._oid] = _promoteClone(r); clones.push(Object.assign({}, payload['plan_today/' + r._oid], { _oid:r._oid })); n++; });
     }
     payload['plan_tomorrow']         = null;
     payload['plan_today_version']    = ts;
@@ -4276,6 +5216,8 @@ function tmrConfirmPromote(){
           ? 'Promoted ' + n + ' row(s) → Today Plan (' + ctx.todayRows.length + ' old row(s) replaced)'
           : 'Added ' + n + ' row(s) into Today Plan · ' + ctx.todayRows.length + ' existing row(s) kept'
             + (ctx.skipped.length ? ' · ' + ctx.skipped.length + ' skipped' : ''), 'ok');
+        /* v4.183 — promote là lần đưa kế hoạch vào Today ⇒ ghi kế hoạch đầu ngày (nếu ngày đó chưa có) */
+        try{ PLANDAY.recordPromoted(clones); }catch(e){ console.warn('[PLANDAY]', e); }
         /* Dòng vừa thêm mang NGÀY MAI — nhắc đúng lúc, đừng để nhân viên cân
            đứng trước một bảng đầy đơn mà trạm báo "future plan". */
         if(ctx.mode === 'add'){

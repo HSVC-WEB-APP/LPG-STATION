@@ -22,6 +22,23 @@
  * ============================================================ */
 
 /* TODO[P5C]: dán thân module RPT (V4-54 dòng 25974–27496) vào đây. */
+/* v4.205 (28/09/2026) — useFile(file, handle): email P2 truyền handle ⇒ file báo cáo lưu CÙNG thư mục file nguồn.
+   v4.203 (28/09/2026) — accumulation() trả thêm `extra` = số tháng của khách CHƯA có dòng trong
+   Summary Data (khách mới) để email P2 hiện đỏ trong bảng rút gọn.
+   v4.187 (25/09/2026) — Cancel List: nhóm ALT huỷ = 1 chuyến; thêm xe biến mất khỏi Today Plan đã
+   xác nhận lúc dán (PLANCX.load(ngày, force) trước khi điền; điền xong đánh dấu 'rpt').
+   v4.185 (25/09/2026) — KHÁCH MỚI chưa có trong bảng "by customer" (Summary Data, dưới
+   Yearly Accumulation): trước đây email P2 có báo nhưng lúc XUẤT FILE thì không ⇒ sót khách
+   (vd. PVGT 804 tấn tàu 24/09). Nay sau khi điền Raw Data, app dò mọi khách có hàng trong
+   THÁNG của ngày báo cáo (Raw Data cột C/E) mà danh sách chưa có ⇒ hỏi, OK thì TỰ CHÈN dòng
+   mới cuối danh sách (chép công thức SUMIFS của dòng cuối, đổi tên/số dòng, mở rộng SUM của
+   dòng tháng) và ghi log; Cancel thì cảnh báo đỏ để người dùng tự thêm.
+   v4.184 (25/09/2026) — xuất file Daily Stock tự điền sheet "Cancel List" cho ngày GI:
+   Daily plan (= kế hoạch ĐẦU NGÀY, PLANDAY) · Daily actual · số xe huỷ · từng xe huỷ
+   (🚫 Cancelled + xe có trong kế hoạch đầu ngày mà cuối ngày không còn). Dữ liệu lấy từ
+   MAIL.p2Cancel — CÙNG một logic với bảng xe huỷ của email P2. Chỉ nối vào CUỐI sheet
+   (hoặc ghi lại khối của chính ngày đó nếu nó đang là khối cuối); bộ lọc ngày của sheet
+   được chuyển sang ngày mới giống cách nhân viên vẫn làm tay.                        */
 
 /* ===== BÓC TỪ V4-54 dòng 25974–27496 ===== */
 const RPT = (function(){
@@ -860,20 +877,15 @@ const RPT = (function(){
      Pre-existing slot rows R7..TotalRow-1. Each row mapped to a
      unique (customer,trade,type) group. Remaining slots hidden.
      ═════════════════════════════════════════════════════════ */
-  async function fillSummary(giDateISO){
-    const sh = await findSheet(state.zip, /Summary\s*Data/i);
-    if(!sh){ log('⚠ Sheet "Summary Data" not found — skip','warn'); return; }
-    log('── Summary Data ──','info');
-
+  /* v4.181 — gom nhóm Summary Data (theo khách|trade|loại) TÁCH RA thành hàm riêng để
+     email P2 (mail.js) dùng CHÍNH hàm này ⇒ thân thư và file báo cáo là một logic. */
+  function summaryGroups(giDateISO){
     // Group TL rows + Vessel rows (vessel → gi.ship)
     const tlRows = collectTL(giDateISO);
     const vsRows = collectVS(giDateISO);
     /* v4-fix: ngày KHÔNG xuất hàng vẫn phải chạy tiếp với danh sách rỗng để
        XÓA dữ liệu cũ của template (báo cáo hôm trước) — nếu return sớm ở đây
        thì bảng Summary giữ nguyên số liệu ngày cũ → báo cáo sai. */
-    if(!tlRows.length && !vsRows.length){
-      log('ℹ Summary: 0 rows (TL+Vessel) for '+giDateISO+' — clearing old template data','info');
-    }
     const groups={};
     tlRows.forEach(r=>{
       const nw = parseFloat(String(r.lpgQty||'').replace(/,/g,''))||0;
@@ -934,6 +946,18 @@ const RPT = (function(){
     /* Vessel groups điền TRƯỚC, rồi mới tới TL; trong mỗi nhóm sort theo cust/trade. */
     const gList = Object.values(groups).sort((a,b)=>
       ((b.isVessel?1:0)-(a.isVessel?1:0)) || (a.cust.localeCompare(b.cust)) || (a.trade.localeCompare(b.trade)));
+    return { gList, tlRows, vsRows };
+  }
+
+  async function fillSummary(giDateISO){
+    const sh = await findSheet(state.zip, /Summary\s*Data/i);
+    if(!sh){ log('⚠ Sheet "Summary Data" not found — skip','warn'); return; }
+    log('── Summary Data ──','info');
+
+    const _sg = summaryGroups(giDateISO), gList = _sg.gList, tlRows = _sg.tlRows, vsRows = _sg.vsRows;
+    if(!tlRows.length && !vsRows.length){
+      log('ℹ Summary: 0 rows (TL+Vessel) for '+giDateISO+' — clearing old template data','info');
+    }
     log('ℹ Summary: '+gList.length+' groups, '+tlRows.length+' TL + '+vsRows.length+' Vessel rows','info');
 
     const sstF = state.zip.file('xl/sharedStrings.xml');
@@ -1414,13 +1438,17 @@ const RPT = (function(){
   /* ═════════════════════════════════════════════════════════
      EXECUTE EXPORT
      ═════════════════════════════════════════════════════════ */
-  async function executeExport(){
+  /* v4.173 — opts {date} khi gọi từ ✉ REPORT MAIL (P2); file xuất ra còn được
+     phát qua sự kiện 'lpg:reportFile' để email tự đính kèm. Gọi từ nút cũ thì
+     opts rỗng ⇒ chạy y như trước. */
+  async function executeExport(opts){
+    opts = (opts && typeof opts === 'object' && !(opts instanceof Event)) ? opts : {};
     if(!state.zip){ toast('❌ No report file selected — pick one first','er'); return; }
     if(state.fileHandle){
       const ok=await reload();
       if(ok) log('🔄 Refreshed: '+state.fileName,'info');
     }
-    const giDate = document.getElementById('rpt-date').value;
+    const giDate = opts.date || document.getElementById('rpt-date').value;
     if(!giDate){ toast('⚠ No date selected','er'); return; }
 
     log('═══════════════════════════════════════','info');
@@ -1520,6 +1548,10 @@ const RPT = (function(){
     await fillRawData(giDate);
     // Fill Summary Data
     await fillSummary(giDate);
+    // v4.185 — khách mới chưa có trong bảng "by customer" (sau khi Raw Data đã có ngày này)
+    try{ await checkNewCustomers(giDate); }catch(e){ log('⚠ New-customer check: '+e.message,'warn'); }
+    // v4.184 — Fill Cancel List (cùng logic xe huỷ với email P2)
+    try{ await fillCancelList(giDate); }catch(e){ log('⚠ Cancel List: '+e.message,'warn'); }
 
     // Force Excel recalc, drop calcChain
     const wbFile = state.zip.file('xl/workbook.xml');
@@ -1570,6 +1602,234 @@ const RPT = (function(){
     }
     log('═══ DONE ═══','ok');
     toast('📋 Report '+giDate+' — OK!','ok');
+    try{ document.dispatchEvent(new CustomEvent('lpg:reportFile',{ detail:{ kind:'daily', date:giDate, name:dlName, blob } })); }catch(_){}
+    return { blob, name:dlName };
+  }
+
+  /* ═════════════════════════════════════════════════════════
+     v4.184 — FILL — Cancel List sheet
+     Cột: A ngày (mọi dòng) · B ngày (dòng đầu) · C Daily plan · D Daily actual · E Cancel Trip
+          F Customer · G T/L plate · H Romooc · I Driver · J Quantity (MT) · K Note
+     B–E gộp dọc theo khối ngày. Trả { ok, xml, msg, rows, start, end }.
+     ═════════════════════════════════════════════════════════ */
+  function cancelListXml(sXml, sst, dateISO, data){
+    const rows = parseRows(sXml);
+    const cellOf = (r, col) => { const m = r.xml.match(new RegExp('<c\\s+r="'+col+r.num+'"[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)')); return m ? m[0] : ''; };
+    const isoOf = r => { const c = cellOf(r, 'A'); if(!c) return ''; const v = cellVal(c, sst); if(/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0,10); const n = parseFloat(v); return (n > 40000 && n < 60000) ? serialToISO(n) : ''; };
+    const hasVal = c => /<v>|<is>/.test(c || '');
+    const dated = rows.map(r => ({ r, iso:isoOf(r) })).filter(x => x.iso);
+    if(!dated.length) return { ok:false, msg:'Cancel List: no dated rows found' };
+    const day = dated.filter(x => x.iso === dateISO);
+    let s0, oldEnd = 0;
+    if(day.length){
+      const maxDay = Math.max.apply(null, day.map(x => x.r.num));
+      if(dated.some(x => x.r.num > maxDay && x.iso !== dateISO)) return { ok:false, msg:'Cancel List: '+dateISO+' is not the last day of the sheet — left untouched (fill it by hand)' };
+      s0 = Math.min.apply(null, day.map(x => x.r.num)); oldEnd = maxDay;
+    } else {
+      const last = dated[dated.length - 1];
+      if(dateISO < last.iso) return { ok:false, msg:'Cancel List: the sheet already goes up to '+last.iso+' — '+dateISO+' is older, left untouched' };
+      s0 = last.r.num + 1;
+    }
+    /* mẫu định dạng: dòng đầu của khối ngày gần nhất (có B) + dòng thứ hai của khối nhiều dòng gần nhất */
+    const before = dated.filter(x => x.r.num < s0);
+    const heads = before.filter(x => hasVal(cellOf(x.r, 'B')));
+    const tFirst = heads.length ? heads[heads.length - 1].r : (before.length ? before[before.length - 1].r : rows[rows.length - 1]);
+    let tCont = null;
+    for(let i = heads.length - 1; i >= 0 && !tCont; i--){
+      const nx = before.find(x => x.r.num === heads[i].r.num + 1 && x.iso === heads[i].iso && !hasVal(cellOf(x.r, 'B')));
+      if(nx) tCont = nx.r;
+    }
+    tCont = tCont || tFirst;
+    const sty = r => { const o = {}; const re = /<c\s+r="([A-Z]+)\d+"([^>]*)/g; let m; while((m = re.exec(r.xml)) !== null){ const sm = m[2].match(/\bs="(\d+)"/); if(sm) o[m[1]] = sm[1]; } return o; };
+    const sF = sty(tFirst), sC = sty(tCont);
+    const list = (data.rows || []);
+    const n = Math.max(1, list.length), e = s0 + n - 1;
+    const num3 = v => Math.round((+v || 0) * 1000) / 1000;
+    const cN = (col, rn, st, v) => '<c r="'+col+rn+'"'+(st[col] ? ' s="'+st[col]+'"' : '')+'><v>'+v+'</v></c>';
+    const cS = (col, rn, st, v) => '<c r="'+col+rn+'"'+(st[col] ? ' s="'+st[col]+'"' : '')+' t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(v)+'</t></is></c>';
+    const cE = (col, rn, st) => '<c r="'+col+rn+'"'+(st[col] ? ' s="'+st[col]+'"' : '')+'/>';
+    const ser = isoToSerial(dateISO);
+    const out = [];
+    for(let i = 0; i < n; i++){
+      const rn = s0 + i, st = i === 0 ? sF : sC, x = list[i];
+      let c = cN('A', rn, st, ser);
+      if(i === 0) c += cN('B', rn, st, ser) + cN('C', rn, st, num3(data.plan)) + cN('D', rn, st, num3(data.actual)) + cN('E', rn, st, list.length);
+      else c += cE('B', rn, st) + cE('C', rn, st) + cE('D', rn, st) + cE('E', rn, st);
+      if(x){
+        c += (x.customer ? cS('F', rn, st, x.customer) : cE('F', rn, st)) + (x.plate ? cS('G', rn, st, x.plate) : cE('G', rn, st))
+           + (x.rmooc ? cS('H', rn, st, x.rmooc) : cE('H', rn, st)) + (x.driver ? cS('I', rn, st, x.driver) : cE('I', rn, st))
+           + ((+x.qty) ? cN('J', rn, st, num3(x.qty)) : cE('J', rn, st)) + (x.note ? cS('K', rn, st, x.note) : cE('K', rn, st));
+      } else c += ['F','G','H','I','J','K'].map(col => cE(col, rn, st)).join('');
+      out.push({ num:rn, xml:'<row r="'+rn+'" spans="1:11">'+c+'</row>' });
+    }
+    /* bộ lọc ngày (autoFilter cột A) ⇒ chuyển sang ngày mới, ẩn/hiện dòng như nhân viên lọc tay */
+    const af = sXml.match(/<autoFilter\b[^>]*>[\s\S]*?<\/autoFilter>|<autoFilter\b[^>]*\/>/);
+    const dateFilter = af && /<filterColumn colId="0">[\s\S]*?<dateGroupItem\b/.test(af[0]);
+    const rmTo = Math.max(e, oldEnd);
+    const kept = rows.filter(r => r.num < s0 || r.num > rmTo).map(r => {
+      if(!dateFilter || r.num < 3) return r;
+      const iso = isoOf(r);
+      if(!iso) return r;
+      let x = r.xml.replace(/^<row\b[^>]*>/, t => t.replace(/\s+hidden="1"/, ''));
+      if(iso !== dateISO) x = x.replace(/^<row\b([^>]*?)(\/?>)/, '<row$1 hidden="1"$2');
+      return Object.assign({}, r, { xml:x });
+    });
+    const all = kept.map(r => ({ num:r.num, xml:r.xml })).concat(out).sort((a, b) => a.num - b.num);
+    const sdA = sXml.indexOf('<sheetData'), sdOpenEnd = sXml.indexOf('>', sdA) + 1, sdB = sXml.indexOf('</sheetData>');
+    if(sdA < 0 || sdB < 0) return { ok:false, msg:'Cancel List: sheetData not found' };
+    let xml = sXml.slice(0, sdOpenEnd) + all.map(r => r.xml).join('') + sXml.slice(sdB);
+    /* gộp ô B–E của khối ngày */
+    const ovl = ref => { const m = ref.match(/^[A-Z]+(\d+)(?::[A-Z]+(\d+))?$/); if(!m) return false; const a = +m[1], b = +(m[2] || m[1]); return !(b < s0 || a > rmTo); };
+    const mm = xml.match(/<mergeCells\b[^>]*>([\s\S]*?)<\/mergeCells>/);
+    let merges = mm ? (mm[1].match(/<mergeCell\b[^>]*\/>/g) || []).filter(t => !ovl((t.match(/ref="([^"]+)"/) || [])[1] || '')) : [];
+    if(n > 1) ['B','C','D','E'].forEach(col => merges.push('<mergeCell ref="'+col+s0+':'+col+e+'"/>'));
+    const mXml = merges.length ? '<mergeCells count="'+merges.length+'">'+merges.join('')+'</mergeCells>' : '';
+    if(mm) xml = xml.replace(mm[0], mXml);
+    else if(mXml) xml = xml.replace(/(<\/sheetData>(?:<sheetCalcPr\b[^>]*\/>)?(?:<sheetProtection\b[^>]*\/>)?(?:<protectedRanges>[\s\S]*?<\/protectedRanges>)?(?:<scenarios>[\s\S]*?<\/scenarios>)?(?:<autoFilter\b[\s\S]*?(?:<\/autoFilter>|\/>))?(?:<sortState\b[\s\S]*?(?:<\/sortState>|\/>))?(?:<dataConsolidate\b[\s\S]*?(?:<\/dataConsolidate>|\/>))?(?:<customSheetViews>[\s\S]*?<\/customSheetViews>)?)/, '$1' + mXml);
+    /* phạm vi: dimension + autoFilter + ngày của bộ lọc */
+    const lastRow = Math.max(e, all.length ? all[all.length - 1].num : e);
+    xml = xml.replace(/<dimension ref="([A-Z]+\d+):([A-Z]+)(\d+)"/, (m0, a, c, r) => '<dimension ref="'+a+':'+c+Math.max(+r, lastRow)+'"');
+    if(af){
+      let nf = af[0].replace(/(<autoFilter\b[^>]*\bref="[A-Z]+\d+:[A-Z]+)(\d+)"/, (m0, a, r) => a + Math.max(+r, lastRow) + '"');
+      if(dateFilter){ const p = dateISO.split('-'); nf = nf.replace(/<dateGroupItem\b[^>]*\/>/, '<dateGroupItem year="'+(+p[0])+'" month="'+(+p[1])+'" day="'+(+p[2])+'" dateTimeGrouping="day"/>'); }
+      xml = xml.replace(af[0], nf);
+    }
+    return { ok:true, xml, rows:list.length, start:s0, end:e, replaced:day.length > 0 };
+  }
+  /* ═════════════════════════════════════════════════════════
+     v4.185 — KHÁCH MỚI trong bảng "by customer" của Summary Data
+     ═════════════════════════════════════════════════════════ */
+  const _ck = v => String(v == null ? '' : v).replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').trim().toLowerCase();
+  function _cellText(rowXml, col, rn, sst){
+    const m = rowXml.match(new RegExp('<c\\s+r="'+col+rn+'"[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)'));
+    if(!m) return '';
+    return String(cellVal(m[0], sst) || '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').trim();
+  }
+  /* Raw Data: khách (cột E) có GI Date (cột C) trong tháng ym → { tên: kg (cột N) } */
+  function rawMonthCustomers(rawXml, sst, ym){
+    const out = {};
+    parseRows(rawXml).forEach(r => {
+      if(r.num < 14) return;
+      const c = _cellText(r.xml, 'C', r.num, sst); const n = parseFloat(c);
+      const iso = /^\d{4}-\d{2}/.test(c) ? c.slice(0,7) : (n > 40000 && n < 60000 ? serialToISO(n).slice(0,7) : '');
+      if(iso !== ym) return;
+      const e = _cellText(r.xml, 'E', r.num, sst); if(!e) return;
+      const q = parseFloat(_cellText(r.xml, 'N', r.num, sst)) || 0;
+      const k = Object.keys(out).find(x => _ck(x) === _ck(e)) || e;
+      out[k] = (out[k] || 0) + q;
+    });
+    return out;
+  }
+  /* Summary Data: vùng danh sách khách = các dòng NGAY SAU dòng tháng cuối (dưới "Yearly …") */
+  function summaryCustList(sXml, sst){
+    const rows = parseRows(sXml);
+    const yi = rows.findIndex(r => /yearly/i.test(_cellText(r.xml, 'B', r.num, sst)));
+    if(yi < 0) return null;
+    let i = yi + 1, monthRow = null;
+    for(; i < rows.length; i++){ const v = parseFloat(_cellText(rows[i].xml, 'B', rows[i].num, sst)); if(!(v > 40000 && v < 60000)) break; monthRow = rows[i]; }
+    const cust = [];
+    for(; i < rows.length; i++){ const nm = _cellText(rows[i].xml, 'B', rows[i].num, sst); if(!nm) break; cust.push({ row:rows[i], name:nm }); }
+    return { rows, monthRow, cust, after:rows.slice(i) };
+  }
+  /* chèn khách mới cuối danh sách: chép dòng khách cuối, đổi số dòng + tên, mở rộng SUM dòng tháng */
+  function summaryAddCustomersXml(sXml, sst, names){
+    const L = summaryCustList(sXml, sst);
+    if(!L || !L.cust.length) return { ok:false, msg:'customer list (under "Yearly Accumulation") not found' };
+    const last = L.cust[L.cust.length - 1].row, n0 = last.num;
+    const blocking = L.after.filter(r => /<v>|<is>|<f>/.test(r.xml));
+    if(blocking.length && blocking[0].num <= n0 + names.length) return { ok:false, msg:'rows below the customer list are in use (row '+blocking[0].num+') — add the customer by hand' };
+    const escF = v => String(v).replace(/"/g, '""');
+    let add = '';
+    names.forEach((nm, j) => {
+      const rn = n0 + 1 + j;
+      let x = last.xml.replace(/^<row\b([^>]*)>/, (m0, a) => '<row'+a.replace(/\br="\d+"/, 'r="'+rn+'"')+'>');
+      x = x.replace(/<c\s+r="([A-Z]+)\d+"/g, (m0, col) => '<c r="'+col+rn+'"');
+      /* ô tên khách */
+      x = x.replace(new RegExp('<c r="B'+rn+'"([^>]*?)(?:\\/>|>[\\s\\S]*?<\\/c>)'), (m0, at) => '<c r="B'+rn+'"'+at.replace(/\s*\bt="[^"]*"/, '')+' t="inlineStr"><is><t>'+xmlEsc(nm)+'</t></is></c>');
+      /* công thức: số dòng cũ → mới, bỏ shared (ghi công thức đầy đủ), bỏ giá trị cache */
+      x = x.replace(/<f\b[^>]*\bt="shared"[^>]*\/>/g, '<f>SUM(C'+rn+':G'+rn+')</f>');
+      x = x.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (m0, at, body) => '<f>'+body.replace(new RegExp('(\\$?[A-Z]{1,2})'+n0+'(?![0-9])', 'g'), '$1'+rn)+'</f>');
+      x = x.replace(/(<f>[^<]*SUMIFS\('Raw Data'!\$N\$\d+:\$N\$\d+,\s*'Raw Data'!\$E\$\d+:\$E\$\d+,)"[^"]*(?:""[^"]*)*"\)/, (m0, a) => a+'"'+escF(xmlEsc(nm))+'")');
+      x = x.replace(/<\/f><v>[^<]*<\/v>/g, '</f>');
+      add += x;
+    });
+    const nEnd = n0 + names.length;
+    /* dòng trống (chỉ có style) đang chiếm số dòng sẽ chèn ⇒ bỏ đi trước */
+    let base = sXml;
+    L.after.filter(r => r.num > n0 && r.num <= nEnd).sort((p, q) => q.start - p.start).forEach(r => { base = base.slice(0, r.start) + base.slice(r.end); });
+    let xml = base.slice(0, last.end) + add + base.slice(last.end);
+    /* dòng tháng: SUM(C45:C106) → SUM(C45:C<nEnd>) */
+    const first = L.cust[0].row.num;
+    xml = xml.replace(new RegExp('SUM\\(([A-Z]{1,2})'+first+':([A-Z]{1,2})'+n0+'\\)', 'g'), (m0, a, b) => 'SUM('+a+first+':'+b+nEnd+')');
+    /* bỏ giá trị cache của các ô vừa đổi phạm vi (Excel tính lại khi mở — fullCalcOnLoad) */
+    xml = xml.replace(new RegExp('(<f\\b[^>]*>SUM\\([A-Z]{1,2}'+first+':[A-Z]{1,2}'+nEnd+'\\)<\\/f>)<v>[^<]*<\\/v>', 'g'), '$1');
+    /* shared formula H46:H106 (ref) — mở rộng không cần: dòng mới ghi công thức riêng */
+    /* ô gộp H:I và J:K như dòng mẫu */
+    const mm = xml.match(/<mergeCells\b[^>]*>([\s\S]*?)<\/mergeCells>/);
+    if(mm){
+      const tpl = (mm[1].match(/<mergeCell ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/g) || []).map(t => t.match(/ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/)).filter(m => +m[2] === n0 && +m[4] === n0);
+      if(tpl.length){
+        let extra = '';
+        names.forEach((_, j) => { const rn = n0 + 1 + j; tpl.forEach(m => { extra += '<mergeCell ref="'+m[1]+rn+':'+m[3]+rn+'"/>'; }); });
+        const inner = mm[1] + extra;
+        xml = xml.replace(mm[0], '<mergeCells count="'+(inner.match(/<mergeCell\b/g) || []).length+'">'+inner+'</mergeCells>');
+      }
+    }
+    xml = xml.replace(/<dimension ref="([A-Z]+\d+):([A-Z]+)(\d+)"/, (m0, a, c, r) => '<dimension ref="'+a+':'+c+Math.max(+r, nEnd)+'"');
+    return { ok:true, xml, added:names.slice(), rows:[n0 + 1, nEnd] };
+  }
+  /* khách có hàng trong tháng mà danh sách "by customer" chưa có */
+  function missingCustomers(sumXml, rawXml, sst, ym){
+    const L = summaryCustList(sumXml, sst);
+    if(!L) return null;
+    const listed = new Set(L.cust.map(c => _ck(c.name)));
+    const used = rawMonthCustomers(rawXml, sst, ym);
+    return Object.keys(used).filter(n => !listed.has(_ck(n))).map(n => ({ name:n, kg:used[n] }));
+  }
+  async function checkNewCustomers(giDate){
+    const sh = await findSheet(state.zip, /Summary\s*Data/i), rw = await findSheet(state.zip, /^Raw\s*Data$/i);
+    if(!sh || !rw) return;
+    const sstF = state.zip.file('xl/sharedStrings.xml');
+    const sst = parseSST(sstF ? await sstF.async('string') : '');
+    let sXml = await state.zip.file(sh.path).async('string');
+    const miss = missingCustomers(sXml, await state.zip.file(rw.path).async('string'), sst, giDate.slice(0,7));
+    if(miss === null){ log('⚠ Summary: "Yearly Accumulation" customer list not found — new-customer check skipped','warn'); return; }
+    if(!miss.length){ log('✅ Summary: every customer of '+giDate.slice(0,7)+' is in the "by customer" list','ok'); return; }
+    const lst = miss.map(m => m.name+' ('+Math.round(m.kg/1000).toLocaleString('en-US')+' MT this month)');
+    miss.forEach(m => log('⚠ NEW CUSTOMER not in the Summary "by customer" list: '+m.name+' · '+Math.round(m.kg).toLocaleString('en-US')+' kg this month','warn'));
+    if(!confirm('NEW CUSTOMER(S) — not in the "Yearly Accumulation / by customer" list of Summary Data:\n\n  • '+lst.join('\n  • ')+
+                '\n\nWithout a row they are missing from the monthly / yearly accumulation.\n\nOK = add them at the end of the list automatically\nCancel = do not add (add them by hand)')){
+      log('❌ Summary: '+miss.length+' new customer(s) NOT added — add them by hand: '+miss.map(m => m.name).join(', '),'er');
+      if(typeof toast === 'function') toast('⚠ New customer not in Summary list: '+miss.map(m => m.name).join(', '),'er');
+      return;
+    }
+    const res = summaryAddCustomersXml(sXml, sst, miss.map(m => m.name));
+    if(!res.ok){ log('❌ Summary: cannot add new customers — '+res.msg,'er'); if(typeof toast === 'function') toast('⚠ Add new customer by hand: '+miss.map(m => m.name).join(', '),'er'); return; }
+    state.zip.file(sh.path, res.xml);
+    log('✅ Summary: added new customer(s) '+res.added.join(', ')+' at row '+res.rows[0]+(res.rows[1] > res.rows[0] ? '–'+res.rows[1] : '')+' (formulas copied from the row above)','ok');
+    if(typeof toast === 'function') toast('➕ New customer added to Summary: '+res.added.join(', '),'ok');
+  }
+
+  async function fillCancelList(giDate){
+    const sh = await findSheet(state.zip, /^cancel\s*list$/i);
+    if(!sh){ log('⚠ Sheet "Cancel List" not found — skip','warn'); return; }
+    log('── Cancel List ──','info');
+    if(typeof MAIL === 'undefined' || !MAIL.p2Cancel){ log('⚠ Cancel List: mail module not loaded — skip','warn'); return; }
+    try{ if(typeof PLANDAY !== 'undefined') await PLANDAY.load(giDate); }catch(_){}
+    try{ if(typeof PLANCX !== 'undefined') await PLANCX.load(giDate, true); }catch(_){}      /* v4.187 — xe biến mất đã xác nhận lúc dán */
+    const cx = MAIL.p2Cancel(giDate);
+    if(!cx.hasPlan && !cx.first){ log('⚠ Cancel List: no Today Plan and no first plan for '+giDate+' — sheet left untouched','warn'); return; }
+    if(!cx.first && !confirm('Cancel List '+giDate+':\nThe first plan of the day was not recorded.\n"Daily plan" would be the CURRENT plan ('+cx.dailyPlan.toFixed(3)+' MT).\n\nOK = write it · Cancel = skip the Cancel List sheet')){ log('⚠ Cancel List: skipped by user (no first plan)','warn'); return; }
+    const short = c => { try{ return (typeof CT !== 'undefined' && CT.lookup) ? (CT.lookup(c) || c) : c; }catch(_){ return c; } };
+    const data = { plan:cx.dailyPlan, actual:cx.dailyActual, rows:cx.rows.map(r => Object.assign({}, r, { customer:short(r.customer) })) };
+    const sstF = state.zip.file('xl/sharedStrings.xml');
+    const sst = parseSST(sstF ? await sstF.async('string') : '');
+    const res = cancelListXml(await state.zip.file(sh.path).async('string'), sst, giDate, data);
+    if(!res.ok){ log('⚠ '+res.msg,'warn'); return; }
+    state.zip.file(sh.path, res.xml);
+    log('✅ Cancel List: '+giDate+' rows '+res.start+'–'+res.end+(res.replaced ? ' (replaced)' : '')+' · plan '+data.plan.toFixed(3)+' MT'+(cx.first ? ' (first plan)' : ' (current plan)')+' · actual '+data.actual.toFixed(3)+' MT · '+res.rows+' cancelled','ok');
+    data.rows.forEach(r => log('   🚫 '+r.customer+' · '+(r.plate||'—')+' · '+(r.qty ? r.qty.toFixed(3)+' MT' : '')+' · '+r.note, 'info'));
+    try{ if(typeof PLANCX !== 'undefined') PLANCX.markUsed(giDate, 'rpt'); }catch(_){}      /* v4.187 — đủ email P2 + file ⇒ xoá plan_cx ngày đó */
   }
 
   /* ─────────── INIT ─────────── */
@@ -1581,7 +1841,86 @@ const RPT = (function(){
   }
 
   /* ─────────── PUBLIC API ─────────── */
-  return { init, pickFile, setDate, preCheck, closePreCheck, executeExport, log, clearLog,
+  /* v4.173 — nạp file từ ô chọn file của ✉ REPORT MAIL */
+  /* v4.205 — nhận thêm handle (showOpenFilePicker) ⇒ hộp Save mở ĐÚNG thư mục của file nguồn (startIn) */
+  async function useFile(file, handle){
+    state.fileName=file.name; state.fileHandle=handle||null;
+    state.zip=await JSZip.loadAsync(await file.arrayBuffer());
+    log('📄 Loaded: '+state.fileName,'ok'); try{ updateUI(); }catch(_){}
+    return true;
+  }
+
+  /* ═══ v4.181 — BẢNG "Summary data" (LUỸ KẾ) CHO EMAIL P2 ═══════════════════
+     Đọc từ CHÍNH file báo cáo vừa điền (hoặc file nhân viên đính kèm):
+       • tháng TRƯỚC tháng báo cáo: số trên các dòng tháng của sheet Summary Data
+         (nhân viên chốt tay — có tháng lệch Raw Data, phải tôn trọng số đã chốt);
+       • tháng của ngày báo cáo + cột "Yearly Accumulation by Customer": tính lại ĐÚNG
+         công thức SUMIFS của file trên sheet Raw Data (file do app ghi nên Excel chưa
+         tính lại — số cache trong file là số của hôm trước).
+     Chỉ đọc, không ghi gì. */
+  function _xlSerialToYm(v){
+    if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0');
+    const n = +v; if(!isFinite(n) || n < 40000 || n > 60000) return '';
+    const d = new Date(Date.UTC(1899,11,30) + Math.floor(n) * 864e5);
+    return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0');
+  }
+  async function accumulation(src, iso){
+    if(typeof XLSX === 'undefined') throw new Error('SheetJS (XLSX) not loaded');
+    const buf = (src && src.arrayBuffer) ? await src.arrayBuffer() : src;
+    const names = XLSX.read(buf, { type:'array', bookSheets:true }).SheetNames || [];
+    const nSum = names.find(n => /summary\s*data/i.test(n)), nRaw = names.find(n => /raw\s*data/i.test(n));
+    if(!nSum || !nRaw) throw new Error('Sheets "Summary Data" / "Raw Data" not found');
+    const wb = XLSX.read(buf, { type:'array', sheets:[nSum, nRaw] });
+    const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header:1, raw:true, defval:'' });
+    const S = aoa(nSum), R = aoa(nRaw);
+    const CATS = ['Domestic','Domestic (Pure)','Domestic (Ship)','Export','Export (Ship)'];
+    const num = v => { const x = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g,'')); return isFinite(x) ? x : 0; };
+    const ym = String(iso).slice(0,7);
+    /* Raw Data: cột theo TIÊU ĐỀ (GI Date · Customer · Trade Type · Net Weight) */
+    let h = -1; const col = {};
+    for(let i = 0; i < Math.min(R.length, 40); i++){
+      const r = R[i].map(x => String(x).trim().toLowerCase());
+      if(r.includes('gi date') && r.includes('customer') && r.includes('net weight')){ h = i;
+        col.d = r.indexOf('gi date'); col.c = r.indexOf('customer'); col.t = r.indexOf('trade type'); col.n = r.indexOf('net weight'); break; }
+    }
+    if(h < 0) throw new Error('Raw Data header (GI Date / Customer / Net Weight) not found');
+    /* SUMIFS của Excel KHÔNG phân biệt hoa/thường ("Anpha" khớp "AnPha") ⇒ so theo chữ thường */
+    const key = v => String(v || '').trim().toLowerCase();
+    const CATK = CATS.map(key);
+    const curByCust = {}, yrByCust = {}, curTot = CATS.map(() => 0), shown = {};
+    for(let i = h + 1; i < R.length; i++){
+      const r = R[i]; const c = key(r[col.c]); if(!c) continue;
+      const q = num(r[col.n]); yrByCust[c] = (yrByCust[c] || 0) + q;
+      if(_xlSerialToYm(r[col.d]) !== ym) continue;
+      const k = CATK.indexOf(key(r[col.t])); if(k < 0) continue;
+      (curByCust[c] = curByCust[c] || CATS.map(() => 0))[k] += q; curTot[k] += q; shown[c] = String(r[col.c]).trim();
+    }
+    /* Summary Data: dòng "Yearly …" rồi các dòng tháng, rồi danh sách khách */
+    let y = S.findIndex(r => /yearly/i.test(String(r[1] || '')));
+    if(y < 0) throw new Error('"Yearly Accumulation" row not found in Summary Data');
+    const months = []; let i = y + 1;
+    for(; i < S.length; i++){
+      const m = _xlSerialToYm(S[i][1]); if(!m) break;
+      if(m < ym) months.push({ ym:m, v:[2,3,4,5,6].map(c => num(S[i][c])) });
+    }
+    months.push({ ym, v:curTot.slice(), cur:true });
+    const cust = []; const listed = {};
+    for(; i < S.length; i++){
+      const nm = String(S[i][1] || '').trim(); if(!nm) break;
+      listed[key(nm)] = 1;
+      const v = curByCust[key(nm)] || CATS.map(() => 0);
+      cust.push({ name:nm, v, tot:v.reduce((a, b) => a + b, 0), yr:yrByCust[key(nm)] || 0 });
+    }
+    const unlisted = Object.keys(curByCust).filter(c => !listed[c]).map(c => shown[c] || c);
+    /* v4.203 — khách mới (chưa có dòng trong file) vẫn có số để email P2 hiện ĐỎ, không bị mất */
+    const extra = Object.keys(curByCust).filter(c => !listed[c]).map(c => { const v = curByCust[c];
+      return { name:shown[c] || c, v, tot:v.reduce((a, b) => a + b, 0), yr:yrByCust[c] || 0, isNew:true }; });
+    const year = CATS.map((_, k) => months.reduce((a, m) => a + m.v[k], 0));
+    return { date:iso, ym, cats:CATS, months, year, cust, unlisted, extra };
+  }
+
+  return { _cancelListXml:cancelListXml, _missingCustomers:missingCustomers, _summaryAddCustomersXml:summaryAddCustomersXml, init, pickFile, useFile, setDate, preCheck, closePreCheck, executeExport, log, clearLog,
+           summaryGroups, accumulation,   /* v4.181 — dùng chung với email P2 */
            get state(){ return state; } };
 })();
 

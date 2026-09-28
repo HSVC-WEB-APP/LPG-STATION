@@ -105,7 +105,8 @@
  *    cột ACTUAL và cột PLAN (file KH tiếng Hàn), rồi GHÉP: lấy ACTUAL tới
  *    ngày đầu tiên thiếu số, từ đó trở đi lấy PLAN và KHÔNG quay lại actual.
  *    Mỗi ngày mang cờ nguồn `xs`: 'a' actual · 'p' plan · 'm' người dùng gõ.
- *    ⚠ Ngày `xs==='m'` KHÔNG bị import đè (trừ khi tích "overwrite").
+ *    ⭐ v4.189: ngày có ACTUAL trong file LUÔN đè số gõ tay (`xs==='m'`);
+ *    chỉ số PLAN mới nhường ngày gõ tay/actual (trừ khi tích "overwrite").
  *    ⚠ Cột **Source** trong bảng OL1 hiện đúng ba nhãn đó — người dùng phải
  *    nhìn ra ngay đâu là số THẬT, đâu là số KẾ HOẠCH, vì cả Actual left lẫn
  *    Empty by đều đứng trên nó. Ngày ĐÃ QUA mà còn cờ 'p' ⇒ dải cảnh báo
@@ -197,7 +198,7 @@ const BOND = (function(){
   let _table=null, _fb=null, _live=false, _loaded=false, _initDone=false;
   let _echo=0, _echoUntil=0;
   let _month='';                 /* KỲ đang xem — mặc định tháng của D-1     */
-  let _mode='raw';               /* 'raw' | 'knq'                            */
+  let _mode='raw';               /* 'raw' | 'knq' | 'wms' (v4.180)           */
   let _slim=false;               /* ẩn bớt cột Init/GR/GI/Trs cho bảng gọn   */
   /* ⭐ v4.116 — MẶC ĐỊNH THU GỌN. Dải thẻ chiếm gần 1/3 chiều cao màn hình
      mà phần lớn thời gian người dùng chỉ cần cái BẢNG. Muốn xem thì bấm ▤. */
@@ -377,6 +378,8 @@ const BOND = (function(){
   function _schedule(){
     if(_renT) return;
     _renT=setTimeout(()=>{ _renT=null; if(_mode==='knq') render(); },200);
+    /* v4.181 — FEED OL1 đổi (máy khác gõ tổng / import X) ⇒ bảng kiểm SAP WMS vẽ lại */
+    try{ if(typeof SWR!=='undefined') SWR.poke(); }catch(_){}
   }
 
   /* ============================================================
@@ -2030,7 +2033,7 @@ const BOND = (function(){
      đúng cách người dùng đọc file. Kết quả ghi vào ô X, kèm cờ nguồn `xs`
      ('a' actual · 'p' plan · 'm' gõ tay) để bảng phân biệt được; số plan gốc
      luôn giữ nguyên ở `xp` để đối chiếu.
-     ⚠ Ngày người dùng ĐÃ GÕ TAY (`xs==='m'`) mặc định KHÔNG bị đè.
+     ⭐ v4.189: ngày có ACTUAL trong file LUÔN đè số gõ tay; PLAN thì không.
   ============================================================ */
   function pickFile(){ const f=_el('bondOl1File'); if(f){ f.value=''; f.click(); } }
   function fileChosen(input){
@@ -2214,13 +2217,19 @@ const BOND = (function(){
     const f=(unit==='kg')?1:1000;
     const R=_impRows();
     const pay={};
-    let na=0, np=0, skip=0, keep=0;
+    let na=0, np=0, skip=0, keep=0, rep=0;
     R.forEach(o=>{
       const u=Object.assign({ t:'', x:'', xp:'', note:'' },USE[o.d]||{});
       if(o.p!=null) u.xp=Math.round(o.p*f);          /* giữ plan gốc để đối chiếu */
+      /* ⭐ v4.189 — ngày CÓ SỐ ACTUAL trong file LUÔN đè lên số gõ tay: file
+         kế hoạch là nguồn cập nhật chính thức, người dùng không phải dò lại
+         từng ngày. Chỉ số PLAN mới nhường số gõ tay / số actual đang có
+         (trừ khi tích ô "overwrite"), vì plan là số tạm. */
+      const _hard=(u.xs==='m'||u.xs==='a') && _num(u.x)!=null;
       if(o.v==null) skip++;
-      else if(u.xs==='m' && !ow) keep++;             /* đã gõ tay → không đè */
+      else if(o.src==='p' && _hard && !ow) keep++;
       else{
+        if(u.xs==='m' && _num(u.x)!==Math.round(o.v*f)) rep++;
         u.x=Math.round(o.v*f); u.xs=o.src;
         if(o.src==='a') na++; else np++;
       }
@@ -2232,7 +2241,8 @@ const BOND = (function(){
     _imp=null; _paste=false; _renderImp(); _renderUse(); render();
     _say('📥 X loaded: '+na+' ACTUAL day(s)'+(np?(' · '+np+' PLAN day(s)'):'')+
          (firstPlan?(' (plan from '+_dmy(firstPlan)+')'):'')+
-         (keep?(' · kept '+keep+' hand-keyed day(s)'):'')+
+         (rep?(' · replaced '+rep+' hand-keyed day(s)'):'')+
+         (keep?(' · kept '+keep+' existing day(s) instead of PLAN'):'')+
          (skip?(' · '+skip+' day(s) with no figure'):''),'ok');
   }
   function _renderImp(){
@@ -2282,9 +2292,9 @@ const BOND = (function(){
           _op(none.concat(opts),_imp.pCol)+'</select>'+
         '<label>Unit</label><select onchange="BOND.impSet(\'unit\',this.value)">'+
           _op([{v:'T',l:'MT'},{v:'kg',l:'kg'}],_imp.unit)+'</select>'+
-        '<label class="bond-ow" title="By default a hand-keyed day is NOT overwritten by the file">'+
+        '<label class="bond-ow" title="ACTUAL figures in the file always overwrite what is in the table. PLAN figures do not replace a hand-keyed or actual day unless this is ticked">'+
           '<input type="checkbox"'+(_imp.ow?' checked':'')+
-          ' onchange="BOND.impSet(\'ow\',this.checked)"> overwrite hand-keyed days</label>'+
+          ' onchange="BOND.impSet(\'ow\',this.checked)"> PLAN may overwrite keyed days</label>'+
         '<button class="bond-btn accent" onclick="BOND.impApply()">✔ APPLY</button>'+
         '<button class="bond-btn" onclick="BOND.impCancel()">Cancel</button>'+
       '</div>'+
@@ -2366,7 +2376,7 @@ const BOND = (function(){
         ? '<span class="bond-src p dim" title="Only a plan figure exists for this day">Plan</span>'
         : '<span class="bond-dim">—</span>';
     }
-    if(xs==='m') return '<span class="bond-src m" title="Typed in by hand — an Excel import will not overwrite it">Keyed</span>';
+    if(xs==='m') return '<span class="bond-src m" title="Typed in by hand — an Excel import/paste with an ACTUAL figure for this day will replace it">Keyed</span>';
     if(xs==='p') return '<span class="bond-src p" title="PLAN figure loaded from the Excel file">Plan</span>';
     return '<span class="bond-src a" title="ACTUAL figure loaded from the Excel file">Actual</span>';
   }
@@ -2378,15 +2388,19 @@ const BOND = (function(){
   /* ============================================================
      KHUNG NHÌN
   ============================================================ */
+  /* v4.180 — nút gạt thứ ba 'wms' = 📑 SAP WMS Report (swr.js) */
   function setMode(m){
-    _mode=(m==='knq')?'knq':'raw';
-    const raw=_el('spViewRaw'), knq=_el('spViewKnq');
+    _mode=(m==='knq'||m==='wms')?m:'raw';
+    const raw=_el('spViewRaw'), knq=_el('spViewKnq'), wms=_el('spViewWms');
     if(raw) raw.style.display=(_mode==='raw')?'':'none';
     if(knq) knq.style.display=(_mode==='knq')?'':'none';
-    ['bondModeRaw','bondModeKnq'].forEach(id=>{ const b=_el(id); if(b) b.classList.remove('on'); });
-    const on=_el(_mode==='raw'?'bondModeRaw':'bondModeKnq'); if(on) on.classList.add('on');
+    if(wms) wms.style.display=(_mode==='wms')?'':'none';
+    ['bondModeRaw','bondModeKnq','bondModeWms'].forEach(id=>{ const b=_el(id); if(b) b.classList.remove('on'); });
+    const on=_el(_mode==='raw'?'bondModeRaw':_mode==='knq'?'bondModeKnq':'bondModeWms'); if(on) on.classList.add('on');
     if(_mode==='knq'){
       onEnter();
+    }else if(_mode==='wms'){
+      try{ if(typeof SWR!=='undefined') SWR.onEnter(); }catch(e){ console.warn('[BOND] swr', e); }
     }else{
       try{ if(SP && SP.table) SP.rebuildTableData(); }catch(_){}
     }
@@ -2506,6 +2520,8 @@ const BOND = (function(){
 
   return {
     init, onEnter, render, recalc, setMode,
+    /* v4.181 — SAP WMS Report / email P6 cần FEED OL1 (tổng + X kế hoạch) mà không phải mở tab KNQ */
+    loadUse:()=>_load(),
     setInfo, delRow,
     savePeriod, openPeriod, closePeriod, delPeriod,
     /* v4.118 — kho lưu trữ + sổ theo dõi */

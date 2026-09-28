@@ -79,19 +79,18 @@ const VLOG = (function(){
     }
     _fbRef = firebase.database().ref(FB_PATH);
     /* child_added → initial backfill + incremental adds from other devices */
+    /* v4.194 — bỏ cờ chặn TOÀN CỤC _suppressEcho ở listener: nó nuốt luôn thay đổi của máy khác
+       trong 400 ms sau mỗi lần mình ghi. Áp lại bản ghi của chính mình là vô hại (cùng rid, cùng dữ liệu). */
     _fbRef.on('child_added', snap=>{
-      if(_suppressEcho > 0) return;
       const rid = snap.key, v = snap.val();
       if(v && typeof v === 'object'){ _setRow(rid, v); render(); }
     }, e=>console.warn('[VLOG] child_added', e));
     _fbRef.on('child_changed', snap=>{
-      if(_suppressEcho > 0) return;
       const rid = snap.key, v = snap.val();
       if(v && typeof v === 'object'){ _setRow(rid, v); render(); }
     }, e=>console.warn('[VLOG] child_changed', e));
     _fbRef.on('child_removed', snap=>{
-      if(_suppressEcho > 0) return;
-      _removeRow(snap.key); render();
+      if(_removeRow(snap.key)) render();
     }, e=>console.warn('[VLOG] child_removed', e));
     _attached = true;
     console.log('[VLOG] ✅ Init OK · listening to /'+FB_PATH);
@@ -197,7 +196,8 @@ const VLOG = (function(){
     return arr.slice().sort((a,b)=>{
       let r = 0;
       if(SORT.col === 'date'){
-        r = String(a.date||'').localeCompare(String(b.date||''));
+        const dk = x => { const r2 = _vDate(x.date); if(!r2.ok || !r2.v) return ''; const q = r2.v.split('/'); return '20'+q[2]+q[1]+q[0]; };
+        r = dk(a).localeCompare(dk(b));
         if(!r) r = _lotKey(a.lot) - _lotKey(b.lot);
       } else {
         r = _lotKey(a.lot) - _lotKey(b.lot);
@@ -282,10 +282,14 @@ const VLOG = (function(){
       thead.innerHTML = h;
     }
 
-    let prevLot = '';
+    let prevLot = '', headDate = '';
     tbody.innerHTML = filtered.map((e, i)=>{
       const isNew = (String(e.lot||'') !== prevLot);
       prevLot = String(e.lot||'');
+      if(isNew) headDate = String(e.date||'').trim();
+      /* v4.194 — dòng tank con có NGÀY KHÁC dòng đầu lot ⇒ hiện đỏ (trước đây bị giấu, email đọc nhầm) */
+      const dOdd = !isNew && String(e.date||'').trim() !== headDate;
+      const dCell = isNew ? _esc(e.date||'') : (dOdd ? '<span class="vle-odd" title="This row has a different date from the first row of the lot — open ✏ and SAVE to align them">'+_esc(e.date||'(blank)')+'</span>' : '');
       const tk = String(e.tank||'');
       const tkCls = tk === '1' ? 'vslog-tk-1'
                   : (tk === '2' ? 'vslog-tk-2' : 'vslog-tk-x');
@@ -303,7 +307,7 @@ const VLOG = (function(){
         +'<td class="'+tkCls+'">'+_esc(tk||'—')+'</td>'
         +'<td>'+_esc(e.ship||'')+'</td>'
         +'<td>'+(isNew ? _esc(e.customer||'') : '')+'</td>'
-        +'<td>'+(isNew ? _esc(e.date||'') : '')+'</td>'
+        +'<td>'+dCell+'</td>'
         +'<td>'+_esc(e.tStart||'')+'</td>'
         +'<td>'+_esc(e.tEnd||'')+'</td>'
         +'<td style="font-family:monospace;text-align:right;font-weight:700">'+_n(e.qty != null ? e.qty : e.cTotal, 0)+'</td>'
@@ -376,106 +380,198 @@ const VLOG = (function(){
     const chip = (c,b,t)=>'<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--ink-2)">'
       +'<span style="width:15px;height:15px;border-radius:3px;background:'+c+';border:1.5px solid '+b+'"></span>'+t+'</span>';
     return '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:16px;padding:9px 14px;background:#fafbfc;border:1px solid var(--line);border-radius:6px">'
-      + chip('#f4f7fa','#cbd5e0','Ban đầu (nhập tay / từ mix)')
-      + chip('#f6f0fb','#c9a0e8','Từ COQ (import)')
-      + chip('#eaf7ef','#6cbf94','Phần mềm tính toán')
+      + chip('#f4f7fa','#cbd5e0','Typed / from the mix')
+      + chip('#f6f0fb','#c9a0e8','From COQ (import)')
+      + chip('#eaf7ef','#6cbf94','Calculated by the app')
       + '</div>';
   }
   function _escAttr(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
   let _editRid = null;   /* dòng đang mở trong modal — cho import COQ */
+  /* v4.177 — chỉ số các tank của một dòng: tối thiểu [0,1] (như trước), tàu N tank ⇒ [0..N-1] */
+  function _tankIdx(e){
+    const n = Math.max(2, Math.min(8, (e && Array.isArray(e.t)) ? e.t.length : 2));
+    const out = []; for(let i = 0; i < n; i++) out.push(i); return out;
+  }
+
+  /* ============================================================
+     v4.194 — MODAL SỬA VESSEL LOG KIỂU TANK LOG
+     • nhóm có tiêu đề màu (dùng lại CSS eng-eg-*), nhãn + đơn vị, ô trống có GỢI Ý ĐỊNH DẠNG
+     • ngày DD/MM/YY + giờ HH:MM có mặt nạ và kiểm tra (ngày không có thật ⇒ không cho lưu)
+     • LOT · Ship · Customer · Date là của CẢ LOT ⇒ lưu là chép sang mọi dòng tank cùng lot
+       (lỗi cũ: sửa ngày ở dòng tank 1, dòng tank 2 vẫn giữ ngày sai ⇒ email P7 đọc nhầm)
+     • ô tính toán (%Wt, C3/C4/LPG weight) người gõ tay THẮNG máy tính — trước đây SAVE luôn
+       chạy recalcEntry nên số vừa sửa bị ghi đè, nhìn như "sửa mà không đổi gì"
+     ============================================================ */
+  const VF = {
+    lot:{ph:'LPG-2026-S-45',tip:'Lot code as on the COQ'},
+    tank:{ph:'1 · 2 · 02 TANK',tip:'1 / 2 = one row per tank · 02 TANK = one combined row'},
+    ship:{ph:'VIET GAS 01'}, customer:{ph:'Gas South'},
+    date:{ph:'DD/MM/YY',type:'date',tip:'Loading date — e.g. 12/06/26 (day / month / year)'},
+    tStart:{ph:'HH:MM',type:'time'}, tEnd:{ph:'HH:MM',type:'time'},
+    qty:{ph:'e.g. 230'}, lpgMixQty:{u:'ton',ph:'e.g. 230.000'},
+    targetC3:{u:'%',ph:'e.g. 35'}, minC3:{u:'%',ph:'e.g. 30'}, maxC3:{u:'%',ph:'e.g. 41'},
+    odoTk1:{u:'ppm',ph:'e.g. 25.00'}, odoTk2:{u:'ppm',ph:'e.g. 25.00'},
+    volC3:{u:'%vol',ph:'e.g. 35.00'}, volC4:{u:'%vol',ph:'e.g. 65.00'},
+    c3fq:{ph:'FQ reading'}, c4fq:{ph:'FQ reading'}, coqNo:{ph:'COQ number'},
+    wtC3:{u:'%wt',ph:'from %Vol by RECALC'}, wtC4:{u:'%wt',ph:'= 100 − %Wt C3'},
+    stC3:{u:'ton',ph:'= LPG × %Wt C3'}, stC4:{u:'ton',ph:'= LPG × %Wt C4'}, lpgWt:{u:'ton',ph:'total loaded, e.g. 231.300'},
+    quality:{ph:'Pass / Fail'}, remark:{ph:'free text'}
+  };
+  const VGROUPS = [
+    {key:'id',  title:'LOT', sub:'Shared by every tank row of this lot — saving copies these 4 fields to all of them', fields:['lot','ship','customer','date']},
+    {key:'inp', title:'THIS TANK — LOADING', sub:'Only this row', fields:['tank','tStart','tEnd','qty','lpgMixQty','targetC3','minC3','maxC3','odoTk1','odoTk2']},
+    {key:'coq', title:'COQ RESULT', sub:'Typed or 📄 IMPORT COQ', fields:['volC3','volC4','c3fq','c4fq','coqNo']},
+    {key:'res', title:'CALCULATED', sub:'🔄 RECALC fills these · a figure you type yourself is kept on SAVE', fields:['wtC3','wtC4','stC3','stC4','lpgWt','quality']},
+    {key:'note',title:'NOTE', sub:'', fields:['remark']}
+  ];
+  const LOT_FIELDS = ['lot','ship','customer','date'];
+  const CALC_FIELDS = ['wtC3','wtC4','stC3','stC4','lpgWt'];
+  function _vDate(s){
+    s = String(s == null ? '' : s).trim(); if(!s) return { ok:true, v:'' };
+    let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/), d, mo, y;
+    if(m){ d = +m[1]; mo = +m[2]; y = +m[3]; if(y < 100) y += 2000; }
+    else if((m = s.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/))){ y = +m[1]; mo = +m[2]; d = +m[3]; }
+    else if((m = s.match(/^(\d{2})(\d{2})(\d{2})$/))){ d = +m[1]; mo = +m[2]; y = 2000 + +m[3]; }
+    else return { ok:false, v:s };
+    const dt = new Date(y, mo - 1, d);
+    if(dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return { ok:false, v:s };
+    const p = n => String(n).padStart(2,'0');
+    return { ok:true, v:p(d)+'/'+p(mo)+'/'+String(y).slice(-2) };
+  }
+  function _vTime(s){
+    s = String(s == null ? '' : s).trim(); if(!s) return { ok:true, v:'' };
+    const m = s.match(/^(\d{1,2})[:h.]?(\d{1,2})?$/); if(!m) return { ok:false, v:s };
+    const h = +m[1], mi = m[2] == null ? 0 : +m[2];
+    if(h > 23 || mi > 59) return { ok:false, v:s };
+    return { ok:true, v:String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0') };
+  }
+  function _mark(el, bad, msg){ if(!el) return; el.classList.toggle('vle-bad', !!bad); el.title = bad ? msg : (el.dataset.tip || ''); }
+  function _dateBlur(el){ const r = _vDate(el.value); if(r.ok) el.value = r.v; _mark(el, !r.ok, 'Not a real date — type DD/MM/YY, e.g. 12/06/26'); }
+  function _timeBlur(el){ const r = _vTime(el.value); if(r.ok) el.value = r.v; _mark(el, !r.ok, 'Type the time as HH:MM, e.g. 08:45'); }
+  function _timeMask(el){ let v = String(el.value||'').replace(/[^\d]/g,'').slice(0,4); if(v.length >= 3) v = v.slice(0,2)+':'+v.slice(2); el.value = v; }
+  function _lotRows(lot){ const k = String(lot||'').trim(); return k ? ROWS.filter(r => String(r.lot||'').trim() === k) : []; }
+  function _fldHtml(k, e){
+    const f = EDIT_FIELDS.find(x => x.k === k) || { l:k, src:'orig' }, m = VF[k] || {};
+    const v = e[k] != null ? e[k] : '';
+    let extra = '';
+    if(m.type === 'time') extra = ' inputmode="numeric" maxlength="5" oninput="VLOG._timeMask(this)" onblur="VLOG._timeBlur(this)"';
+    else if(m.type === 'date') extra = ' maxlength="10" onblur="VLOG._dateBlur(this)"';
+    else if(!EDIT_TXT.includes(k)) extra = ' inputmode="decimal"';
+    const bad = m.type === 'date' && String(v).trim() !== '' && !_vDate(v).ok;
+    return '<div class="eng-edit-fld"'+(k === 'remark' ? ' style="grid-column:1/-1"' : '')+'>'
+      +'<label class="eng-edit-lbl" for="vle-'+k+'">'+f.l+(m.u ? ' <span class="vle-u">'+m.u+'</span>' : '')+'</label>'
+      +'<input id="vle-'+k+'" type="text" class="eng-edit-inp vle-'+f.src+(bad ? ' vle-bad' : '')+'" data-orig="'+_escAttr(v)+'" data-tip="'+_escAttr(m.tip || '')+'"'
+      +' value="'+_escAttr(v)+'" placeholder="'+_escAttr(m.ph || '')+'" title="'+_escAttr(bad ? 'Not a real date — type DD/MM/YY' : (m.tip || ''))+'" onfocus="this.select()"'+extra+'>'
+      +'</div>';
+  }
 
   function openEdit(rid){
     const e = RID_MAP[rid]; if(!e){ toast('Row not found','er'); return; }
     _editRid = rid;
     const old = document.getElementById('vlog-edit-overlay'); if(old) old.remove();
     const ov = document.createElement('div');
-    ov.id = 'vlog-edit-overlay';
-    ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.id = 'vlog-edit-overlay'; ov.className = 'vle-ov';
     ov.onclick = ev => { if(ev.target === ov) ov.remove(); };
-    let h = '<div style="background:#fff;border-radius:12px;padding:26px 30px;max-width:1180px;width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,.3)">';
-    h += '<div style="font-family:Oswald;font-size:22px;font-weight:700;margin-bottom:14px;letter-spacing:.5px">✏ Edit — Lot '+_escAttr(e.lot)+' Tank '+_escAttr(e.tank)+'</div>';
+    const sib = _lotRows(e.lot), dates = Array.from(new Set(sib.map(r => String(r.date||'').trim()).filter(Boolean)));
+    const rq = String(rid).replace(/'/g,"\\'");
+    let h = '<div class="vle-box"><div class="vle-hd"><div><div class="vle-ttl">✏ Edit — Lot '+_escAttr(e.lot)+' · Tank '+_escAttr(e.tank)+'</div>'
+      +'<div class="vle-sub">'+sib.length+' row(s) in this lot: '+sib.map(r => 'tank '+_escAttr(r.tank || '?')).join(' · ')+'</div></div>'
+      +'<button class="vle-x" onclick="document.getElementById(\'vlog-edit-overlay\').remove()" title="Close">✕</button></div>';
+    if(dates.length > 1) h += '<div class="vle-warn">⚠ The rows of this lot have DIFFERENT dates ('+dates.map(_escAttr).join(' / ')+'). The email reads the lot date from these rows — press 💾 SAVE to give every row the date below.</div>';
     h += _srcLegend();
-    h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px 14px">';
-    EDIT_FIELDS.forEach(f=>{
-      const v = e[f.k] != null ? e[f.k] : '';
-      h += '<div><div style="font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;margin-bottom:3px">'+f.l+'</div>'
-        +'<input id="vle-'+f.k+'" value="'+_escAttr(v)+'" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:15px;padding:8px 10px;border-radius:5px;'+_srcInputStyle(f.src)+'"></div>';
+    h += '<div class="eng-edit-grid vle-grid">';
+    VGROUPS.forEach(g => {
+      h += '<div class="eng-eg-hdr eng-eg-'+g.key+'"><span class="eng-eg-ttl">'+g.title+'</span>'+(g.sub ? '<span class="eng-eg-sub">'+g.sub+'</span>' : '')+'</div>';
+      g.fields.forEach(k => { h += _fldHtml(k, e); });
     });
     h += '</div>';
-    [0,1].forEach(t=>{
-      const col = t === 0 ? 'var(--blue)' : 'var(--orange)';
-      h += '<div style="font-size:14px;font-weight:700;color:'+col+';margin:18px 0 8px;letter-spacing:.5px">GC TANK '+(t+1)+'</div>';
-      h += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px 14px">';
+    /* khối GC từng tank — giữ nguyên id vle-gc<t>-<k> cho IMPORT COQ / RECALC */
+    _tankIdx(e).forEach(t=>{
+      const md = e.t && e.t[t] && e.t[t].mode;
+      const src = e.t && e.t[t] ? e.t[t] : (t === 0 ? (e.gc||{}) : (e.gc2||{}));
+      h += '<div class="eng-edit-grid vle-grid"><div class="eng-eg-hdr eng-eg-gc"><span class="eng-eg-ttl">GC TANK '+(t+1)+(md ? ' · PURE '+_escAttr(md) : '')+'</span><span class="eng-eg-sub">mol % · density kg/L @15 °C · leave blank if not measured</span></div>';
       GC_COLS.forEach((k,ki)=>{
-        const src = e.t && e.t[t] ? e.t[t] : (t === 0 ? (e.gc||{}) : (e.gc2||{}));
         const v = src && src[k] != null ? src[k] : '';
-        h += '<div><div style="font-size:11px;font-weight:700;color:var(--ink-3);margin-bottom:3px">'+EDIT_GC_LABELS[ki]+'</div>'
-          +'<input id="vle-gc'+t+'-'+k+'" value="'+_escAttr(v)+'" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:14px;padding:7px 9px;border-radius:5px;'+_srcInputStyle(GC_SRC[ki])+'"></div>';
+        h += '<div class="eng-edit-fld"><label class="eng-edit-lbl">'+EDIT_GC_LABELS[ki]+'</label><input id="vle-gc'+t+'-'+k+'" type="text" inputmode="decimal" class="eng-edit-inp vle-'+GC_SRC[ki]+'" value="'+_escAttr(v)+'" placeholder="'+(k === 'labdens' ? 'e.g. 0.5575' : 'e.g. 0.00')+'" onfocus="this.select()"></div>';
       });
       GC_EXTRA.forEach(f=>{
-        const src = e.t && e.t[t] ? e.t[t] : (t === 0 ? (e.gc||{}) : (e.gc2||{}));
         const v = src && src[f.k] != null ? src[f.k] : '';
-        h += '<div><div style="font-size:11px;font-weight:700;color:var(--ink-3);margin-bottom:3px">'+f.l+'</div>'
-          +'<input id="vle-gc'+t+'-'+f.k+'" value="'+_escAttr(v)+'" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:14px;padding:7px 9px;border-radius:5px;'+_srcInputStyle('coq')+'"></div>';
+        h += '<div class="eng-edit-fld"><label class="eng-edit-lbl">'+f.l+'</label><input id="vle-gc'+t+'-'+f.k+'" type="text" class="eng-edit-inp vle-coq" value="'+_escAttr(v)+'" placeholder="'+(f.txt ? 'text' : 'number')+'" onfocus="this.select()"></div>';
       });
       h += '</div>';
     });
-    h += '<div style="margin-top:22px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
+    h += '<div class="vle-ft">';
     h += '<input type="file" id="vlog-coqfile" accept=".xlsx,.xls" style="display:none" onchange="VLOG.coqChosen(this)">';
-    h += '<button onclick="VLOG.importCoqPick()" style="background:#7b2d8e;color:#fff;border:1px solid #7b2d8e;border-radius:6px;font-size:14px;font-weight:600;padding:10px 26px;cursor:pointer" title="Import COQ Excel (2 tank) → điền GC Tank 1/2 + các chỉ tiêu (tím)">📄 IMPORT COQ</button>';
-    h += '<button onclick="VLOG.recalcEditForm()" style="background:#2d8a4e;color:#fff;border:1px solid #2d8a4e;border-radius:6px;font-size:14px;font-weight:600;padding:10px 26px;cursor:pointer" title="Recalculate C3/C4 Weight from %Wt (or %Vol) and LPG qty">🔄 RECALC</button>';
-    h += '<button onclick="VLOG.saveEdit(\''+String(rid).replace(/'/g,"\\'")+'\')" style="background:var(--blue);color:#fff;border:1px solid var(--blue);border-radius:6px;font-size:14px;font-weight:600;padding:10px 26px;cursor:pointer">💾 SAVE</button>';
-    h += '<button onclick="VLOG.saveAndPushVessel(\''+String(rid).replace(/'/g,"\\'")+'\')" style="background:#7b2d8e;color:#fff;border:1px solid #7b2d8e;border-radius:6px;font-size:14px;font-weight:600;padding:10px 26px;cursor:pointer" title="Save + push this entry to the LPG Sales → Vessel tab">🚢 SAVE + PUSH VESSEL</button>';
-    h += '<button onclick="document.getElementById(\'vlog-edit-overlay\').remove()" style="background:#f0f4f8;border:1px solid var(--line);border-radius:6px;font-size:14px;font-weight:600;padding:10px 26px;cursor:pointer">✕ CANCEL</button>';
+    h += '<button class="vle-b coq" onclick="VLOG.importCoqPick()" title="Import COQ Excel (2 tank) — fills GC Tank 1/2 + COQ items">📄 IMPORT COQ</button>';
+    h += '<button class="vle-b calc" onclick="VLOG.recalcEditForm()" title="Recalculate %Wt and C3/C4 weight from %Vol / %Wt and LPG qty">🔄 RECALC</button>';
+    h += '<span style="flex:1"></span>';
+    h += '<button class="vle-b" onclick="document.getElementById(\'vlog-edit-overlay\').remove()">Cancel</button>';
+    h += '<button class="vle-b push" onclick="VLOG.saveAndPushVessel(\''+rq+'\')" title="Save + push this entry to the LPG Sales → Vessel tab">🚢 SAVE + PUSH VESSEL</button>';
+    h += '<button class="vle-b pri" onclick="VLOG.saveEdit(\''+rq+'\')">💾 SAVE</button>';
     h += '</div></div>';
     ov.innerHTML = h;
     document.body.appendChild(ov);
   }
 
+  function _write(rid, e){
+    if(!_fbRef) return;
+    _fbRef.child(rid).set(e).catch(err => { console.warn('[VLOG] edit', err); toast('⚠ Save failed: '+(err && err.message || err),'er'); });
+  }
   function saveEdit(rid){
-    const e = RID_MAP[rid]; if(!e){ toast('Row not found','er'); return; }
-    const gv = id => { const el = document.getElementById(id); return el ? el.value : ''; };
-    const gn = id => { const v = parseFloat(gv(id)); return isNaN(v) ? null : v; };
+    const e = RID_MAP[rid]; if(!e){ toast('Row not found','er'); return false; }
+    const el = id => document.getElementById(id);
+    const gv = id => { const x = el(id); return x ? x.value : ''; };
+    const gn = id => { const v = parseFloat(String(gv(id)).replace(/,/g,'')); return isNaN(v) ? null : v; };
+    const changed = k => { const x = el('vle-'+k); return !!x && String(x.value).trim() !== String(x.dataset.orig || '').trim(); };
+    /* kiểm tra ngày / giờ trước khi ghi */
+    const dv = _vDate(gv('vle-date'));
+    if(!dv.ok){ _mark(el('vle-date'), true, 'Not a real date'); el('vle-date').focus(); toast('⚠ Date must be DD/MM/YY — e.g. 12/06/26','er'); return false; }
+    const tS = _vTime(gv('vle-tStart')), tE = _vTime(gv('vle-tEnd'));
+    if(!tS.ok || !tE.ok){ const b = !tS.ok ? 'vle-tStart' : 'vle-tEnd'; _mark(el(b), true, 'HH:MM'); el(b).focus(); toast('⚠ Time must be HH:MM — e.g. 08:45','er'); return false; }
+    if(!String(gv('vle-lot')).trim()){ toast('⚠ Lot is required','er'); el('vle-lot').focus(); return false; }
+    const oldLot = String(e.lot||'').trim();
+    const manual = CALC_FIELDS.filter(changed);
     EDIT_FIELDS.forEach(f=>{
-      if(EDIT_TXT.includes(f.k)) e[f.k] = gv('vle-'+f.k);
+      if(EDIT_TXT.includes(f.k)) e[f.k] = String(gv('vle-'+f.k)).trim();
       else e[f.k] = gn('vle-'+f.k);
     });
-    e.cTotal  = e.lpgWt || e.lpgMixQty || e.qty || 0;
-    e.cFilled = e.lpgWt || e.lpgMixQty || 0;
+    e.date = dv.v; e.tStart = tS.v; e.tEnd = tE.v;
+    const tIdx = _tankIdx(e);
     if(!e.t) e.t = [{},{}];
-    if(!e.t[0]) e.t[0] = {};
-    if(!e.t[1]) e.t[1] = {};
-    GC_COLS.forEach(k=>{
-      const v0 = gn('vle-gc0-'+k), v1 = gn('vle-gc1-'+k);
-      if(v0 != null) e.t[0][k] = v0; else delete e.t[0][k];
-      if(v1 != null) e.t[1][k] = v1; else delete e.t[1][k];
-    });
-    /* v4.72 — extra COQ indicators per tank (numeric or text) */
+    tIdx.forEach(t => { if(!e.t[t]) e.t[t] = {}; });
+    GC_COLS.forEach(k=>{ tIdx.forEach(t => { const v = gn('vle-gc'+t+'-'+k); if(v != null) e.t[t][k] = v; else delete e.t[t][k]; }); });
     GC_EXTRA.forEach(f=>{
       const isTxt = GC_EXTRA_TXT.includes(f.k);
-      [0,1].forEach(t=>{
-        const el = document.getElementById('vle-gc'+t+'-'+f.k);
-        if(!el){ return; }
-        if(isTxt){
-          const s = String(el.value||'').trim();
-          if(s) e.t[t][f.k] = s; else delete e.t[t][f.k];
-        } else {
-          const v = parseFloat(el.value);
-          if(!isNaN(v)) e.t[t][f.k] = v; else delete e.t[t][f.k];
-        }
+      tIdx.forEach(t=>{
+        const x = el('vle-gc'+t+'-'+f.k); if(!x) return;
+        if(isTxt){ const s = String(x.value||'').trim(); if(s) e.t[t][f.k] = s; else delete e.t[t][f.k]; }
+        else { const v = parseFloat(x.value); if(!isNaN(v)) e.t[t][f.k] = v; else delete e.t[t][f.k]; }
       });
     });
-    recalcEntry(e);
-    e._ts = Date.now();
-    if(_fbRef){
-      _suppressEcho++;
-      _fbRef.child(rid).set(e)
-        .catch(err => console.warn('[VLOG] edit', err))
-        .finally(()=> setTimeout(()=>{ _suppressEcho = Math.max(0, _suppressEcho-1); }, 400));
+    /* người gõ thắng máy: có sửa tay một ô tính toán thì KHÔNG recalc đè lên */
+    if(!manual.length) recalcEntry(e);
+    else {
+      if(manual.includes('wtC3') && !manual.includes('wtC4') && e.wtC3 != null) e.wtC4 = Math.round((100 - e.wtC3) * 100) / 100;
+      if((manual.includes('stC3') || manual.includes('stC4')) && !manual.includes('lpgWt') && e.stC3 != null && e.stC4 != null)
+        e.lpgWt = Math.round((e.stC3 + e.stC4) * 1000) / 1000;
     }
+    e.cTotal  = e.lpgWt || e.lpgMixQty || e.qty || 0;
+    e.cFilled = e.lpgWt || e.lpgMixQty || 0;
+    e._ts = Date.now();
+    _write(rid, e);
+    /* trường của LOT ⇒ chép sang mọi dòng tank cùng lot (theo mã lot CŨ, kể cả khi vừa đổi mã) */
+    let nSib = 0;
+    ROWS.forEach(r => {
+      if(r === e || !oldLot || String(r.lot||'').trim() !== oldLot) return;
+      let ch = false;
+      LOT_FIELDS.forEach(k => { if(String(r[k] == null ? '' : r[k]) !== String(e[k] == null ? '' : e[k])){ r[k] = e[k]; ch = true; } });
+      if(ch){ r._ts = Date.now(); _write(r._rid, r); nSib++; }
+    });
     render();
-    const ov = document.getElementById('vlog-edit-overlay'); if(ov) ov.remove();
-    toast('✅ Saved','ok');
+    try{ if(typeof MAIL !== 'undefined' && MAIL.refreshIf) MAIL.refreshIf('P7'); }catch(_){}
+    const ov = el('vlog-edit-overlay'); if(ov) ov.remove();
+    toast('✅ Saved'+(nSib ? ' · lot / ship / customer / date copied to '+nSib+' other row(s) of this lot' : '')+(manual.length ? ' · your typed '+manual.join(', ')+' kept' : ''),'ok');
+    return true;
   }
 
   /* v4.70 (V406 smRecalcEntry): recompute C3/C4 weights from %Wt × LPG qty;
@@ -510,6 +606,9 @@ const VLOG = (function(){
     const dens = (typeof VMIX !== 'undefined' && VMIX.DENS) ? VMIX.DENS : { c3l:0.492, c4l:0.566 };
     let wtC3 = gn('vle-wtC3');
     const volC3 = gn('vle-volC3');
+    /* v4.194 — vừa sửa %Vol C3 ⇒ tính lại %Wt từ %Vol mới (trước đây chỉ tính khi %Wt đang trống) */
+    const vEl = document.getElementById('vle-volC3');
+    if(vEl && String(vEl.value).trim() !== String(vEl.dataset.orig || '').trim() && volC3 != null) wtC3 = null;
     const lpg = gn('vle-lpgMixQty') || gn('vle-lpgWt') || gn('vle-qty') || 0;
     if(wtC3 == null && volC3 != null){
       const m3 = volC3 * dens.c3l, m4 = (100 - volC3) * dens.c4l;
@@ -560,13 +659,17 @@ const VLOG = (function(){
     }
     if(!ws) ws = wb.Sheets[wb.SheetNames[0]];
     const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:true});
-    /* tìm cột kết quả của TANK 1 / TANK 2 từ dòng header */
+    /* tìm cột kết quả của TANK 1 / TANK 2 từ dòng header
+       v4.177 — dò luôn TANK 3…8 (tàu nhiều tank); file 2 tank cho kết quả y hệt trước */
     let c1 = 7, c2 = 9;
+    const cN = {};
     for(const row of aoa){
       for(let j = 0; j < row.length; j++){
         const s = String(row[j]||'').trim();
         if(/^TANK\s*1$/i.test(s)) c1 = j;
         if(/^TANK\s*2$/i.test(s)) c2 = j;
+        const m = s.match(/^TANK\s*([3-8])$/i);
+        if(m) cN[+m[1]] = j;
       }
     }
     /* nhãn → giá trị đầu tiên bên phải (dùng cho phần định danh) */
@@ -649,6 +752,7 @@ const VLOG = (function(){
       frw:  rdFrac(col, 1)
     });
     coq.tanks = [ readTank(c1), readTank(c2) ];
+    for(let k = 3; k <= 8 && cN[k] != null; k++) coq.tanks.push(readTank(cN[k]));
     return coq;
   }
   function coqChosen(inputEl){
@@ -684,12 +788,13 @@ const VLOG = (function(){
     };
     sv('vle-coqNo', coq.no || '');
     if(coq.sampTime){ const fin = document.getElementById('vle-tEnd'); if(fin && !String(fin.value||'').trim()) fin.value = coq.sampTime; }
-    [0,1].forEach(t=>{
+    const tIdx = _tankIdx(e);                 /* v4.177 — mọi khối GC TANK n đang có trong modal */
+    tIdx.forEach(t=>{
       const tk = coq.tanks[t] || {};
       GC_COLS.forEach(k=>{ if(k !== 'meth') sv('vle-gc'+t+'-'+k, tk[k]); });
       GC_EXTRA.forEach(f=>{ sv('vle-gc'+t+'-'+f.k, tk[f.k]); });
     });
-    toast('📄 Import COQ '+(coq.no||coq.lot)+' → đã điền GC Tank 1 & 2 (tím) · bấm 🔄 RECALC rồi 💾 SAVE','ok');
+    toast('📄 Import COQ '+(coq.no||coq.lot)+' → GC of tank '+tIdx.filter(t => coq.tanks[t]).map(t => t+1).join(' & ')+' filled (purple) · press 🔄 RECALC then 💾 SAVE','ok');
   }
 
   /* v4.70 (V406 smPushToVessel): push a Vessel Log entry to the LPG Sales →
@@ -726,7 +831,9 @@ const VLOG = (function(){
       lot: e.lot||'',
       vessel: e.ship||'',
       item: 'Domestic (Ship)',
-      type: tankKey === '02 TANK' ? '02 TANK' : ('Tank '+tankKey),
+      /* v4.177 — hàng thuần ghi đúng loại sản phẩm (P2 nhận ra "Pure"); còn lại giữ như cũ */
+      type: e.mixType === 'C3' ? 'LPG (Pure Propane)' : e.mixType === 'C4' ? 'LPG (Pure Butane)'
+          : (/^\d+\s*TANK$/i.test(tankKey) ? tankKey : ('Tank '+tankKey)),
       customer: e.customer||'',
       dest: '',
       tank: tankKey||'',
@@ -744,7 +851,7 @@ const VLOG = (function(){
     });
   }
   function saveAndPushVessel(rid){
-    saveEdit(rid);
+    if(!saveEdit(rid)) return;
     const e = RID_MAP[rid];
     if(e) pushToVessel(e);
   }
@@ -998,6 +1105,8 @@ const VLOG = (function(){
     /* v4.70 */
     toggleGrp, sortBy, exportXlsx,
     saveEdit, recalcEntry, recalcEditForm, pushToVessel, saveAndPushVessel,
+    /* v4.194 — mặt nạ / kiểm tra ô ngày giờ trong modal sửa */
+    _dateBlur, _timeBlur, _timeMask, lotRows:_lotRows, vDate:_vDate,
     /* v4.72 — COQ import (vessel, 2-tank) */
     importCoqPick, coqChosen, parseVesselCoq: _parseVesselCoq,
     get ROWS(){ return ROWS; }

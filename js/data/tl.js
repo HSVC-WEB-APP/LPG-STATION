@@ -652,6 +652,7 @@ const TL = (function(){
       setSyncStatus(true);
       rebuildTableData();
       refreshBadge();
+      try{ if(typeof INV!=='undefined'&&INV.dataReady) INV.dataReady('tl'); }catch(_){} /* v4.202 */
     });
   }
   function setSyncStatus(ok){

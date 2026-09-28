@@ -94,7 +94,12 @@ const ENG = (function(){
      (Filled C3/C4 chinh thuc [13][14][66][67] giu nguyen, khong gui Scale,
      khong doi Quality). Xem khoi _tempAdjCalc/_tempAdjApply va nut
      'Temp-adj audit' o gan cuoi file de biet cong thuc & cach back-fill lot cu. */
-  const ROW_W = 80;
+  /* v4.174 — +1 → 81: [80] DẤU ĐÃ GỬI EMAIL Ball Tank Mixing Report (✉ REPORT
+     MAIL · P1) = "ms|người gửi|chữ ký số liệu". Chữ ký = băm các ô mà email
+     dùng ⇒ Tank Log sửa SAU khi gửi thì cột hiện "⚠ changed" để biết mà gửi lại.
+     Chỉ ghi đúng MỘT ô (eng_tkmix/<rid>/cells/80), không ghi lại cả dòng. */
+  const ROW_W = 81;
+  const M_SENT = 80;
   const C_ST = 53, C_ST_TS = 54, C_ST_BY = 55;
   /* v4.111 — 4 cột đối chiếu chuyển kho (kg) */
   const S_GAP3 = 69, S_GAP4 = 70, S_ADJ3 = 71, S_ADJ4 = 72;
@@ -549,6 +554,42 @@ const ENG = (function(){
   }
 
   /* ---------- main render ---------- */
+  /* ── v4.174 — dấu đã gửi email P1 ─────────────────────────────── */
+  const MAIL_SIG_COLS = [1,2,3,4,5,6,7,8,9,10,11,13,14,16,17,18,19,20,21,22,23,26,29,30,31,32,33];
+  function mailSig(r){
+    let h = 5381; const t = MAIL_SIG_COLS.map(i => String(r[i] == null ? '' : r[i]).trim()).join('|');
+    for(let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+  function mailInfo(r){
+    const v = String((r && r[M_SENT]) || '').trim(); if(!v) return null;
+    const p = v.split('|'); const ts = +p[0] || 0;
+    return { ts, by:p[1] || '', sig:p[2] || '', changed: !!p[2] && p[2] !== mailSig(r) };
+  }
+  function _mailTd(r){
+    const m = mailInfo(r);
+    if(!m) return '<td class="td-c td-mail" style="color:#94a3b8" title="Ball Tank Mixing Report not sent for this lot yet">—</td>';
+    const d = new Date(m.ts), p = n => String(n).padStart(2,'0');
+    const when = p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
+    return '<td class="td-c td-mail" style="white-space:nowrap;'+(m.changed ? 'color:#b45309;font-weight:700' : 'color:#15803d')+'" title="'+
+      _esc('Mixing report mail prepared '+d.toLocaleString()+(m.by ? ' by '+m.by : '')+(m.changed ? ' — Tank Log data CHANGED since then: send again' : ''))+'">'+
+      (m.changed ? '⚠ ' : '✉ ')+when+'</td>';
+  }
+  /* ghi dấu ĐÃ GỬI cho một lot — đúng MỘT ô trên Firebase */
+  function markMailSent(rid, by){
+    const row = RID_MAP[rid]; if(!row) return false;
+    const v = Date.now()+'|'+String(by || '').replace(/\|/g,'/')+'|'+mailSig(row);
+    row[M_SENT] = v; _saveCache();
+    if(_fbRef){
+      _suppressEcho++;
+      _fbRef.child(rid).child('cells').child(String(M_SENT)).set(v)
+        .catch(e => console.warn('[ENG] mail mark', e))
+        .finally(() => setTimeout(() => { _suppressEcho = Math.max(0, _suppressEcho - 1); }, 400));
+    }
+    try{ render(); }catch(_){}
+    return true;
+  }
+
   function render(){
     const tbody  = document.getElementById('engTbody');
     const overlay= document.getElementById('engPasteOverlay');
@@ -689,6 +730,7 @@ const ENG = (function(){
         '<td class="td-r td-coq">'+(c[50]!==''?_fmtNum(c[50],4):'')+'</td>' +
         '<td class="td-r td-coq">'+(c[51]!==''?_fmtNum(c[51],4):'')+'</td>' +
         '<td class="td-r td-coq">'+(c[52]!==''?_fmtNum(c[52],4):'')+'</td>' +
+        _mailTd(r) +
         '</tr>';
     }).join('');
 
@@ -1524,6 +1566,12 @@ const ENG = (function(){
             safe[col] = prev[col];
         });
       }
+    }
+    /* v4.174 — giữ dấu ĐÃ GỬI EMAIL khi Mix Cal / paste / sửa dòng ghi lại lot
+       (mảng của họ không có ô [80]). Chữ ký số liệu vẫn tự lộ ra thay đổi. */
+    {
+      const prev = RID_MAP[rid];
+      if(prev && String(safe[M_SENT] == null ? '' : safe[M_SENT]).trim() === '' && prev[M_SENT]) safe[M_SENT] = prev[M_SENT];
     }
     /* v4.156 -- cung ly do voi khoi tren: mixctrl.js dung mang ROW_W rieng
        (con o 73, chua theo kip 75->80) nen 5 cot THAM KHAO [75]-[79] luon
@@ -2729,6 +2777,12 @@ const ENG = (function(){
         return;
       }
     }
+    /* ── 2b. v4.171 — RÀ SOÁT FORMAT & ĐỘ ĐẦY ĐỦ CỦA FILE COQ ──
+       Thiếu/sai bất kỳ ô nào ⇒ KHÔNG điền một số nào vào modal. */
+    if(typeof MC.coqBlocked === 'function' && MC.coqBlocked(coq)){
+      MC.coqReport(coq, fname, rowLotStr + (rowTk ? (' · TK-' + rowTk) : ''));
+      return;
+    }
     /* ── 3. Fill modal INPUTS (not the row) — same col map as Tank Mix ── */
     const setC = (col, v, dec)=>{
       if(v == null || v === '') return;
@@ -3013,7 +3067,9 @@ const ENG = (function(){
       /* v4.131 -- ton dau he thong (WMS/SAP), kg */
       'WmsOpenC3_kg','WmsOpenC4_kg',
       /* v4.156 -- 5 cot THAM KHAO quy doi theo nhiet do thuc */
-      'TempAdjFilledC3_ton','TempAdjFilledC4_ton','TempAdjFactor','TempAdjDiff_ton','TempAdjDiff_pct'];
+      'TempAdjFilledC3_ton','TempAdjFilledC4_ton','TempAdjFactor','TempAdjDiff_ton','TempAdjDiff_pct',
+      /* v4.174 — dấu đã gửi email P1 */
+      'MailSent'];
     const csvLines = [headers.join(',')];
     /* v4.63 — export theo thứ tự lot MỚI NHẤT → CŨ NHẤT (khớp bảng) */
     const ordered = ROWS.slice().sort((a,b)=> _lotKey(b[1]) - _lotKey(a[1]));
@@ -3190,6 +3246,7 @@ const ENG = (function(){
         _attachChildListeners(_query);
       }
       _attachOrphanWatch();     /* v4.167 — bắt lot do bản cũ ghi (thiếu _ord) */
+      try{ if(typeof INV!=='undefined'&&INV.dataReady) INV.dataReady('eng'); }catch(_){} /* v4.202 */
       /* SCALE: refresh active tank's lot from latest tank-log row */
       try{ if(typeof SCALE!=='undefined' && SCALE.refreshLotFromTankLog) SCALE.refreshLotFromTankLog(); }catch(_){}
     }).catch(e=> console.warn('[ENG] partial load fail', e));
@@ -4115,6 +4172,8 @@ const ENG = (function(){
     ALT_COLS: { A_MID, A_T3, A_P3, A_T4, A_P4, A_DC3, A_DC4,
                 A_IDEN, A_IW3, A_ISRC, A_QC3, A_QC4, A_MTH },
     loadAll,                          /* v4.62 — fetch full Tank Log on demand */
+    /* v4.174 — dấu đã gửi Ball Tank Mixing Report */
+    markMailSent, mailInfo, mailSig, M_SENT,
     get allLoaded(){ return _allLoaded; },
     /* v4.161 — { miss:[so lot thieu], noLot:n } tren tap dang co trong RAM */
     lotGaps: _lotGaps,

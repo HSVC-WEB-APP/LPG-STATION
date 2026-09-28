@@ -61,6 +61,174 @@ const VMIX = (function(){
   const UNIT   = { '0':'vol',  '1':'vol'  }; // %vol or %wt for target C3
   let _attached = false;
 
+  /* ---------- v4.177 — TÀU CÓ N TANK (mặc định 2) + KIỂU TRỘN THUẦN ----------
+     • Số tank lấy theo tàu đang chọn: ship.tanks = [m³,…] nếu có, không thì
+       [tk1_m3, tk2_m3] như cũ ⇒ tàu 2 tank KHÔNG đổi gì (dữ liệu lẫn giao diện).
+     • Cột tank 1 & 2 vẫn là HTML tĩnh trong index.html. Tank 3+ được NHÂN BẢN
+       từ cột 1 (tank lẻ, xanh) / cột 2 (tank chẵn, cam) rồi đổi hậu tố id -0 → -i.
+     • Tàu ít tank hơn số cột đang có ⇒ cột thừa chỉ bị ẨN (vsmix-col-off), không
+       xoá ⇒ đổi tàu qua lại không mất số đã gõ; mọi vòng tính chỉ chạy i < NT().
+     • HIDE[i] = người dùng tạm ẩn cột để lấy chỗ thao tác — CHỈ là hiển thị,
+       tank bị ẩn vẫn được tính và vẫn được lưu. Đổi tàu ⇒ hiện lại đủ.
+     • MODE[i] = 'MIX' | 'C3' | 'C4'. Thuần C3/C4: không trộn, target khoá 100/0,
+       toàn bộ lượng nạp ghi vào ĐÚNG MỘT sản phẩm (stC3/stC4), không chấm Pass/Fail. */
+  const MAX_TANKS = 8;
+  const MODE  = { '0':'MIX', '1':'MIX' };
+  const HIDE  = {};
+  function _tankVols(ship){
+    if(!ship) return [];
+    if(Array.isArray(ship.tanks) && ship.tanks.length){
+      return ship.tanks.map(v => parseFloat(v) || 0).slice(0, MAX_TANKS);
+    }
+    const out = [parseFloat(ship.tk1_m3) || 0];
+    const t2 = parseFloat(ship.tk2_m3);
+    if(!isNaN(t2) && t2 > 0) out.push(t2);
+    else if(ship.tk2_m3 == null || ship.tk2_m3 === '') out.push(0);   /* dữ liệu cũ thiếu tk2 ⇒ vẫn 2 tank */
+    return out;
+  }
+  function _selShip(){ return SEL_SHIP ? SHIPS.find(s => s.name === SEL_SHIP) : null; }
+  /* số tank đang làm việc: theo tàu đang chọn, chưa chọn tàu ⇒ 2 (bố cục quen thuộc) */
+  function NT(){ const v = _tankVols(_selShip()); return v.length ? v.length : 2; }
+  function _cols(){ return Array.prototype.slice.call(document.querySelectorAll('.vsmix-body > .vsmix-col')); }
+  function _mode(i){ return MODE[String(i)] || 'MIX'; }
+  function _isPure(i){ const m = _mode(i); return m === 'C3' || m === 'C4'; }
+  function _volEl(i){ return _gid(i === 0 ? 'vs-tk1-vol' : i === 1 ? 'vs-tk2-vol' : 'vs-tkvol-'+i); }
+
+  /* nhân bản cột tank mẫu thành cột tank i (i ≥ 2) */
+  function _cloneCol(i){
+    const tpl = document.querySelector('.vsmix-body > .vsmix-col-'+((i % 2) + 1));
+    if(!tpl) return null;
+    const col = tpl.cloneNode(true);
+    const fix = el => {
+      if(el.id){
+        if(el.id === 'vs-tk1-vol' || el.id === 'vs-tk2-vol') el.id = 'vs-tkvol-'+i;
+        else if(/^vs-.*-\d+$/.test(el.id)) el.id = el.id.replace(/-\d+$/, '-'+i);
+      }
+      ['oninput','onchange','onclick'].forEach(a => {
+        const v = el.getAttribute && el.getAttribute(a);
+        if(v && /VMIX\.(gcSum|onUnitChange|setMode)\(\d+/.test(v))
+          el.setAttribute(a, v.replace(/VMIX\.(gcSum|onUnitChange|setMode)\(\d+/g, 'VMIX.$1('+i));
+      });
+      const nx = el.getAttribute && el.getAttribute('data-vs-next');
+      if(nx) el.setAttribute('data-vs-next', nx.replace(/-\d+$/, '-'+i));
+      if(el.classList){
+        Array.prototype.slice.call(el.classList).forEach(c => {
+          if(/^vs-gc-\d+$/.test(c)){ el.classList.remove(c); el.classList.add('vs-gc-'+i); }
+          if(/^vsmix-col-\d+$/.test(c)){ el.classList.remove(c); el.classList.add('vsmix-col-'+(i+1)); }
+        });
+      }
+    };
+    fix(col); col.querySelectorAll('*').forEach(fix);
+    col.classList.remove('vsmix-col-off', 'vsmix-col-hide');
+    const ttl = col.querySelector('.vsmix-card-ttl'); if(ttl) ttl.textContent = 'TANK '+(i+1);
+    const ah = col.querySelector('.vsmix-after-hdr'); if(ah) ah.textContent = 'TANK '+(i+1)+' — AFTER LOADING';
+    /* cột mới phải TRẮNG: bỏ số đã gõ ở cột mẫu, giữ mặc định ODO 10 / TOL 5 */
+    col.querySelectorAll('input').forEach(inp => {
+      const k = (inp.id || '').replace(/^vs-/, '').replace(/-\d+$/, '');
+      inp.value = k === 'odor' ? '10' : k === 'tole' ? '5' : '';
+      inp.readOnly = false; inp.disabled = false; inp.style.opacity = ''; inp.style.pointerEvents = '';
+      if(inp.classList.contains('vs-gc-'+i)) inp.style.borderColor = '';   /* chỉ viền GC do gcSum tô; ô COQ giữ viền tím */
+      inp.classList.remove('vsmix-pure-lock');
+      delete inp.dataset.prev;
+    });
+    col.querySelectorAll('select').forEach(s => { s.disabled = false; s.style.opacity = ''; s.selectedIndex = 0; });
+    ['vs-plan-res-','vs-after-res-','vs-grand-'].forEach(p => { const el = col.querySelector('#'+p+i); if(el){ el.classList.remove('on'); el.innerHTML = ''; } });
+    const gs = col.querySelector('#vs-gcsum-'+i); if(gs){ gs.textContent = 'Σ —'; gs.className = 'vsmix-gc-sum'; }
+    const st = col.querySelector('#vs-status-'+i); if(st){ st.className = 'vsmix-card-status'; st.textContent = ''; st.style.animation = 'none'; }
+    const card = col.querySelector('#vs-card-'+i); if(card){ card.style.boxShadow = ''; card.classList.remove('vsmix-card-pure'); }
+    const tag = col.querySelector('#vs-tr3-lbl-'+i+' .vsmix-unit-tag'); if(tag) tag.textContent = '%VOL';
+    const pb = col.querySelector('.vsmix-pure-badge'); if(pb) pb.remove();
+    return col;
+  }
+  /* bảo đảm có đủ cột cho n tank; cột ≥ n bị ẩn (không xoá) */
+  function _ensureCols(n){
+    const body = document.querySelector('.vsmix-body'); if(!body) return;
+    let cols = _cols();
+    for(let i = cols.length; i < n; i++){
+      const c = _cloneCol(i); if(!c) break;
+      body.appendChild(c);
+      if(STATE[String(i)] == null) STATE[String(i)] = 'idle';
+      if(UNIT[String(i)] == null) UNIT[String(i)] = 'vol';
+      if(MODE[String(i)] == null) MODE[String(i)] = 'MIX';
+    }
+    cols = _cols();
+    cols.forEach((c, i) => {
+      c.classList.toggle('vsmix-col-off', i >= n);
+      c.classList.toggle('vsmix-col-hide', i < n && !!HIDE[i]);
+    });
+    const vis = cols.filter((c, i) => i < n && !HIDE[i]).length;
+    body.classList.toggle('vsmix-many', vis > 2);
+    _renderView();
+  }
+  /* thanh chip TANKS: bấm để ẩn/hiện từng cột (chỉ hiển thị, không đổi dữ liệu) */
+  function _renderView(){
+    const box = _gid('vs-view'); if(!box) return;
+    const n = NT();
+    const fld = _gid('vs-view-fld'); if(fld) fld.style.display = n > 2 ? '' : 'none';
+    let h = '';
+    for(let i = 0; i < n; i++){
+      const off = !!HIDE[i];
+      h += '<button type="button" class="vsmix-view-chip'+(off ? ' off' : '')+(i % 2 ? ' t2' : '')+'" onclick="VMIX.toggleTank('+i+')" '+
+        'title="'+(off ? 'Show' : 'Hide')+' Tank '+(i+1)+' — display only, its data is still calculated and saved">'+(i+1)+'</button>';
+    }
+    if(Object.keys(HIDE).some(k => HIDE[k] && +k < n))
+      h += '<button type="button" class="vsmix-view-chip all" onclick="VMIX.showAllTanks()" title="Show every tank">ALL</button>';
+    box.innerHTML = h;
+  }
+  function toggleTank(i){
+    const n = NT();
+    if(!HIDE[i]){
+      let vis = 0; for(let k = 0; k < n; k++) if(!HIDE[k]) vis++;
+      if(vis <= 1){ toast('At least one tank must stay visible','warn'); return; }
+      HIDE[i] = true;
+    } else delete HIDE[i];
+    _ensureCols(n);
+  }
+  function showAllTanks(){ Object.keys(HIDE).forEach(k => delete HIDE[k]); _ensureCols(NT()); }
+
+  /* kiểu trộn của tank i: MIX (có target C3%) · C3 / C4 thuần (không trộn) */
+  function _applyModeUi(i){
+    const m = _mode(i), pure = m !== 'MIX';
+    const sel = _gid('vs-mode-'+i); if(sel && sel.value !== m) sel.value = m;
+    const tr = _gid('vs-tr3-'+i);
+    if(tr){
+      if(pure){
+        if(tr.dataset.prev == null) tr.dataset.prev = tr.value;
+        tr.value = m === 'C3' ? '100' : '0';
+        tr.readOnly = true; tr.classList.add('vsmix-pure-lock');
+        tr.title = 'Pure '+m+' — no mixing, target fixed';
+      } else {
+        if(tr.dataset.prev != null){ tr.value = tr.dataset.prev; delete tr.dataset.prev; }
+        tr.readOnly = STATE[String(i)] === 'mixing'; tr.classList.remove('vsmix-pure-lock'); tr.title = '';
+      }
+    }
+    ['min','max'].forEach(k => {
+      const el = _gid('vs-'+k+'-'+i); if(!el) return;
+      el.disabled = pure; el.classList.toggle('vsmix-pure-lock', pure);
+      el.title = pure ? 'Not used for a pure product' : '';
+    });
+    const ru = _gid('vs-runit-'+i); if(ru && STATE[String(i)] !== 'mixing') ru.disabled = pure;
+    const card = _gid('vs-card-'+i);
+    if(card){
+      card.classList.toggle('vsmix-card-pure', pure);
+      let b = card.querySelector('.vsmix-pure-badge');
+      if(pure){
+        if(!b){ b = document.createElement('span'); b.className = 'vsmix-pure-badge'; const hd = card.querySelector('.vsmix-card-hdr'); if(hd) hd.insertBefore(b, _gid('vs-mode-'+i)); }
+        b.textContent = m === 'C3' ? 'PURE PROPANE' : 'PURE BUTANE';
+        b.classList.toggle('c4', m === 'C4');
+      } else if(b) b.remove();
+    }
+  }
+  function setMode(i, m){
+    m = (m === 'C3' || m === 'C4') ? m : 'MIX';
+    if(STATE[String(i)] === 'mixing'){ toast('⚠ Tank '+(i+1)+' is MIXING — finish first','er'); _applyModeUi(i); return; }
+    MODE[String(i)] = m;
+    _applyModeUi(i);
+    try{ calcPlan(); }catch(_){}
+    try{ calcResult(true); }catch(_){}
+    saveMixState();
+  }
+
   /* ---------- DOM helpers ---------- */
   function _gid(id){ return document.getElementById(id); }
   function _gv(id){ const e = _gid(id); return e ? e.value : ''; }
@@ -83,7 +251,10 @@ const VMIX = (function(){
     SHIPS.forEach(s=>{
       const opt = document.createElement('option');
       opt.value = s.name;
-      opt.textContent = s.name+' ('+s.tk1_m3+'m³ / '+s.tk2_m3+'m³)';
+      /* v4.177 — tàu 2 tank giữ nguyên chữ cũ; tàu 1 / 3+ tank liệt kê đủ */
+      const vols = _tankVols(s);
+      opt.textContent = vols.length === 2 ? s.name+' ('+s.tk1_m3+'m³ / '+s.tk2_m3+'m³)'
+                                          : s.name+' ('+vols.map(v => v+'m³').join(' / ')+' · '+vols.length+' tank'+(vols.length > 1 ? 's' : '')+')';
       sel.appendChild(opt);
     });
     /* preserve previous selection if still in the list */
@@ -99,12 +270,18 @@ const VMIX = (function(){
 
   function onShipChange(){
     const sel = _gid('vs-ship-sel');
+    const prevShip = SEL_SHIP;
     SEL_SHIP = sel ? sel.value : '';
     const ship = SEL_SHIP ? SHIPS.find(s=>s.name===SEL_SHIP) : null;
-    const v1 = _gid('vs-tk1-vol');
-    const v2 = _gid('vs-tk2-vol');
-    if(v1) v1.textContent = ship ? '('+ship.tk1_m3+' m³)' : '';
-    if(v2) v2.textContent = ship ? '('+ship.tk2_m3+' m³)' : '';
+    /* v4.177 — đủ cột cho số tank của tàu; đổi tàu ⇒ hiện lại mọi tank (mặc định hiện đủ) */
+    if(prevShip !== SEL_SHIP) Object.keys(HIDE).forEach(k => delete HIDE[k]);
+    const vols = _tankVols(ship), n = NT();
+    _ensureCols(n);
+    for(let i = 0; i < n; i++){
+      const el = _volEl(i);
+      if(el) el.textContent = ship ? '('+(vols[i] != null ? vols[i] : '?')+' m³)' : '';
+      _applyModeUi(i);
+    }
     updateLot();
   }
 
@@ -157,7 +334,7 @@ const VMIX = (function(){
        enforce a hard sync here yet (will hook into calcPlan() in Session 5);
        just show the visual signal. */
     toast(RATIO === 1
-      ? 'Switched to 1-RATIO (both tanks share target C3%)'
+      ? 'Switched to 1-RATIO (all tanks share target C3%)'
       : 'Switched to 2-RATIO (independent targets per tank)', 'ok');
   }
 
@@ -214,6 +391,8 @@ const VMIX = (function(){
     }
     const card = _gid('vs-card-'+i);
     if(card) card.style.boxShadow = lock ? '0 0 0 3px #22c55e' : '';
+    /* v4.177 — mở khoá xong phải khoá lại ô target/min/max nếu tank đang ở chế độ thuần */
+    if(!lock) _applyModeUi(i);
   }
 
   /* ---------- status pill ---------- */
@@ -243,10 +422,12 @@ const VMIX = (function(){
   let _startLastClick = 0;
   function startMix(){
     const now = Date.now();
-    const anyMixing = STATE['0']==='mixing' || STATE['1']==='mixing';
+    const n = NT();
+    let anyMixing = false;
+    for(let i=0;i<n;i++) if(STATE[String(i)]==='mixing') anyMixing = true;
     if(anyMixing && now - _startLastClick < 500){
       /* double-click: revert mixing → calc */
-      for(let i=0;i<2;i++){
+      for(let i=0;i<n;i++){
         if(STATE[String(i)]==='mixing'){ STATE[String(i)]='calc'; _lockTank(i,false); _renderStatus(i); }
       }
       _startLastClick = 0;
@@ -259,17 +440,17 @@ const VMIX = (function(){
     const dt = _gid('vs-date'); if(dt && !dt.value) dt.value = _todayDDMMYY();
     const st = _gid('vs-stime'); if(st && !st.value.trim()) st.value = _nowHHMM();
     let started = 0;
-    for(let i=0;i<2;i++){
+    for(let i=0;i<n;i++){
       const s = STATE[String(i)];
       if(s && s !== 'idle' && s !== 'mixing'){ STATE[String(i)]='mixing'; _lockTank(i,true); _renderStatus(i); started++; }
     }
     updateLot();
     if(started){ saveMixState(); toast('▶ Vessel mix started ('+started+' tank'+(started>1?'s':'')+') — session synced','ok'); }
-    else toast('⚠ Nhập QTY/Target trước (tank chưa ở trạng thái TÍNH TOÁN)','er');
+    else toast('⚠ Enter QTY / Target first (no tank is in CALC state yet)','er');
   }
   function finishMix(){
     const ft = _gid('vs-ftime'); if(ft && !ft.value.trim()) ft.value = _nowHHMM();
-    for(let i=0;i<2;i++){
+    for(let i=0;i<NT();i++){
       if(STATE[String(i)]==='mixing'){ STATE[String(i)]='calc'; _lockTank(i,false); _renderStatus(i); }
     }
     saveMixState();
@@ -300,12 +481,16 @@ const VMIX = (function(){
       lotNum:_gv('vs-lot-num'),  cust: _gv('vs-cust'),
       date:  _gv('vs-date'),     stime:_gv('vs-stime'), ftime:_gv('vs-ftime'),
       c3fq:  _gv('vs-c3fq'),     c4fq: _gv('vs-c4fq'),
-      states:[STATE['0']==='idle'?null:STATE['0'], STATE['1']==='idle'?null:STATE['1']],
+      states:[],
       ratio: RATIO,
       tanks: []
     };
-    for(let i=0;i<2;i++){
+    /* v4.177 — lưu đủ N tank của tàu (tàu 2 tank: y hệt trước) + kiểu trộn từng tank */
+    const n = NT();
+    for(let i=0;i<n;i++){
+      data.states.push(STATE[String(i)]==='idle' || !STATE[String(i)] ? null : STATE[String(i)]);
       const tk = { runit: (_gid('vs-runit-'+i)||{}).value || 'vol' };
+      if(_mode(i) !== 'MIX') tk.mode = _mode(i);
       PLAN_IDS.forEach(k => { tk['p_'+k] = _gv('vs-'+k+'-'+i); });
       AFTER_IDS.forEach(k => { tk['a_'+k] = _gv('vs-'+k+'-'+i); });
       GC_KEYS.forEach(k => { tk['gc_'+k] = _gv('vs-gc-'+k+'-'+i); });
@@ -330,13 +515,22 @@ const VMIX = (function(){
                     stime:'vs-stime', ftime:'vs-ftime', c3fq:'vs-c3fq', c4fq:'vs-c4fq' };
       Object.keys(ids).forEach(k=>{ const el=_gid(ids[k]); if(el && d[k]) el.value = d[k]; });
 
-      /* per-tank */
-      for(let i=0;i<2;i++){
+      /* per-tank — v4.177: đủ số tank của tàu (Firebase có thể trả mảng hoặc object) */
+      const n = NT();
+      _ensureCols(n);
+      for(let i=0;i<n;i++){
         const tk = d.tanks[i]; if(!tk) continue;
         const ru = _gid('vs-runit-'+i); if(ru && tk.runit){ ru.value = tk.runit; UNIT[String(i)] = tk.runit; }
-        PLAN_IDS.forEach(k=>{ const el=_gid('vs-'+k+'-'+i); if(el && tk['p_'+k]) el.value = tk['p_'+k]; });
+        /* kiểu trộn: đặt TRƯỚC khi điền target để ô target thuần không bị ghi đè */
+        MODE[String(i)] = (tk.mode === 'C3' || tk.mode === 'C4') ? tk.mode : 'MIX';
+        PLAN_IDS.forEach(k=>{
+          const el=_gid('vs-'+k+'-'+i); if(!el || !tk['p_'+k]) return;
+          if(k === 'tr3' && MODE[String(i)] !== 'MIX') return;
+          el.value = tk['p_'+k];
+        });
         AFTER_IDS.forEach(k=>{ const el=_gid('vs-'+k+'-'+i); if(el && tk['a_'+k]) el.value = tk['a_'+k]; });
         GC_KEYS.forEach(k=>{ const el=_gid('vs-gc-'+k+'-'+i); if(el && tk['gc_'+k]) el.value = tk['gc_'+k]; });
+        _applyModeUi(i);
         gcSum(i);
       }
 
@@ -348,9 +542,9 @@ const VMIX = (function(){
       }
 
       /* keep as 'calc' first so calcPlan renders, then apply real state + lock */
-      const saved = [null, null];
+      const saved = [];
       if(d.states){
-        for(let j=0;j<2;j++){
+        for(let j=0;j<n;j++){
           saved[j] = d.states[j] || null;
           STATE[String(j)] = saved[j] ? 'calc' : 'idle';
           _renderStatus(j);
@@ -359,7 +553,7 @@ const VMIX = (function(){
       try{ calcPlan(); }catch(_){}
       updateLot();
       if(d.states){
-        for(let j=0;j<2;j++){
+        for(let j=0;j<n;j++){
           STATE[String(j)] = saved[j] || 'idle';
           _renderStatus(j);
           if(STATE[String(j)]==='mixing') _lockTank(j,true);
@@ -372,8 +566,11 @@ const VMIX = (function(){
   /* ---------- reset ---------- */
   function reset(){
     if(!confirm('Reset entire Vessel Mix Cal?')) return;
-    /* Plan + after-loading inputs */
-    [0,1].forEach(i=>{
+    /* Plan + after-loading inputs — v4.177: MỌI cột đang có (kể cả cột của tàu khác đang ẩn) */
+    _cols().forEach((_c, i)=>{
+      MODE[String(i)] = 'MIX';
+      const tr = _gid('vs-tr3-'+i); if(tr) delete tr.dataset.prev;
+      const ms = _gid('vs-mode-'+i); if(ms) ms.value = 'MIX';
       ['qty','tr3','min','max','odor','tole','ilw','ivw','tload','lvol','labdens'].forEach(k=>{
         const el = _gid('vs-'+k+'-'+i); if(el){
           /* preserve sticky defaults */
@@ -392,7 +589,7 @@ const VMIX = (function(){
       const ares = _gid('vs-after-res-'+i); if(ares){ ares.classList.remove('on'); ares.innerHTML = ''; }
       const gr   = _gid('vs-grand-'+i); if(gr){ gr.classList.remove('on'); gr.innerHTML = ''; }
       STATE[String(i)] = 'idle'; _renderStatus(i);
-      _lockTank(i, false);                       /* v4.70: unlock */
+      _lockTank(i, false);                       /* v4.70: unlock (v4.177: + trả ô target/min/max về MIX) */
     });
     ['vs-cust','vs-lot-num','vs-date','vs-stime','vs-ftime','vs-c3fq','vs-c4fq'].forEach(id=>{
       const el = _gid(id); if(el) el.value = '';
@@ -513,19 +710,22 @@ const VMIX = (function(){
     updateLot();
     const DL3 = DENS.c3l, DL4 = DENS.c4l;
 
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < NT(); i++){
       const card = _gid('vs-plan-res-'+i);
       if(!card) continue;
       if(STATE[String(i)] === 'mixing') continue;   // don't redraw during a live mix
 
+      /* v4.177 — tank thuần: target cố định 100 (C3) / 0 (C4), không phụ thuộc ô gõ */
+      const pure    = _isPure(i), mode = _mode(i);
       const qty     = _val('vs-qty-'+i);
-      const r3      = _val('vs-tr3-'+i);
-      const unit    = (_gid('vs-runit-'+i)||{}).value || 'vol';
+      const r3in    = pure ? null : _val('vs-tr3-'+i);
+      const r3      = pure ? (mode === 'C3' ? 100 : 0) : r3in;
+      const unit    = pure ? 'vol' : ((_gid('vs-runit-'+i)||{}).value || 'vol');
       const tole    = _val('vs-tole-'+i) || 0;
       const odorPpm = _val('vs-odor-'+i);
 
       /* drive state pill: any plan input present → 'calc'; both blank → 'idle' */
-      if(r3 != null || qty != null){
+      if(r3in != null || qty != null){
         if(STATE[String(i)] !== 'mixing'){
           const wasIdle = (STATE[String(i)] === 'idle');
           STATE[String(i)] = 'calc';
@@ -539,7 +739,7 @@ const VMIX = (function(){
       }
       _renderStatus(i);
 
-      if(r3 == null){ card.classList.remove('on'); card.innerHTML = ''; continue; }
+      if(r3 == null || (pure && qty == null)){ card.classList.remove('on'); card.innerHTML = ''; continue; }
 
       const r4 = 100 - r3;
       let ptv3, ptv4, ptw3, ptw4;
@@ -564,11 +764,12 @@ const VMIX = (function(){
       const qMin    = qty != null ? qty * (1 - tole/100) : null;
       const qMax    = qty != null ? qty * (1 + tole/100) : null;
 
-      const blue   = (i === 0) ? 'var(--blue)' : 'var(--orange)';
-      const orange = (i === 0) ? 'var(--orange)' : 'var(--blue)';
+      const blue   = (i % 2 === 0) ? 'var(--blue)' : 'var(--orange)';
+      const orange = (i % 2 === 0) ? 'var(--orange)' : 'var(--blue)';
       /* Header line — labels share the same Oswald 11px treatment */
       let h = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">'
-        +'<span style="font-family:Oswald;font-size:11px;letter-spacing:1.5px;color:var(--ink-3);font-weight:600">MIX TARGET</span>'
+        +'<span style="font-family:Oswald;font-size:11px;letter-spacing:1.5px;color:'+(pure ? '#7b2d8e' : 'var(--ink-3)')+';font-weight:600">'
+          +(pure ? (mode === 'C3' ? 'PURE C3 — NO MIXING' : 'PURE C4 — NO MIXING') : 'MIX TARGET')+'</span>'
         +'<span style="font-family:Oswald;font-size:11px;font-weight:700;color:#334155">%Vol C3: <span style="color:'+blue+'">'+_fmtNum(ptv3,2)+'</span></span>'
         +'<span style="font-family:Oswald;font-size:11px;font-weight:700;color:#334155">%Wt C3: <span style="color:'+orange+'">'+_fmtNum(ptw3,2)+'</span></span>'
         +'<span style="font-family:Oswald;font-size:11px;font-weight:700;color:var(--green)">Odorant: <span style="font-size:20px">'+(odorkg!=null?_fmtNum(odorkg,2)+' kg':'—')+'</span></span>'
@@ -624,14 +825,16 @@ const VMIX = (function(){
     const DL3 = DENS.c3l, DL4 = DENS.c4l;
     const DV3 = DENS.c3v, DV4 = DENS.c4v;
     const ship = SEL_SHIP ? SHIPS.find(s => s.name === SEL_SHIP) : null;
+    const vols = _tankVols(ship), n = NT();
     let hasResult = false;
-    _afterResult = [null, null];
+    _afterResult = [];
+    for(let i = 0; i < n; i++) _afterResult.push(null);
 
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < n; i++){
       const container = _gid('vs-after-res-'+i);
       if(!container) continue;
 
-      const maxV  = ship ? (i === 0 ? ship.tk1_m3 : ship.tk2_m3) : 0;
+      const maxV  = ship ? (vols[i] || 0) : 0;
       const lvol  = _val('vs-lvol-'+i);
       const tload = _val('vs-tload-'+i);
       const ivw   = _val('vs-ivw-'+i);
@@ -655,15 +858,20 @@ const VMIX = (function(){
         const wr4  = twt > 0 ? tw4 / twt : 0;
         const fqty = twt - (ivw || 0);
         const r3r2 = Math.round(wr3 * 100) / 100;
-        const ld3  = tload != null ? parseFloat((tload * r3r2).toFixed(3)) : null;
-        const ld4  = tload != null ? parseFloat((tload - ld3).toFixed(3)) : null;
+        let ld3  = tload != null ? parseFloat((tload * r3r2).toFixed(3)) : null;
+        let ld4  = tload != null ? parseFloat((tload - ld3).toFixed(3)) : null;
+        /* v4.177 — hàng THUẦN: không trộn ⇒ toàn bộ lượng nạp là MỘT sản phẩm
+           (GC chỉ để xem độ tinh khiết, không dùng để tách C3/C4) */
+        const mode = _mode(i);
+        if(tload != null && mode === 'C3'){ ld3 = parseFloat(tload.toFixed(3)); ld4 = 0; }
+        if(tload != null && mode === 'C4'){ ld3 = 0; ld4 = parseFloat(tload.toFixed(3)); }
 
         _afterResult[i] = { tw3, tw4, twt, wr3, wr4, ld3, ld4, fqty,
-                            lv3, lv4, lvol, vtot, lw3, lw4, vw3, vw4, tload };
+                            lv3, lv4, lvol, vtot, lw3, lw4, vw3, vw4, tload, mode };
 
-        const tkColor = i === 0 ? 'var(--blue)' : 'var(--orange)';
-        const tkBg    = i === 0 ? 'var(--blue-soft)' : 'var(--orange-soft)';
-        const tkBd    = i === 0 ? '#b3ddf5' : '#ffd4a8';
+        const tkColor = i % 2 === 0 ? 'var(--blue)' : 'var(--orange)';
+        const tkBg    = i % 2 === 0 ? 'var(--blue-soft)' : 'var(--orange-soft)';
+        const tkBd    = i % 2 === 0 ? '#b3ddf5' : '#ffd4a8';
 
         /* Collapsible summary row + hidden detail table */
         let h = '<div style="border:1.5px solid '+tkBd+';border-radius:6px;overflow:hidden">'
@@ -706,7 +914,7 @@ const VMIX = (function(){
           +'<td colspan="3" style="padding:1px 3px;text-align:right;font-family:monospace">'+_fmtNum(fqty,3)+'</td></tr>';
         if(tload != null){
           h += '<tr style="background:#fff5eb;font-weight:700">'
-            +'<td style="padding:1px 3px">Loaded</td>'
+            +'<td style="padding:1px 3px">Loaded'+(mode !== 'MIX' ? ' (pure '+mode+')' : '')+'</td>'
             +'<td style="padding:1px 3px;text-align:right;font-family:monospace;color:var(--blue)">'+_fmtNum(ld3,3)+'</td>'
             +'<td style="padding:1px 3px;text-align:right;font-family:monospace;color:var(--orange)">'+_fmtNum(ld4,3)+'</td>'
             +'<td style="padding:1px 3px;text-align:right;font-family:monospace;font-weight:800">'+_fmtNum(tload,3)+'</td></tr>';
@@ -730,7 +938,7 @@ const VMIX = (function(){
     }
 
     /* Per-tank grand-total card (yellow) — only shows when tload + result are present */
-    for(let g = 0; g < 2; g++){
+    for(let g = 0; g < n; g++){
       const gd = _gid('vs-grand-'+g); if(!gd) continue;
       const cd = _afterResult[g];
       const tload_g = _val('vs-tload-'+g);
@@ -757,8 +965,8 @@ const VMIX = (function(){
     if(!hasResult){
       const diag = [];
       if(!ship) diag.push('Vessel not selected');
-      for(let d = 0; d < 2; d++){
-        const dMaxV = ship ? (d===0 ? ship.tk1_m3 : ship.tk2_m3) : 0;
+      for(let d = 0; d < n; d++){
+        const dMaxV = ship ? (vols[d] || 0) : 0;
         const dLvol = _val('vs-lvol-'+d);
         const dProp = _val('vs-gc-prop-'+d) || 0;
         const dIbut = (_val('vs-gc-ibut-'+d)||0) + (_val('vs-gc-nbut-'+d)||0);
@@ -838,6 +1046,11 @@ const VMIX = (function(){
       lvol:   _val('vs-lvol-'+i),
       labdens:_val('vs-labdens-'+i)
     };
+    /* v4.177 — tank thuần: ghi rõ kiểu, target 100/0 %vol, bỏ min/max */
+    if(_isPure(i)){
+      t.mode = _mode(i);
+      t.tr3 = t.mode === 'C3' ? 100 : 0; t.unit = 'vol'; t.min = null; t.max = null;
+    }
     GC_KEYS.forEach(k => { t[k] = _val('vs-gc-'+k+'-'+i); });
     /* v4.72 — chỉ tiêu COQ bổ sung (numeric hoặc text) → lưu vào entry.t[tank] */
     VCQ.forEach(f=>{
@@ -868,15 +1081,18 @@ const VMIX = (function(){
 
     /* If user hasn't pressed CALCULATE RESULT for this session, run it
        once so _afterResult is populated. Silent — no toast spam. */
+    const n = NT();
     let needsRecalc = false;
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < n; i++){
       const hasInputs = (_val('vs-tload-'+i) != null) || (_val('vs-lvol-'+i) != null);
       if(hasInputs && !_afterResult[i]){ needsRecalc = true; break; }
     }
+    /* v4.177 — kết quả cũ phải đúng kiểu trộn hiện tại (đổi MIX ⇄ thuần sau khi tính) */
+    for(let i = 0; i < n; i++){ if(_afterResult[i] && _afterResult[i].mode !== _mode(i)){ needsRecalc = true; break; } }
     if(needsRecalc){ try{ calcResult(); }catch(_){} }
 
     /* GC sum sanity check (warn-but-allow per V406 UX) */
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < n; i++){
       let sum = 0;
       document.querySelectorAll('.vs-gc-'+i).forEach(el=>{
         const v = parseFloat(el.value); if(!isNaN(v)) sum += v;
@@ -890,7 +1106,7 @@ const VMIX = (function(){
     const empties = [];
     if(!_gv('vs-cust')) empties.push('Customer');
     if(!_gv('vs-date')) empties.push('Date');
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < n; i++){
       if(_val('vs-qty-'+i) == null && _val('vs-tload-'+i) == null) continue;
       if(_val('vs-tload-'+i) == null) empties.push('Tank '+(i+1)+' Total Loaded');
     }
@@ -911,74 +1127,92 @@ const VMIX = (function(){
       ratio:    RATIO
     };
 
-    const tanks       = [_collectTank(0), _collectTank(1)];
+    /* v4.177 — N tank. Tàu 2 tank cho ra bản ghi Y HỆT trước (t:[tk0,tk1], '02 TANK'…). */
+    const tanks       = [];
+    for(let i = 0; i < n; i++) tanks.push(_collectTank(i));
     const isOneRatio  = (RATIO === 1);
-    const tk0hasData  = (tanks[0].qty != null) || (tanks[0].tload != null);
-    const tk1hasData  = (tanks[1].qty != null) || (tanks[1].tload != null);
+    const act         = [];
+    tanks.forEach((t, i) => { if(t.qty != null || t.tload != null) act.push(i); });
+    const modes       = act.map(i => tanks[i].mode || 'MIX');
+    const modesDiffer = modes.some(m => m !== modes[0]);
+    const allPure     = act.length > 0 && !modesDiffer && modes[0] !== 'MIX';
 
-    /* Cross-check RATIO vs actual Target C3% (V406 sanity dialog) */
-    if(tk0hasData && tk1hasData){
-      const t30 = tanks[0].tr3, t31 = tanks[1].tr3;
-      if(t30 != null && t31 != null){
-        const same = Math.abs(t30 - t31) < 0.01;
-        if(isOneRatio && !same){
-          if(!confirm('⚠ 1-RATIO selected but Target C3% differ:\n\n'
-                     +'Tank 1: '+t30+'%\nTank 2: '+t31+'%\n\nShould be 2-RATIO?\n\n'
-                     +'OK = save as 1-ratio, Cancel = abort and fix.')) return;
-        }
-        if(!isOneRatio && same){
-          if(!confirm('⚠ 2-RATIO selected but Target C3% are identical:\n\n'
-                     +'Tank 1: '+t30+'%\nTank 2: '+t31+'%\n\nShould be 1-RATIO?\n\n'
-                     +'OK = save as 2-ratio, Cancel = abort and fix.')) return;
-        }
+    /* Cross-check RATIO vs actual Target C3% (V406 sanity dialog) — chỉ các tank MIX */
+    const mixAct = act.filter(i => (tanks[i].mode || 'MIX') === 'MIX' && tanks[i].tr3 != null);
+    if(mixAct.length >= 2){
+      const t0 = tanks[mixAct[0]].tr3;
+      const same = mixAct.every(i => Math.abs(tanks[i].tr3 - t0) < 0.01);
+      const list = mixAct.map(i => 'Tank '+(i+1)+': '+tanks[i].tr3+'%').join('\n');
+      if(isOneRatio && !same){
+        if(!confirm('⚠ 1-RATIO selected but Target C3% differ:\n\n'
+                   +list+'\n\nShould be 2-RATIO?\n\n'
+                   +'OK = save as 1-ratio, Cancel = abort and fix.')) return;
       }
+      if(!isOneRatio && same && !modesDiffer){
+        if(!confirm('⚠ 2-RATIO selected but Target C3% are identical:\n\n'
+                   +list+'\n\nShould be 1-RATIO?\n\n'
+                   +'OK = save as 2-ratio, Cancel = abort and fix.')) return;
+      }
+    }
+    /* tank khác kiểu trộn (vd. TK1 thuần C3, TK2 thuần C4) thì KHÔNG gộp được một dòng */
+    let merge = isOneRatio && act.length >= 2;
+    if(merge && modesDiffer){
+      if(!confirm('⚠ The tanks have different mix types:\n\n'
+                 +act.map(i => 'Tank '+(i+1)+': '+(tanks[i].mode ? 'PURE '+tanks[i].mode : 'MIX')).join('\n')
+                 +'\n\nThey cannot be combined into one 1-RATIO row — each tank will be saved as its own row.\n\nOK = continue, Cancel = abort.')) return;
+      merge = false;
     }
 
     const written = [];
 
-    if(isOneRatio && tk0hasData && tk1hasData){
-      /* 1-RATIO merged row: aggregate both tanks into one entry */
-      const gTw3   = (tanks[0].tw3 || 0) + (tanks[1].tw3 || 0);
-      const gTw4   = (tanks[0].tw4 || 0) + (tanks[1].tw4 || 0);
+    if(merge){
+      /* 1-RATIO merged row: aggregate every active tank into one entry */
+      let gTw3 = 0, gTw4 = 0, gTload = 0, gFill = 0, gQty = 0;
+      act.forEach(i => { gTw3 += tanks[i].tw3 || 0; gTw4 += tanks[i].tw4 || 0; gTload += tanks[i].tload || 0; gFill += tanks[i].fqty || 0; });
+      tanks.forEach(t => { gQty += t.qty || 0; });
       const gTwt   = gTw3 + gTw4;
-      const gTload = (tanks[0].tload || 0) + (tanks[1].tload || 0);
       const gR     = gTwt > 0 ? gTw3 / gTwt : 0;
       const gR2    = Math.round(gR * 100) / 100;
-      const vw     = _calcVolWt(tanks[0].tr3, tanks[0].unit || 'vol');
+      const t0     = tanks[act[0]];
+      const vw     = _calcVolWt(t0.tr3, t0.unit || 'vol');
+      let stC3 = parseFloat((gR2 * gTload).toFixed(3)), stC4 = parseFloat((gTload - gR2 * gTload).toFixed(3));
+      if(allPure){ stC3 = modes[0] === 'C3' ? parseFloat(gTload.toFixed(3)) : 0; stC4 = modes[0] === 'C4' ? parseFloat(gTload.toFixed(3)) : 0; }
+      const odo = t => (t && t.qty != null && t.odor != null) ? (t.qty * t.odor / 1000) : null;
       const entry  = Object.assign({}, commonInfo, {
-        tank: '02 TANK',
-        t: [tanks[0], tanks[1]],
+        tank: String(act.length).padStart(2, '0') + ' TANK',
+        t: tanks,
         cTotal:    gTload,
-        cFilled:   (tanks[0].fqty || 0) + (tanks[1].fqty || 0),
-        stC3:      parseFloat((gR2 * gTload).toFixed(3)),
-        stC4:      parseFloat((gTload - gR2 * gTload).toFixed(3)),
+        cFilled:   gFill,
+        stC3:      stC3,
+        stC4:      stC4,
         wr3:       gR,
-        targetC3:  tanks[0].tr3,
-        targetUnit:tanks[0].unit || 'vol',
-        minC3:     tanks[0].min,
-        maxC3:     tanks[0].max,
+        targetC3:  t0.tr3,
+        targetUnit:t0.unit || 'vol',
+        minC3:     t0.min,
+        maxC3:     t0.max,
         volC3:     vw.volC3, volC4: vw.volC4,
         wtC3:      vw.wtC3,  wtC4:  vw.wtC4,
         lpgMixQty: gTload,
         lpgWt:     gTload,
-        odoTk1:    (tanks[0].qty != null && tanks[0].odor != null) ? (tanks[0].qty * tanks[0].odor / 1000) : null,
-        odoTk2:    (tanks[1].qty != null && tanks[1].odor != null) ? (tanks[1].qty * tanks[1].odor / 1000) : null,
-        qty:       (tanks[0].qty || 0) + (tanks[1].qty || 0),
-        quality:   _qualCheck({ wr3:gR, min:tanks[0].min, max:tanks[0].max, tr3:tanks[0].tr3, unit:tanks[0].unit || 'vol' }),
+        odoTk1:    odo(tanks[0]),
+        odoTk2:    odo(tanks[1]),
+        qty:       gQty,
+        quality:   allPure ? '' : _qualCheck({ wr3:gR, min:t0.min, max:t0.max, tr3:t0.tr3, unit:t0.unit || 'vol' }),
         remark:    ''
       });
+      for(let i = 2; i < n; i++) entry['odoTk'+(i+1)] = odo(tanks[i]);
+      if(allPure) entry.mixType = modes[0];
       VLOG.pushEntry(entry);
       written.push('1 merged row');
     } else {
       /* 2-RATIO (or single tank): one entry per active tank */
-      for(let j = 0; j < 2; j++){
-        if(j === 0 && !tk0hasData) continue;
-        if(j === 1 && !tk1hasData) continue;
+      act.forEach(j => {
         const tkData = tanks[j];
+        const pure = !!tkData.mode;
         const vw = _calcVolWt(tkData.tr3, tkData.unit || 'vol');
         const entry = Object.assign({}, commonInfo, {
           tank: String(j + 1),
-          t: [tanks[0], tanks[1]],
+          t: tanks,
           _tkIdx:    j,
           cTotal:    tkData.tload || 0,
           cFilled:   tkData.fqty || 0,
@@ -989,7 +1223,7 @@ const VMIX = (function(){
           targetUnit:tkData.unit || 'vol',
           minC3:     tkData.min,
           maxC3:     tkData.max,
-          quality:   _qualCheck(tkData),
+          quality:   pure ? '' : _qualCheck(tkData),
           volC3:     vw.volC3, volC4: vw.volC4,
           wtC3:      vw.wtC3,  wtC4:  vw.wtC4,
           lpgMixQty: tkData.tload || 0,
@@ -1000,9 +1234,10 @@ const VMIX = (function(){
           labdens:   tkData.labdens,
           remark:    ''
         });
+        if(pure) entry.mixType = tkData.mode;
         VLOG.pushEntry(entry);
         written.push('TK '+(j+1));
-      }
+      });
     }
 
     if(!written.length){
@@ -1013,28 +1248,39 @@ const VMIX = (function(){
 
   /* ---------- modal: edit ships / density ---------- */
   function _escAttr(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
-  function openShipEdit(){
-    const m = _gid('vsmixModal'); if(!m) return;
-    const rows = SHIPS.map((s,i)=>
-      '<div class="vsmix-ship-row" data-idx="'+i+'" style="display:flex;gap:6px;align-items:center;margin-bottom:5px">'+
-        '<input class="vsmix-inp" data-fld="name" value="'+_escAttr(s.name)+'" style="flex:2;font-size:12px">'+
-        '<input class="vsmix-inp" data-fld="tk1" value="'+s.tk1_m3+'" style="flex:1;font-size:11px;text-align:right" placeholder="TK1 m³">'+
-        '<input class="vsmix-inp" data-fld="tk2" value="'+s.tk2_m3+'" style="flex:1;font-size:11px;text-align:right" placeholder="TK2 m³">'+
-        '<button onclick="this.closest(\'.vsmix-ship-row\').remove()" '+
+  /* v4.177 — mỗi tàu có DANH SÁCH tank (1…8). Ô thể tích từng tank + nút ＋TK / −TK.
+     Lưu: { name, tk1_m3, tk2_m3 } như cũ (máy chạy bản cũ vẫn đọc được 2 tank đầu)
+     + tanks:[…] CHỈ khi số tank ≠ 2 ⇒ dữ liệu tàu 2 tank giữ nguyên hình dạng. */
+  const _SHIP_BTN = 'padding:3px 7px;border:1px solid var(--line);color:var(--ink-2);background:var(--panel);border-radius:4px;cursor:pointer;font-size:10px;font-weight:700;white-space:nowrap';
+  function _shipTkInp(v, k){
+    return '<input class="vsmix-inp" data-fld="tk" value="'+_escAttr(v == null ? '' : v)+'" placeholder="TK'+(k+1)+' m³" title="Tank '+(k+1)+' volume (m³)" inputmode="decimal" style="width:82px;font-size:11px;text-align:right">';
+  }
+  function _shipRowHtml(name, vols){
+    return '<div class="vsmix-ship-row" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;padding-bottom:6px;border-bottom:1px dashed var(--line)">'+
+        '<input class="vsmix-inp" data-fld="name" value="'+_escAttr(name)+'" placeholder="Vessel name" style="flex:0 0 160px;font-size:12px">'+
+        '<span class="vsmix-ship-tks" style="display:flex;gap:4px;flex-wrap:wrap;flex:1">'+vols.map((v,k) => _shipTkInp(v,k)).join('')+'</span>'+
+        '<button onclick="VMIX._shipTk(this,1)" title="Add a tank to this vessel" style="'+_SHIP_BTN+'">+ TK</button>'+
+        '<button onclick="VMIX._shipTk(this,-1)" title="Remove the last tank" style="'+_SHIP_BTN+'">− TK</button>'+
+        '<button onclick="this.closest(\'.vsmix-ship-row\').remove()" title="Remove this vessel" '+
                 'style="padding:3px 7px;border:1px solid var(--red);color:var(--red);background:var(--panel);'+
                 'border-radius:4px;cursor:pointer;font-size:11px">✕</button>'+
-      '</div>'
-    ).join('');
+      '</div>';
+  }
+  function openShipEdit(){
+    const m = _gid('vsmixModal'); if(!m) return;
+    m.style.width = 'min(820px,96vw)';            /* đủ chỗ cho 4 ô tank / hàng */
+    const rows = SHIPS.map(s => _shipRowHtml(s.name, _tankVols(s))).join('');
+    let opts = ''; for(let k = 1; k <= MAX_TANKS; k++) opts += '<option value="'+k+'"'+(k === 2 ? ' selected' : '')+'>'+k+' tank'+(k > 1 ? 's' : '')+'</option>';
     m.innerHTML =
       '<div style="display:flex;align-items:center;margin-bottom:12px">'+
         '<span style="font-family:Oswald;font-size:15px;font-weight:700;letter-spacing:2px;color:#7b2d8e">⚙ VESSEL MANAGEMENT</span>'+
         '<button onclick="VMIX.closeModal()" style="margin-left:auto;padding:4px 12px;border:1.5px solid var(--line);background:#f0f4f8;border-radius:5px;font-family:Oswald;font-size:11px;cursor:pointer">✕ Close</button>'+
       '</div>'+
+      '<div style="font-size:10px;color:var(--ink-3);margin-bottom:8px">Tank volumes in m³. Most vessels have 2 tanks — use + TK / − TK for a vessel with a different number of tanks (1–'+MAX_TANKS+'); the Vessel Mix sheet then shows one column per tank.</div>'+
       '<div id="vsmix-ships-list">'+rows+'</div>'+
-      '<div style="display:flex;gap:6px;margin-top:8px">'+
+      '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">'+
         '<input id="vsmix-newship-name" placeholder="New vessel name" class="vsmix-inp" style="flex:2;font-size:12px">'+
-        '<input id="vsmix-newship-tk1"  placeholder="TK1 m³" class="vsmix-inp" style="flex:1;font-size:11px;text-align:right">'+
-        '<input id="vsmix-newship-tk2"  placeholder="TK2 m³" class="vsmix-inp" style="flex:1;font-size:11px;text-align:right">'+
+        '<select id="vsmix-newship-n" class="vsmix-inp" style="flex:0 0 96px;font-size:11px" title="Number of tanks">'+opts+'</select>'+
         '<button onclick="VMIX._addShipRow()" style="padding:5px 14px;border:1.5px solid var(--blue);color:var(--blue);background:var(--blue-soft);border-radius:5px;cursor:pointer;font-family:Oswald;font-size:11px;font-weight:700">+ ADD</button>'+
       '</div>'+
       '<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">'+
@@ -1043,37 +1289,45 @@ const VMIX = (function(){
       '</div>';
     _gid('vsmixModalBg')?.classList.add('on');
   }
+  function _shipTk(btn, d){
+    const row = btn && btn.closest('.vsmix-ship-row'); if(!row) return;
+    const box = row.querySelector('.vsmix-ship-tks'); if(!box) return;
+    const n = box.querySelectorAll('input[data-fld="tk"]').length;
+    if(d > 0){
+      if(n >= MAX_TANKS){ toast('⚠ Max '+MAX_TANKS+' tanks per vessel','er'); return; }
+      box.insertAdjacentHTML('beforeend', _shipTkInp('', n));
+      const inp = box.lastElementChild; if(inp) inp.focus();
+    } else {
+      if(n <= 1){ toast('⚠ A vessel needs at least 1 tank','er'); return; }
+      box.lastElementChild.remove();
+    }
+  }
   function _addShipRow(){
-    const nm  = _gv('vsmix-newship-name').trim();
-    const tk1 = parseFloat(_gv('vsmix-newship-tk1'));
-    const tk2 = parseFloat(_gv('vsmix-newship-tk2'));
+    const nm = _gv('vsmix-newship-name').trim();
+    const k  = Math.max(1, Math.min(MAX_TANKS, parseInt(_gv('vsmix-newship-n'), 10) || 2));
     if(!nm){ toast('⚠ Enter vessel name','er'); return; }
-    if(isNaN(tk1) || isNaN(tk2)){ toast('⚠ Enter TK1 and TK2 volumes','er'); return; }
     const list = _gid('vsmix-ships-list'); if(!list) return;
-    const div = document.createElement('div');
-    div.className = 'vsmix-ship-row';
-    div.innerHTML =
-      '<input class="vsmix-inp" data-fld="name" value="'+_escAttr(nm)+'" style="flex:2;font-size:12px">'+
-      '<input class="vsmix-inp" data-fld="tk1" value="'+tk1+'" style="flex:1;font-size:11px;text-align:right">'+
-      '<input class="vsmix-inp" data-fld="tk2" value="'+tk2+'" style="flex:1;font-size:11px;text-align:right">'+
-      '<button onclick="this.closest(\'.vsmix-ship-row\').remove()" '+
-              'style="padding:3px 7px;border:1px solid var(--red);color:var(--red);background:var(--panel);'+
-              'border-radius:4px;cursor:pointer;font-size:11px">✕</button>';
-    div.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:5px';
-    list.appendChild(div);
+    list.insertAdjacentHTML('beforeend', _shipRowHtml(nm, new Array(k).fill('')));
     _gid('vsmix-newship-name').value = '';
-    _gid('vsmix-newship-tk1').value  = '';
-    _gid('vsmix-newship-tk2').value  = '';
+    const first = list.lastElementChild && list.lastElementChild.querySelector('input[data-fld="tk"]');
+    if(first) first.focus();
+    toast('Enter the '+k+' tank volume'+(k > 1 ? 's' : '')+' (m³), then 💾 SAVE','ok');
   }
   function _saveShips(){
     const rows = document.querySelectorAll('#vsmix-ships-list .vsmix-ship-row');
-    const next = [];
+    const next = [], bad = [], seen = {};
     rows.forEach(r=>{
-      const nm  = r.querySelector('input[data-fld="name"]')?.value.trim();
-      const tk1 = parseFloat(r.querySelector('input[data-fld="tk1"]')?.value);
-      const tk2 = parseFloat(r.querySelector('input[data-fld="tk2"]')?.value);
-      if(nm && !isNaN(tk1) && !isNaN(tk2)) next.push({ name:nm, tk1_m3:tk1, tk2_m3:tk2 });
+      const nm = (r.querySelector('input[data-fld="name"]')?.value || '').trim();
+      const vols = Array.prototype.map.call(r.querySelectorAll('input[data-fld="tk"]'), el => parseFloat(String(el.value||'').replace(/,/g,'')));
+      if(!nm){ if(vols.some(v => !isNaN(v))) bad.push('a vessel without a name'); return; }
+      if(!vols.length || vols.some(v => isNaN(v) || v <= 0)){ bad.push(nm+': every tank needs a volume > 0'); return; }
+      if(seen[nm.toUpperCase()]){ bad.push(nm+': duplicate name'); return; }
+      seen[nm.toUpperCase()] = 1;
+      const s = { name:nm, tk1_m3:vols[0], tk2_m3:vols.length > 1 ? vols[1] : 0 };
+      if(vols.length !== 2) s.tanks = vols;
+      next.push(s);
     });
+    if(bad.length){ toast('⚠ Not saved — '+bad.join(' · '),'er'); return; }
     if(!next.length){ toast('⚠ Need at least one vessel','er'); return; }
     SHIPS = next;
     /* Firebase persistence wired in S5 along with vessel_config listener.
@@ -1090,6 +1344,7 @@ const VMIX = (function(){
   }
   function openDensityEdit(){
     const m = _gid('vsmixModal'); if(!m) return;
+    m.style.width = '';                             /* v4.177 — trả lại độ rộng mặc định */
     const fld = (id, lbl, val) =>
       '<div class="vsmix-fld"><label class="vsmix-lbl">'+lbl+'</label>'+
         '<input id="'+id+'" class="vsmix-inp" value="'+val+'" inputmode="decimal" style="font-size:13px"></div>';
@@ -1168,7 +1423,8 @@ const VMIX = (function(){
      KHÔNG import final volume (COQ vessel không có).
      ============================================================ */
   function _renderCoqExtra(){
-    [0,1].forEach(i=>{
+    /* v4.177 — mọi cột tank đang có (cột nhân bản có thể chưa dựng lưới COQ) */
+    _cols().forEach((_c, i)=>{
       const host = _gid('vs-coq-extra-'+i);
       if(!host || host.dataset.built === '1') return;
       let h = '<div class="vsmix-gc-row" style="align-items:flex-start">'
@@ -1191,7 +1447,7 @@ const VMIX = (function(){
     _renderCoqExtra();
     const dt = _gid('vs-date'); if(dt && !dt.value) dt.value = _todayDDMMYY();
     updateLot();
-    [0,1].forEach(_renderStatus);
+    for(let i = 0; i < NT(); i++) _renderStatus(i);
   }
 
   /* ---------- COQ import (vessel, 2-tank) ---------- */
@@ -1242,7 +1498,9 @@ const VMIX = (function(){
     /* điền định danh nếu đang trống (không đè dữ liệu đã nhập) */
     const cust = _gid('vs-cust'); if(cust && !cust.value && coq.customer) cust.value = coq.customer;
     const fin  = _gid('vs-ftime'); if(fin && !fin.value && coq.sampTime) fin.value = coq.sampTime;
-    [0,1].forEach(i=>{
+    /* v4.177 — đủ số tank của tàu; COQ có bao nhiêu cột TANK n thì điền bấy nhiêu */
+    const n = NT();
+    for(let i = 0; i < n; i++){
       const tk = (coq.tanks && coq.tanks[i]) || {};
       /* GC %vol — CH₄ để trống (COQ không có) */
       GC_KEYS.forEach(k=>{ if(k !== 'meth') sv('vs-gc-'+k+'-'+i, tk[k]); });
@@ -1251,8 +1509,20 @@ const VMIX = (function(){
       /* các chỉ tiêu COQ bổ sung (KHÔNG có final volume) */
       VCQ.forEach(f=>{ sv('vs-cq-'+f.k+'-'+i, tk[f.k]); });
       try{ gcSum(i); }catch(_){}
-    });
-    toast('📄 Import COQ '+(coq.no||coq.lot)+' → điền GC %vol + Lab Dens + chỉ tiêu cả 2 tank (tím)','ok');
+    }
+    const nq = (coq.tanks || []).length;
+    toast('📄 Import COQ '+(coq.no||coq.lot)+' → GC %vol + Lab Dens + COQ items filled for '+Math.min(n, nq)+' tank'+(Math.min(n, nq) > 1 ? 's' : '')+
+          (nq < n ? ' (COQ has only '+nq+' tank column'+(nq > 1 ? 's' : '')+')' : ''),'ok');
+  }
+
+  /* ---------- v4.177: ✉ MAIL — mở email P7 Vessel Mixing Report cho lot đang làm ----------
+     Thư đọc Vessel Log (số đã lưu), không đọc ô đang gõ ⇒ lot chưa lưu thì nhắc 💾 SAVE trước. */
+  function mail(){
+    if(typeof MAIL === 'undefined' || !MAIL.openVessel){ toast('⚠ Report mail module not loaded','er'); return; }
+    const lot = ((_gid('vs-lot-display')||{}).textContent || '').trim();
+    const inLog = !!(lot && typeof VLOG !== 'undefined' && (VLOG.ROWS || []).some(e => e && String(e.lot||'').trim() === lot));
+    if(lot && !inLog) toast('ℹ '+lot+' is not in Vessel Log yet — press 💾 SAVE first, the mail reads the Vessel Log','warn');
+    MAIL.openVessel(inLog ? lot : '');
   }
 
   /* ---------- init: attach Firebase listeners (vessel_config / density) ---------- */
@@ -1286,6 +1556,12 @@ const VMIX = (function(){
     toggleRatio, onUnitChange,
     gcSum, startMix, finishMix, reset,
     calcPlan, calcResult, saveLog,
+    /* v4.177 — N tank + kiểu trộn thuần */
+    setMode, toggleTank, showAllTanks, _shipTk, mail,
+    get NT(){ return NT(); },
+    get MODE(){ return MODE; },
+    get HIDE(){ return HIDE; },
+    tankVols: _tankVols,
     importCoqPick, coqChosen,
     openShipEdit, openDensityEdit, closeModal,
     now, toggleAfter, custSearch, custPick,

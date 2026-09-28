@@ -220,6 +220,7 @@ const SP = (function(){
         refreshCounts(); refreshBadge();
         try{ renderAnalysis(); }catch(_){}
       }
+      try{ if(typeof INV!=='undefined'&&INV.dataReady) INV.dataReady('sp'); }catch(_){} /* v4.202 */
     }).catch(()=>{});
     ref.on('child_added',snap=>{if(_suppressEcho)return;const rid=snap.key,row=snap.val();if(!row)return;row._rid=rid;ROWS[rid]=row;saveCache();if(table)rebuildTableData();refreshCounts();refreshBadge();renderAnalysis();});
     ref.on('child_changed',snap=>{if(_suppressEcho)return;const rid=snap.key,row=snap.val();if(!row)return;row._rid=rid;ROWS[rid]=row;saveCache();if(table){const r=table.getRow(rid);if(r)r.update(row);else table.addRow(row);}refreshCounts();refreshBadge();renderAnalysis();});

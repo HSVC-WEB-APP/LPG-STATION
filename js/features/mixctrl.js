@@ -2310,134 +2310,318 @@ const MC = (function(){
     return m ? parseFloat(m[0]) : null;
   }
 
+  /* ============================================================
+     v4.171 — COQ FORMAT & COMPLETENESS AUDIT
+     ------------------------------------------------------------
+     Bẫy đã xảy ra (lot 421, 22/09/2026): ô RESULTS của Total Sulfur
+     bị lab bỏ trống, parser cũ "quét mò" sang phải và vớ phải cột
+     METHOD "ASTM D6667-21" → S = 6667 mg/kg → Quality Fail → nhánh
+     lưu Fail chỉ ghi 3 cột GC → mất C2H6 / C5+ / Olefin của cả lô.
+     Vì COQ là nguồn số liệu xuất hàng, từ nay:
+       • Giá trị BẮT BUỘC nằm ĐÚNG cột RESULTS — không quét sang phải.
+       • Thiếu / sai / lạc format 1 ô  ⇒  KHÔNG import gì hết.
+       • Hiện bảng liệt kê: tên chỉ tiêu (cột D) · địa chỉ ô · lý do,
+         để nhân viên cầm đi làm việc với phòng lab.
+     ============================================================ */
+
+  /* (0,6) → 'G1' */
+  function _a1(r, c){
+    let s = '', n = c + 1;
+    while(n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+    return s + (r + 1);
+  }
+  function _clean(s){ return String(s == null ? '' : s).replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim(); }
+  /* chuỗi trông giống tên PHƯƠNG PHÁP thử, không bao giờ là kết quả */
+  const _METH_RE = /ASTM|\bISO\b|\bEN\s*\d|\bIP\s*\d|\bD\s?\d{3,}|Calculation|T[ií]nh\s*to[áa]n/i;
+
   function _parseCoqWorkbook(wb){
-    /* pick the sheet that contains 'CERTIFICATE OF QUALITY' (or first) */
-    let ws = null;
+    /* ---- chọn sheet chứa 'CERTIFICATE OF QUALITY' ---- */
+    let ws = null, wsName = '';
     for(const name of wb.SheetNames){
       const s = wb.Sheets[name];
       const txt = JSON.stringify(XLSX.utils.sheet_to_json(s, {header:1, defval:'', raw:false}) || []);
-      if(/CERTIFICATE OF QUALITY/i.test(txt)){ ws = s; break; }
+      if(/CERTIFICATE OF QUALITY/i.test(txt)){ ws = s; wsName = name; break; }
     }
-    if(!ws) ws = wb.Sheets[wb.SheetNames[0]];
+    const A = { sheet:'', hdrRow:-1, resCol:-1, methCol:-1,
+                fields:[], missing:[], bad:[], checks:[], fatal:[] };
+    if(!ws){
+      ws = wb.Sheets[wb.SheetNames[0]]; wsName = wb.SheetNames[0];
+      A.fatal.push('Không tìm thấy sheet nào có dòng "CERTIFICATE OF QUALITY" — file có thể không phải phiếu COQ chuẩn (đang đọc tạm sheet "' + wsName + '").');
+    }
+    A.sheet = wsName;
     const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:true});
 
-    /* locate the RESULTS column from the table header row */
-    let resCol = 6;   // default col G
-    outer:
-    for(const row of aoa){
-      for(let j = 0; j < row.length; j++){
-        if(/RESULTS/i.test(String(row[j]))){ resCol = j; break outer; }
-      }
-    }
-
-    const coq = { comp:{} };
-
-    /* label → value on the same row (value = first non-empty cell right of label) */
-    const findVal = (labelRe, valRe)=>{
-      for(const row of aoa){
-        for(let j = 0; j < row.length; j++){
-          const cell = String(row[j]||'');
-          if(labelRe.test(cell)){
-            for(let k = j; k < row.length; k++){
-              if(k === j && !valRe) continue;
-              const v = String(row[k]||'').trim();
-              if(!v || v === ':' ) continue;
-              if(valRe){ const m = v.match(valRe); if(m) return m[0]; }
-              else if(k > j) return v;
-            }
-          }
-        }
-      }
-      return null;
-    };
-    /* component label → numeric result in resCol */
-    const compVal = (labelRe)=>{
-      for(const row of aoa){
-        for(let j = 0; j < Math.min(row.length, resCol); j++){
-          if(labelRe.test(String(row[j]||''))){
-            const v = _coqNum(row[resCol]);
-            if(v != null) return v;
-            /* '<0.01' stored as text also handled by _coqNum; fallback scan right */
-            for(let k = resCol; k < row.length; k++){
-              const x = _coqNum(row[k]); if(x != null) return x;
-            }
-          }
-        }
-      }
-      return null;
-    };
-
-    coq.no      = findVal(/No\.?\s*\/\s*S[oố]/i, /[A-Z]{2,5}-\d{4}-\d+/) ||
-                  findVal(/CERTIFICATE/i, /[A-Z]{2,5}-\d{4}-\d+/);
-    coq.lot     = findVal(/Lot\s*No/i, /LPG-\d{4}-\d+/i);
-    const qtyS  = findVal(/Quantity/i, /[\d.,]+\s*m3/i);
-    coq.qty     = qtyS ? _coqNum(qtyS) : null;
-    coq.tank    = findVal(/Shore\s*Tank/i, /TK\s*-?\s*\d{4}/i);
-    const smpS  = findVal(/Sampling\s*Time/i, /\d{1,2}:\d{2}/);
-    coq.sampTime= smpS || '';
-    const anaS  = findVal(/Analysis\s*Date/i, /\d{1,2}\/\d{1,2}\/\d{2,4}/);
-    coq.anaDate = anaS || '';
-
-    coq.comp.c2h6 = compVal(/\(C2H6\)/i);
-    coq.comp.c3h8 = compVal(/\(C3H8\)/i);
-    coq.comp.c3h6 = compVal(/Propylene|\(C3H6\)/i);
-    coq.comp.ic4  = compVal(/i-C4H10|Iso\s*-?\s*Butane/i);
-    coq.comp.nc4  = compVal(/n-C4H10|n-butane/i);
-    coq.comp.bd13 = compVal(/Butadiene/i);
-    coq.comp.olef = compVal(/Total\s*-?\s*Olefin/i);
-    coq.comp.c5   = compVal(/C5\s*&\s*C5\+/i);
-    /* v4.55.1 — minor components (%vol, matched by chemical formula to avoid
-       cross-hits: e.g. 'Neo - Pentane (neo-C5H12)' vs 'n-Pentane (n-C5H12)') */
-    coq.comp.t2b   = compVal(/\(t-C4H8\)|t-2\s*butene/i);
-    coq.comp.b1    = compVal(/\(1-C4H8\)|1-Butene/i);
-    coq.comp.ib    = compVal(/\(i-C4H8\)|i-Butene/i);
-    coq.comp.neoc5 = compVal(/\(neo-C5H12\)|Neo\s*-\s*Pentane/i);
-    coq.comp.ic5   = compVal(/\(i-C5H12\)|Iso\s*-\s*Pentane/i);
-    coq.comp.nc5   = compVal(/\(n-C5H12\)/i);
-    coq.comp.nc6   = compVal(/\(n-C6H14\)|n-Hexane/i);
-
-    /* v4.55.1 — Propane/Butane fraction: label row holds %Vol ('52.96/45.62'),
-       the row(s) right below hold %Wt ('50.31/49.69') */
-    coq.frv = ''; coq.frw = '';
+    /* ---- hàng tiêu đề bảng chỉ tiêu: RESULTS + METHOD ---- */
     for(let i = 0; i < aoa.length; i++){
       const row = aoa[i] || [];
-      let hit = false;
-      for(let j = 0; j < Math.min(row.length, resCol); j++){
-        if(/Propane\s*\/\s*Butane|Pro\s*\/\s*Bu/i.test(String(row[j]||''))){ hit = true; break; }
+      let rc = -1, mc = -1;
+      for(let j = 0; j < row.length; j++){
+        const t = String(row[j] || '');
+        if(rc < 0 && /RESULTS/i.test(t)) rc = j;
+        if(mc < 0 && /METHOD/i.test(t))  mc = j;
       }
-      if(!hit) continue;
-      const frRe = /\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?/;
-      const v0 = String(row[resCol]||'').match(frRe);
-      if(v0) coq.frv = v0[0].replace(/\s+/g,'');
-      for(let k = i+1; k <= i+2 && k < aoa.length; k++){
-        const v1 = String((aoa[k]||[])[resCol]||'').match(frRe);
-        if(v1){ coq.frw = v1[0].replace(/\s+/g,''); break; }
-      }
-      break;
+      if(rc >= 0){ A.hdrRow = i; A.resCol = rc; A.methCol = mc; break; }
     }
+    if(A.resCol < 0){
+      A.resCol = 6;
+      A.fatal.push('Không tìm thấy cột "RESULTS (Kết quả)" trong bảng chỉ tiêu — file không đúng mẫu COQ của nhà máy. Đang đọc tạm cột G.');
+    }
+    const resCol = A.resCol;
+    const coq = { comp:{}, _audit:A };
 
-    coq.vp  = compVal(/Vapor\s*Pressure/i);
-    coq.sul = compVal(/Total\s*Sulfur/i);
-    coq.den = compVal(/Density\s*at\s*15/i);
-    coq.mw  = compVal(/Molecular\s*weight|Kh[oố]i\s*l[uư][oợ]ng\s*ph[aâ]n\s*t[uử]/i);
-    /* text results — read raw cell in resCol on the label row */
-    const textVal = (labelRe)=>{
-      for(const row of aoa){
+    /* ---- dò dòng theo nhãn (chỉ tìm ở phần BÊN TRÁI cột RESULTS) ---- */
+    const _findRow = (re)=>{
+      for(let i = 0; i < aoa.length; i++){
+        const row = aoa[i] || [];
         for(let j = 0; j < Math.min(row.length, resCol); j++){
-          if(labelRe.test(String(row[j]||''))){
-            const v = String(row[resCol]||'').trim();
-            if(v) return v;
-          }
+          if(re.test(String(row[j] || '')))
+            return { i, j, row, label:_clean(row[j]) };
         }
       }
-      return '';
+      return null;
     };
-    coq.h2o = textVal(/Free\s*Water/i);
-    coq.cu  = textVal(/Copper\s*Strip/i);
-    coq.res = textVal(/Residue/i);
+
+    /* ---- đọc 1 chỉ tiêu: giá trị BẮT BUỘC ở đúng cột RESULTS ---- */
+    const read = (key, ui, re, opt)=>{
+      opt = opt || {};
+      const ent = { key, ui, label:'', addr:'', raw:'', val:null, state:'ok', why:'' };
+      A.fields.push(ent);
+      const hit = _findRow(re);
+      if(!hit){
+        ent.state = 'norow'; ent.label = '—';
+        ent.why = 'Không có dòng chỉ tiêu này trong file';
+        A.missing.push(ent); return null;
+      }
+      ent.label = hit.label;
+      ent.addr  = _a1(hit.i, resCol);
+      const raw = hit.row.length > resCol ? hit.row[resCol] : '';
+      ent.raw   = (raw === '' || raw == null) ? '' : String(raw);
+      if(ent.raw === ''){
+        ent.state = 'empty'; ent.why = 'Ô KẾT QUẢ để trống — lab chưa điền';
+        A.missing.push(ent); return null;
+      }
+      if(_METH_RE.test(ent.raw) && !opt.text){
+        ent.state = 'meth';
+        ent.why   = 'Ô kết quả đang chứa TÊN PHƯƠNG PHÁP — cột bị lệch so với mẫu chuẩn';
+        A.bad.push(ent); return null;
+      }
+      if(opt.text){ ent.val = ent.raw.trim(); return ent.val; }
+      if(opt.frac){
+        const m = ent.raw.match(/\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?/);
+        if(!m){ ent.state = 'bad'; ent.why = 'Không đúng dạng "a/b" (ví dụ 52.85/47.15)'; A.bad.push(ent); return null; }
+        ent.val = m[0].replace(/\s+/g, ''); return ent.val;
+      }
+      const v = _coqNum(ent.raw);
+      if(v == null){ ent.state = 'bad'; ent.why = 'Không đọc được thành con số'; A.bad.push(ent); return null; }
+      ent.val = v; return v;
+    };
+
+    /* ---- phần đầu phiếu: nhãn ở trái, giá trị ở ô bên phải (có regex chặn) ---- */
+    const head = (key, ui, labRe, valRe, fmtHint)=>{
+      const ent = { key, ui, label:'', addr:'', raw:'', val:null, state:'ok', why:'' };
+      A.fields.push(ent);
+      for(let i = 0; i < aoa.length; i++){
+        const row = aoa[i] || [];
+        for(let j = 0; j < row.length; j++){
+          if(!labRe.test(String(row[j] || ''))) continue;
+          ent.label = _clean(row[j]);
+          /* quét hết phần bên phải nhãn: nhãn phụ tiếng Việt "(Số lô)" và
+             dấu ":" nằm xen giữa, nên chỉ kết luận SAU KHI hết hàng */
+          const seen = [];
+          for(let k = j + 1; k < row.length; k++){
+            const v = _clean(row[k]);
+            if(!v || v === ':') continue;
+            const m = v.match(valRe);
+            if(m){ ent.addr = _a1(i, k); ent.raw = v; ent.val = m[0]; return ent.val; }
+            if(!/^\(.*\)$/.test(v)) seen.push({ v, k });   // bỏ qua nhãn phụ trong ngoặc
+          }
+          if(seen.length){
+            const last = seen[seen.length - 1];
+            ent.addr = _a1(i, last.k); ent.raw = last.v; ent.state = 'bad';
+            ent.why = 'Giá trị "' + last.v + '" không đúng dạng ' + fmtHint;
+            A.bad.push(ent); return null;
+          }
+          ent.state = 'empty'; ent.addr = _a1(i, j + 1);
+          ent.why = 'Bỏ trống — cần ' + fmtHint;
+          A.missing.push(ent); return null;
+        }
+      }
+      ent.state = 'norow'; ent.label = '—';
+      ent.why = 'Không có dòng này trong file';
+      A.missing.push(ent); return null;
+    };
+
+    /* ═══ 1. Phần đầu phiếu ═══ */
+    coq.no       = head('no',   'COQ No.',        /No\.?\s*\/\s*S[oố]/i, /[A-Z]{2,5}-\d{4}-\d+/,    'PPT-YYYY-nnn');
+    coq.lot      = head('lot',  'Lot No.',        /Lot\s*No/i,          /LPG-\d{4}-\d+/i,          'LPG-YYYY-nnn');
+    const qtyS   = head('qty',  'Quantity (m³)',  /Quantity/i,          /[\d.,]+\s*m3/i,           'số + "m3"');
+    coq.qty      = qtyS ? _coqNum(qtyS) : null;
+    coq.tank     = head('tank', 'Shore Tank No.', /Shore\s*Tank/i,      /TK\s*-?\s*\d{4}/i,        'TK3501 / TK3502');
+    coq.sampTime = head('samp', 'Sampling Time',  /Sampling\s*Time/i,   /\d{1,2}:\d{2}/,           'HH:MM') || '';
+    coq.anaDate  = head('ana',  'Analysis Date',  /Analysis\s*Date/i,   /\d{1,2}\/\d{1,2}\/\d{2,4}/, 'DD/MM/YYYY') || '';
+
+    /* ═══ 2. Thành phần (%Vol, đúng cột RESULTS) ═══ */
+    const c = coq.comp;
+    c.c2h6  = read('c2h6',  'Ethane C₂H₆',          /\(C2H6\)/i);
+    c.c3h8  = read('c3h8',  'Propane C₃H₈',         /\(C3H8\)/i);
+    c.c3h6  = read('c3h6',  'Propylene C₃H₆',       /\(C3H6\)|Propylene/i);
+    c.ic4   = read('ic4',   'Iso-Butane i-C₄',      /i-C4H10|Iso\s*-?\s*Butane/i);
+    c.nc4   = read('nc4',   'n-Butane n-C₄',        /n-C4H10|n-butane/i);
+    const tbu = read('tbu', 'Total Butane C₄H₁₀',   /Total\s*Butane/i);
+    c.t2b   = read('t2b',   't-2-Butene',           /\(t-C4H8\)|t-2\s*butene/i);
+    c.b1    = read('b1',    '1-Butene',             /\(1-C4H8\)|1-Butene/i);
+    c.ib    = read('ib',    'i-Butene',             /\(i-C4H8\)|i-Butene/i);
+    c.neoc5 = read('neoc5', 'neo-Pentane',          /\(neo-C5H12\)|Neo\s*-\s*Pentane/i);
+    c.ic5   = read('ic5',   'i-Pentane',            /\(i-C5H12\)|Iso\s*-\s*Pentane/i);
+    c.nc5   = read('nc5',   'n-Pentane',            /\(n-C5H12\)/i);
+    c.bd13  = read('bd13',  '1,3-Butadiene',        /Butadiene/i);
+    c.nc6   = read('nc6',   'n-Hexane',             /\(n-C6H14\)|n-Hexane/i);
+    c.olef  = read('olef',  'Total Olefin',         /Total\s*-?\s*Olefin/i);
+    c.c5    = read('c5',    'C5 & C5+',             /C5\s*&\s*C5\+/i);
+
+    /* ═══ 3. Pro/Bu fraction — %Vol trên dòng nhãn, %Wt dòng ngay dưới ═══ */
+    coq.frv = ''; coq.frw = '';
+    const frHit = _findRow(/Propane\s*\/\s*Butane|Pro\s*\/\s*Bu/i);
+    const frRe  = /\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?/;
+    const frEnt = (key, ui, i)=>{
+      const ent = { key, ui, label:(frHit ? frHit.label : '—'), addr:'', raw:'', val:null, state:'ok', why:'' };
+      A.fields.push(ent);
+      if(!frHit){ ent.state='norow'; ent.why='Không có dòng Propane/Butane Fraction trong file'; A.missing.push(ent); return ''; }
+      ent.addr = _a1(i, resCol);
+      const raw = (aoa[i] || [])[resCol];
+      ent.raw = (raw == null) ? '' : String(raw);
+      if(ent.raw === ''){ ent.state='empty'; ent.why='Ô KẾT QUẢ để trống — lab chưa điền'; A.missing.push(ent); return ''; }
+      const m = ent.raw.match(frRe);
+      if(!m){ ent.state='bad'; ent.why='Không đúng dạng "a/b" (ví dụ 52.85/47.15)'; A.bad.push(ent); return ''; }
+      ent.val = m[0].replace(/\s+/g, ''); return ent.val;
+    };
+    if(frHit){
+      coq.frv = frEnt('frv', 'Pro/Bu %Vol', frHit.i);
+      coq.frw = frEnt('frw', 'Pro/Bu %Wt',  frHit.i + 1);
+    } else {
+      coq.frv = frEnt('frv', 'Pro/Bu %Vol', 0);
+      coq.frw = frEnt('frw', 'Pro/Bu %Wt',  0);
+    }
+
+    /* ═══ 4. Các chỉ tiêu còn lại ═══ */
+    coq.vp  = read('vp',  'Vapor Pressure @37.8°C', /Vapor\s*Pressure/i);
+    coq.sul = read('sul', 'Total Sulfur',           /Total\s*Sulfur/i);
+    coq.h2o = read('h2o', 'Free Water',             /Free\s*Water/i,  {text:true}) || '';
+    coq.cu  = read('cu',  'Cu Strip Corrosion',     /Copper\s*Strip/i,{text:true}) || '';
+    coq.den = read('den', 'Density @15°C',          /Density\s*at\s*15/i);
+    coq.res = read('res', 'Residue',                /Residue/i,       {text:true}) || '';
+    coq.mw  = read('mw',  'Molecular Weight',       /Molecular\s*weight|Kh[oố]i\s*l[uư][oợ]ng\s*ph[aâ]n\s*t[uử]/i);
+
+    /* ═══ 5. Đối chiếu nội bộ phiếu ═══ */
+    const chk = (name, got, want, tol, note)=>{
+      if(got == null || want == null){ return; }
+      const d = got - want;
+      A.checks.push({ name, got, want, diff:d, ok:Math.abs(d) <= tol, tol, note:note || '' });
+    };
+    const S = (...xs)=> xs.every(x=> x != null) ? xs.reduce((a,b)=>a+b, 0) : null;
+    chk('Σ các cấu tử %Vol = 100',
+        S(c.c2h6,c.c3h8,c.c3h6,c.ic4,c.nc4,c.t2b,c.b1,c.ib,c.neoc5,c.ic5,c.nc5,c.bd13,c.nc6), 100, 0.10);
+    chk('Total Butane = i-C₄ + n-C₄', tbu, S(c.ic4, c.nc4), 0.02);
+    chk('Total Olefin = C₃H₆ + t-2-Butene + 1-Butene + i-Butene', c.olef, S(c.c3h6,c.t2b,c.b1,c.ib), 0.02);
+    chk('C5 & C5+ = neo + iso + n-Pentane + n-Hexane', c.c5, S(c.neoc5,c.ic5,c.nc5,c.nc6), 0.02);
+    const _sumFr = s =>{
+      const m = String(s || '').match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+      return m ? parseFloat(m[1]) + parseFloat(m[2]) : null;
+    };
+    chk('Pro/Bu %Vol cộng lại = 100', _sumFr(coq.frv), 100, 0.05);
+    chk('Pro/Bu %Wt cộng lại = 100',  _sumFr(coq.frw), 100, 0.05,
+        'Cột %Wt là số dùng tính Filled C3/C4 chính thức — sai tổng là KHÔNG tính được');
+    if(coq.den != null && (coq.den < 0.45 || coq.den > 0.65))
+      A.checks.push({ name:'Density @15°C nằm trong 0.45–0.65 kg/l', got:coq.den, want:null, ok:false, note:'Giá trị bất thường' });
+    if(coq.qty != null && !(coq.qty > 0))
+      A.checks.push({ name:'Quantity > 0', got:coq.qty, want:null, ok:false, note:'' });
+
     return coq;
   }
 
+  /* ---- có vấn đề gì không? ---- */
+  function _coqBlocked(coq){
+    const A = coq && coq._audit;
+    if(!A) return false;
+    return !!(A.fatal.length || A.missing.length || A.bad.length || A.checks.some(x=> !x.ok));
+  }
+
+  /* ---- bảng thông báo chi tiết (chặn import) ---- */
+  const _CQR_ST = {
+    empty: ['ĐỂ TRỐNG',      'cqr-bad'],
+    norow: ['THIẾU DÒNG',    'cqr-bad'],
+    meth:  ['LỆCH CỘT',      'cqr-bad'],
+    bad:   ['SAI ĐỊNH DẠNG', 'cqr-bad']
+  };
+  function _coqReport(coq, fname, ctxLot){
+    const A = coq._audit || { fields:[], missing:[], bad:[], checks:[], fatal:[] };
+    const bad = A.missing.concat(A.bad);
+    const badChk = A.checks.filter(x=> !x.ok);
+    let bd = _gid('cqr-backdrop');
+    if(!bd){
+      bd = document.createElement('div');
+      bd.id = 'cqr-backdrop'; bd.className = 'cqr-backdrop';
+      bd.onclick = e =>{ if(e.target === bd) bd.classList.remove('on'); };
+      document.body.appendChild(bd);
+    }
+    const line = e =>
+      '<tr><td class="cqr-nm">' + _escHtml(e.ui) + '</td>' +
+      '<td class="cqr-lab">' + _escHtml(e.label || '—') + '</td>' +
+      '<td class="cqr-ad">' + _escHtml(e.addr || '—') + '</td>' +
+      '<td class="cqr-rw">' + (e.raw === '' ? '<i>(trống)</i>' : _escHtml(e.raw)) + '</td>' +
+      '<td class="' + (_CQR_ST[e.state] ? _CQR_ST[e.state][1] : 'cqr-bad') + '">' +
+        (_CQR_ST[e.state] ? _CQR_ST[e.state][0] : e.state) + '</td>' +
+      '<td class="cqr-wh">' + _escHtml(e.why) + '</td></tr>';
+    const nf = v => (v == null ? '—' : (Math.round(v * 1000) / 1000));
+
+    let txt = 'FILE COQ CHƯA DÙNG ĐƯỢC — ' + (fname || '') + '\n' +
+              'Lot: ' + (coq.lot || '—') + (ctxLot ? ('  (đang xử lý ' + ctxLot + ')') : '') +
+              '   Sheet: ' + (A.sheet || '—') + '\n\n';
+    if(A.fatal.length) txt += 'FORMAT: ' + A.fatal.join(' | ') + '\n\n';
+    bad.forEach(e=>{ txt += '• ' + e.ui + ' — "' + (e.label || '') + '" — ô ' + (e.addr || '?') + ' : ' + e.why + '\n'; });
+    badChk.forEach(x=>{ txt += '• ĐỐI CHIẾU: ' + x.name + ' — đang là ' + nf(x.got) +
+      (x.want != null ? (' / lệch ' + nf(x.diff)) : '') + (x.note ? (' — ' + x.note) : '') + '\n'; });
+
+    bd.innerHTML =
+      '<div class="cqr-box">' +
+        '<div class="cqr-hd">' +
+          '<div class="cqr-t1">⛔ FILE COQ CHƯA DÙNG ĐƯỢC — KHÔNG CÓ SỐ NÀO ĐƯỢC NHẬP VÀO APP</div>' +
+          '<div class="cqr-t2">' + _escHtml(fname || '') +
+            '&nbsp;·&nbsp;Sheet <b>' + _escHtml(A.sheet || '—') + '</b>' +
+            '&nbsp;·&nbsp;Lot <b>' + _escHtml(coq.lot || '—') + '</b>' +
+            (ctxLot ? ('&nbsp;·&nbsp;đang xử lý <b>' + _escHtml(ctxLot) + '</b>') : '') + '</div>' +
+        '</div>' +
+        (A.fatal.length
+          ? '<div class="cqr-fatal">' + A.fatal.map(t=>'<div>⚠ ' + _escHtml(t) + '</div>').join('') + '</div>'
+          : '') +
+        (bad.length
+          ? '<div class="cqr-sec">① Ô KẾT QUẢ THIẾU HOẶC SAI (' + bad.length + ')</div>' +
+            '<table class="cqr-tb"><thead><tr>' +
+              '<th>Chỉ tiêu (V4)</th><th>Tên trên phiếu COQ</th><th>Ô</th>' +
+              '<th>Đang chứa</th><th>Tình trạng</th><th>Vì sao</th>' +
+            '</tr></thead><tbody>' + bad.map(line).join('') + '</tbody></table>'
+          : '') +
+        (badChk.length
+          ? '<div class="cqr-sec">② ĐỐI CHIẾU SỐ TRONG PHIẾU KHÔNG KHỚP (' + badChk.length + ')</div>' +
+            '<table class="cqr-tb"><thead><tr><th>Phép đối chiếu</th><th>Đang là</th><th>Phải là</th><th>Lệch</th><th>Ghi chú</th></tr></thead><tbody>' +
+            badChk.map(x=>
+              '<tr><td class="cqr-nm">' + _escHtml(x.name) + '</td>' +
+              '<td class="cqr-bad">' + nf(x.got) + '</td>' +
+              '<td>' + (x.want == null ? '—' : nf(x.want)) + '</td>' +
+              '<td class="cqr-bad">' + (x.want == null ? '—' : ((x.diff > 0 ? '+' : '') + nf(x.diff))) + '</td>' +
+              '<td class="cqr-wh">' + _escHtml(x.note || '') + '</td></tr>').join('') +
+            '</tbody></table>'
+          : '') +
+        '<div class="cqr-note">Phần mềm <b>không tự suy, không tự điền, không tự sửa</b> số của chứng thư. ' +
+          'Gửi danh sách dưới đây cho phòng lab, nhận file COQ đã sửa rồi import lại.</div>' +
+        '<div class="cqr-sec">③ NỘI DUNG GỬI LAB (bôi đen để copy)</div>' +
+        '<textarea class="cqr-txt" readonly onclick="this.select()">' + _escHtml(txt) + '</textarea>' +
+        '<div class="cqr-ft"><button type="button" class="btn btn-blue" onclick="MC.closeCoqReport()">ĐÃ HIỂU — ĐÓNG</button></div>' +
+      '</div>';
+    bd.classList.add('on');
+    try{ toast('⛔ COQ thiếu/sai ' + (bad.length + badChk.length) + ' mục — không import','er'); }catch(_){}
+  }
+  function _closeCoqReport(){ _gid('cqr-backdrop')?.classList.remove('on'); }
   function _fmtCoqDate(s){
     const m = String(s||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
     if(!m) return '';
@@ -2499,6 +2683,9 @@ const MC = (function(){
         return;
       }
     }
+    /* ── 2b. v4.171 — RÀ SOÁT FORMAT & ĐỘ ĐẦY ĐỦ CỦA FILE COQ ──
+       Thiếu/sai bất kỳ ô nào ⇒ KHÔNG ghi một số nào vào panel. */
+    if(_coqBlocked(coq)){ _coqReport(coq, fname, _lotName(curNum) + ' · TK-' + tk); return; }
     /* ── 3. Fill GC composition (calc cells) ── */
     const setV = (id, v, dec)=>{
       const el = _gid(id);
@@ -3440,6 +3627,8 @@ const MC = (function(){
     /* v4.55 — COQ import + spec table + quality evaluation */
     importCoqPick, coqFileChosen,
     parseCoqWorkbook: _parseCoqWorkbook,   /* v4.61 — reused by ENG edit-modal COQ import */
+    coqBlocked: _coqBlocked,               /* v4.171 — COQ audit gate */
+    coqReport: _coqReport, closeCoqReport: _closeCoqReport,
     fmtCoqDate: _fmtCoqDate,
     openSpec, closeSpec, saveSpec, resetSpec,
     evalQuality, evalRowQuality, qcRecalc

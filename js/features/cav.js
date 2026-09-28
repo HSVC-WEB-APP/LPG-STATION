@@ -21,7 +21,11 @@
  *   5) Cập nhật docs/PLAN-TACH-MODULE.md: đánh dấu [x] module này.
  * ============================================================ */
 
-/* TODO[P5B]: dán thân module CAV (V4-54 dòng 25059–25760) vào đây. */
+/* ⭐ v4.180 — màn hình của module này dời từ REPORTS ▸ Cavern Daily sang
+   LPG SALES ▸ SAP ▸ 📑 SAP WMS Report (swr.js). CAV vẫn là NƠI GIỮ dữ liệu nhập tay
+   (cavern_in, cavern_price) và các nguồn CAV.src; việc kiểm/điền file do BSXL làm.
+   preview()/viewTable()/exportReport() cũ không còn chỗ vẽ (đã gỡ giao diện) — tự
+   thoát khi không thấy phần tử. Mỗi lần dữ liệu CAV đổi ⇒ SWR.poke() vẽ lại bảng kiểm. */
 
 /* ===== BÓC TỪ V4-54 dòng 25059–25760 ===== */
 const CAV = (function(){
@@ -160,6 +164,7 @@ const CAV = (function(){
   }
 
   function render(){
+    try{ if(typeof SWR!=='undefined') SWR.poke(); }catch(_){}
     const badge=document.getElementById('engBadgeCavern');
     const tbody=document.getElementById('cavTbody');
     const empty=document.getElementById('cavEmpty');
@@ -305,6 +310,8 @@ const CAV = (function(){
       const from=String(r.fromLoc||'').trim(), to=String(r.toLoc||'').trim();
       if(from==='1100'&&(to==='2100'||to==='2101')){ net[to][k]+=kg; n++; }
       else if((from==='2100'||from==='2101')&&to==='1100'){ net[from][k]-=kg; n++; }
+      /* v4.173 — chuyển liên bồn cũng làm đổi tồn bồn (file Batch Stock cân theo ST thuần) */
+      else if((from==='2100'&&to==='2101')||(from==='2101'&&to==='2100')){ net[to][k]+=kg; net[from][k]-=kg; n++; }
     });
     return { net, n };
   }
@@ -373,7 +380,7 @@ const CAV = (function(){
   function _attachPrice(){
     if(_priceRef || typeof firebase==='undefined' || !firebase.database) return;
     _priceRef = firebase.database().ref(FB_PRICE);
-    _priceRef.on('value', s=>{ const v=s.val(); PRICES = (v&&typeof v==='object')?v:Object.create(null); _fillPriceInputs(); },
+    _priceRef.on('value', s=>{ const v=s.val(); PRICES = (v&&typeof v==='object')?v:Object.create(null); _fillPriceInputs(); try{ if(typeof SWR!=='undefined') SWR.poke(); }catch(_){} },
                  e=>console.warn('[CAV] price',e));
   }
   /* value for (date,key): explicit record for the date, else most-recent prior date */
@@ -424,7 +431,7 @@ const CAV = (function(){
     function manRow(col,label,kg,xnote){ return {col,label,group:'MANUAL',src:'man',ton:T(kg),status:(kg>0?'man':'wait'),note:xnote||''}; }
     function appRow(col,label,kg,note,missCond){ return {col,label,group:'APP',src:'app',ton:T(kg),status:(missCond?'miss':(kg>0?'app':'wait')),note:note||''}; }
     function sapRow(col,label,kg,note){ return {col,label,group:'SAP',src:'sap',ton:(sapHas?T(kg):null),status:(sapHas?'sap':'miss'),note:note||''}; }
-    const g=A.gr, o=A.ol1;
+    const g=A.gr, o=A.ol1, OL=_ol1(date);
     let rows, prices, vesselCol;
     if(prod==='c4'){
       /* Butane sheet (58 cols): Domestic/Export only — no PETCHEM/EX-PETCHEM,
@@ -462,9 +469,11 @@ const CAV = (function(){
         manRow(14, 'Bonded Get-out EX-P/X',        g.X.c3, 'GR · so khớp SAP'),
         manRow(15, 'Bonded Get-out D',             g.D.c3, 'GR · so khớp SAP'),
         manRow(16, 'Bonded Get-out E',             g.E.c3, 'GR · so khớp SAP'),
-        manRow(34, 'OL1 DH 이체 PETCHEM (P)',      o.P),
-        manRow(37, 'OL1 DH 이체 EX-PETCHEM (X)',   o.X),
-        manRow(40, 'OL1 total (X+P)',              (o.PX||o.X+o.P)),
+        /* v4.173 — X = bản PLAN tuần (import), TỔNG = FEED OL1 gõ tay, P = TỔNG − X.
+           Chưa gõ TỔNG ⇒ 'wait' (KHÔNG BAO GIỜ dùng mức tạm tính 2.000 T). */
+        manRow(34, 'OL1 DH 이체 PETCHEM (P = total − X)', (OL.t==null?0:Math.max(0,OL.t-(OL.x||0))), 'formula in file'),
+        manRow(37, 'OL1 DH 이체 EX-PETCHEM (X · weekly plan)', (OL.x||0), OL.xAt?('plan imported '+new Date(OL.xAt).toISOString().slice(0,10)):'no plan imported'),
+        manRow(40, 'OL1 total (FEED OL1, typed)',  (OL.t==null?0:OL.t), OL.t==null?'not keyed in FEED OL1':'FEED OL1'),
         manRow(44, 'Domestic Heater (B100 GI)',    A.heater.c3, 'so khớp SAP B100 GI'),
         appRow(43, 'Domestic Pure C3 (1100 GI)',   tl.pure.c3, 'TL Data · LPG type = pure', tlMiss),
         appRow(48, 'Domestic 2100 (TK-3501)',      tl.dom['2100'].c3, 'TL net · xe Domestic từ TK-3501', tlMiss),
@@ -938,7 +947,56 @@ const CAV = (function(){
     return victims.length;
   }
 
-  return { init, render, add, deleteRow, delEntry, editEntry, cancelEdit, saveEntry, savePrices, fileChosen, preview, exportReport, viewTable, setPrevProd, refreshPrices, setQty, mgrDelete, deleteRange, renderMgr, showDefaults, importXUsage, editXQty, deleteX, deleteAllX, get ROWS(){ return ROWS; } };
+  /* ── v4.173 — NGUỒN SỐ cho module khác (BSXL ghi file, MAIL dựng email) ──
+     OL1 của BÁO CÁO:
+       X     = bản PLAN X nhập tuần một lần (cavern_in · ol1 · X) — KHÔNG lấy
+               số X nhân viên gõ theo dõi ở FEED OL1.
+       TỔNG  = ô TỔNG P+X nhân viên gõ ở FEED OL1 (knq_bonded/use/<ngày>/t).
+               Ngày chưa gõ ⇒ null. Mức tạm tính 2.000 T KHÔNG BAO GIỜ vào
+               báo cáo.
+       P     = TỔNG − X (công thức sẵn trong file). */
+  function _ol1(date){
+    let x = null, xAt = 0, xBy = '';
+    ROWS.forEach(r=>{
+      if(!r || r.kind!=='ol1' || r.prod!=='c3' || r.batch!=='X') return;
+      const ts = +r._ts || 0; if(ts > xAt){ xAt = ts; xBy = r.by || ''; }
+      if(r.date===date) x = (x||0) + (parseFloat(r.qty)||0);
+    });
+    let t = null, tSrc = '';
+    try{
+      const U = (typeof BOND!=='undefined' && BOND._state) ? BOND._state.USE : null;
+      const u = U && U[date];
+      if(u){
+        const v = BOND._state.totOf(u);
+        if(v != null && isFinite(v)){ t = v; tSrc = 'feed'; }
+      }
+    }catch(_){}
+    return { x, xAt, xBy, t, tSrc };
+  }
+  /* ghi ô TỔNG FEED OL1 (kg) — dữ liệu người gõ ⇒ lên Firebase, đúng node của tab SAP ▸ Bonded */
+  function setOl1Total(date, kg){
+    if(typeof canWrite==='function' && !canWrite('sap')) return Promise.reject(new Error('No write permission'));
+    const v = Math.round(+kg);
+    if(!isFinite(v) || v < 0) return Promise.reject(new Error('Invalid value'));
+    try{ if(typeof BOND!=='undefined' && BOND._state && BOND._state.USE){ const U=BOND._state.USE; U[date]=Object.assign({t:'',x:'',note:''},U[date]||{},{t:v}); } }catch(_){}
+    try{ logAudit('cav:ol1Total', date, 'ol1', String(v), '', 'update'); }catch(_){}
+    return firebase.database().ref('knq_bonded/use/'+date).update({ t:v });
+  }
+  /* v4.173 — ghi MỘT đơn giá từ ✉ REPORT MAIL (P6) — cùng node cavern_price/<ngày> */
+  function setPrice(date, key, val){
+    if(PRICE_KEYS.indexOf(key) < 0) return Promise.reject(new Error('Unknown price key'));
+    if(typeof canWrite==='function' && !canWrite('sap')) return Promise.reject(new Error('No write permission'));
+    const v = _n(val);
+    const rec = { _ts:Date.now(), by:(typeof CURRENT_USER!=='undefined'&&CURRENT_USER.name)||'?' }; rec[key] = v;
+    PRICES[date] = Object.assign({}, PRICES[date], rec);
+    try{ logAudit('cav:price', date, 'price', key+'='+v, '', 'update'); }catch(_){}
+    _attachPrice();
+    return _priceRef ? _priceRef.child(date).update(rec) : Promise.reject(new Error('Firebase not ready'));
+  }
+  function removeSilent(rid){ _silentRemove(rid); render(); }
+  const src = { agg:_agg, tl:_srcTL, vs:_srcVS, ws:_srcWS, wg:_srcWG, sap:_srcSAP, price:_priceFor, ol1:_ol1 };
+
+  return { src, setOl1Total, setPrice, removeSilent, pushEntry:_pushOne, init, render, add, deleteRow, delEntry, editEntry, cancelEdit, saveEntry, savePrices, fileChosen, preview, exportReport, viewTable, setPrevProd, refreshPrices, setQty, mgrDelete, deleteRange, renderMgr, showDefaults, importXUsage, editXQty, deleteX, deleteAllX, get ROWS(){ return ROWS; } };
 })();
 window.CAV = CAV;
 
@@ -1053,7 +1111,9 @@ function cavParseXText(text, yr){
     else if(!isNaN(H)){ val=H; src='Paste · plan (H)'; }
     if(val==null) return;
     var date=yr+'-'+String(mo).padStart(2,'0')+'-'+String(day).padStart(2,'0');
-    out.push({ date:date, kg:Math.round(val*1000*1000)/1000, src:src });  /* MT → kg */
+    /* v4.173 — giữ CẢ HAI cột; cavDoImportX chọn theo nút PLAN / ACTUAL */
+    out.push({ date:date, kg:Math.round(val*1000*1000)/1000, src:src,
+               kgPlan:isNaN(H)?null:Math.round(H*1000*1000)/1000, kgAct:isNaN(J)?null:Math.round(J*1000*1000)/1000 });  /* MT → kg */
   });
   return { list:out };
 }
@@ -1089,6 +1149,12 @@ function cavDoImportX(){
   var checked={}; document.querySelectorAll('.cavImpM:checked').forEach(function(c){ checked[c.value]=1; });
   var sel=_cavParsedX.filter(function(e){ return checked[e.date.slice(0,7)]; });
   if(!sel.length){ alert('Select at least one month.'); return; }
+  /* v4.173 — PLAN (mặc định): bản plan tuần dùng cho báo cáo SAP WMS; ngày không có plan thì 0 */
+  var mEl=document.querySelector('input[name="cavXMode"]:checked'), mode=mEl?mEl.value:'plan';
+  if(mode==='plan'){
+    var stamp='Weekly plan (H) · '+new Date().toISOString().slice(0,10);
+    sel=sel.map(function(e){ return { date:e.date, kg:(e.kgPlan==null?0:e.kgPlan), src:stamp }; });
+  }
   try{ CAV.importXUsage(sel); }catch(e){ console.warn(e); alert('Import failed: '+e.message); }
   cavCloseImport();
   var ta=document.getElementById('cavOl1PasteData'); if(ta) ta.value='';
@@ -1165,6 +1231,9 @@ function engSwitchTab(sub){
   else if(sub === 'shiplog'){ try{ VLOG.render(); }catch(_){} }
   else if(sub === 'purelog'){ try{ PLOG.render(); }catch(_){} }
   else if(sub === 'odor'){ try{ ODOR.refresh(); }catch(_){} }   /* v4.62 */
+  else if(sub === 'dew'){ try{ DEWPT.refresh(); }catch(e){ console.warn(e); } }   /* v4.176 — đọc Firebase lần đầu mở */
+  else if(sub === 'heat'){ try{ HTRH.refresh(); }catch(e){ console.warn(e); } }   /* v4.176 · v4.197 — một màn hình: tàu unloading + ngày PMS + lịch sử (tải 3 tháng lần đầu) */
+  else if(sub === 'gc'){ try{ GCX.refresh(); }catch(e){ console.warn(e); } }   /* v4.196 — 🧪 GC: tải 2 năm lần đầu mở */
 }
 
 /* Paste-anywhere shortcut: when Engineer/Tank Log is active and user pastes,

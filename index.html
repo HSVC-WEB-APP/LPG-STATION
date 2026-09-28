@@ -15,14 +15,14 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="app-build" content="4.170">
+<meta name="app-build" content="4.208">
 
 <!-- Fonts (giữ từ V4-54) -->
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Barlow:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
 <!-- CSS theo module (nạp core trước) -->
 <link rel="stylesheet" href="vendor/tabulator.min.css">
-<link rel="stylesheet" href="css/core.css?v=4168"><!-- v4.127 — chip số hiệu bản + dải cảnh báo chạy bản cũ -->
+<link rel="stylesheet" href="css/core.css?v=4201"><!-- v4.201 — bảng chọn START/FINISH (ht-itbl) --><!-- v4.200 — khung PMS import (ht-imp) --><!-- v4.199 — ô dán itinerary + ô đoán (ht-guess) --><!-- v4.198 — bảng tàu itinerary (ht-itin) --><!-- v4.197 — heater gộp (ht-voy / ht-days) --><!-- v4.196 — Engineer: 📥 import · 🧪 GC · 🔥 heater history (lx-*) --><!-- v4.195 — ô tìm người nhận nổi (popup) --><!-- v4.194 — Vessel Log edit modal kiểu Tank Log --><!-- v4.193 — bảng kiểm Batch Stock gọn, gợi ý SAP/PMS --><!-- v4.191 — Recipients: tab By group / By mail / By person --><!-- v4.190 — toast z-index nổi trên modal --><!-- v4.127 — chip số hiệu bản + dải cảnh báo chạy bản cũ -->
 <link rel="stylesheet" href="css/monthly.css"><!-- Monthly Report (mthr) — file tách riêng, link ACTIVE -->
 <link rel="stylesheet" href="css/tldata.css"><!-- TL Data paste (mthr) — link ACTIVE -->
 <link rel="stylesheet" href="css/vessel.css"><!-- Vessel data tab (LPG Sales) — link ACTIVE -->
@@ -49,7 +49,8 @@
     <div class="nav-tabs" id="navTabs"></div>
     <div class="nav-right">
       <div class="fb-status" id="fbStatus" title="Firebase activity (hover for breakdown)"><span class="fb-led off" id="fbLed"></span><span id="fbTxt">LOCAL</span><span class="fb-counts" id="fbCounts"></span></div>
-      <button class="nav-icobtn" title="Settings">⚙</button>
+      <button class="nav-icobtn nav-mailbtn" title="Report mail — prepare the routine report emails (recipients + tables filled by the app)" onclick="MAIL.open()">✉</button>
+      <button class="nav-icobtn" title="Admin settings — download / clear the sale-note logs (administrators only)" onclick="ADMSET.open()">⚙</button>
       <div class="nav-user"><div class="avatar">–</div>
         <div><div class="uname">—</div><div class="urole">—</div></div></div>
       <button class="nav-icobtn nav-logout" id="navLogout" title="Đăng xuất" onclick="if(confirm('Đăng xuất khỏi hệ thống?'))AUTH.logout()">⏻</button>
@@ -883,6 +884,8 @@
              (một trong N xe sẽ vào lấy = ALT · một xe chở nhiều DO = MULTI-DO).
              Không link thì PLAN cộng trùng, và tab Scale phải hỏi lại lúc assign. -->
         <button class="btn" style="background:#0b6ea8;color:#fff;border-color:#0b6ea8" onclick="tpOpenLink()" title="Link plan rows that are really ONE order: alternate trucks (only one will come — counted once) or one truck carrying several DOs (loaded together at the scale, no pop-up).">🔗 Link Orders</button>
+        <button class="btn" style="background:#fff1f2;border-color:#fda4af;color:#9f1239" onclick="if(typeof FCHECK!=='undefined')FCHECK.runPasteCheck(TP.PLAN)" title="Open the Fleet check summary again for Today Plan: expired certificates and ⛔ blocked trucks / rmoocs / drivers (same table as after a paste)">⚠ Fleet check</button>
+        <button class="btn" onclick="SNOTE.open()" title="Notes written by sales in the Note column (M) of every pasted plan, grouped by pattern — collected to teach the app later (cancel, one truck two cargo types, fixed tonnage…)">📝 Sale notes</button>
         <button class="btn" style="background:#8a6d1f;color:#fff;border-color:#8a6d1f" onclick="tpDedup()" title="Find plan rows that are exact duplicates of each other (same date, customer, driver, truck, No, quantity and DO) and delete the extra copies. Reads Firebase first; nothing is deleted until you confirm.">🧹 Duplicates</button>
         <button class="btn btn-green" onclick="tpOpenPaste()">📋 Paste from Excel</button>
         <button class="btn" style="background:#7b2d8e;color:#fff;border-color:#7b2d8e" onclick="PTT_EARLY.open('today')" title="Bulk print PTT from Today Plan — every order still Pending / Entered. Tick/untick in the list to choose which to print. Lot/tank are placeholders.">🖨 PTT Today (<span id="peTodayCntPlan">0</span>)</button>
@@ -923,6 +926,7 @@
         <button class="btn btn-amber" onclick="tmrCreateTemp()" title="Assign temp DO (TMP) for any order without a real DO. Auto-runs on paste.">🔢 Create Temp DO</button>
         <button class="btn" style="background:#8a6d1f;color:#fff;border-color:#8a6d1f" onclick="tmrDedup()" title="Find plan rows that are exact duplicates of each other and delete the extra copies. Reads Firebase first; nothing is deleted until you confirm.">🧹 Duplicates</button>
         <button class="btn btn-green" onclick="tmrOpenPaste()">📋 Paste from Excel</button>
+        <button class="btn" style="background:#fff1f2;border-color:#fda4af;color:#9f1239" onclick="if(typeof FCHECK!=='undefined')FCHECK.runPasteCheck(TMR.PLAN)" title="Open the Fleet check summary again for Tomorrow Plan: expired certificates and ⛔ blocked trucks / rmoocs / drivers (same table as after a paste)">⚠ Fleet check</button>
         <button class="btn" style="background:#0d6e3a;color:#fff;border-color:#0d6e3a" onclick="tmrPromoteToToday()" title="Move every row in Tomorrow Plan into Today Plan. Today Plan is wiped first; then Tomorrow rows are inserted with _forDate=today.">🚀 Promote to Today</button>
         <button class="btn" style="background:#7b2d8e;color:#fff;border-color:#7b2d8e" onclick="PTT_EARLY.open()" title="Bulk print PTT for early-morning orders (note contains '8' = arrive before 8AM). Date = plan date; lot/tank are placeholders to fill by hand.">🖨 Early-8AM PTT</button>
         <button class="btn btn-blue" onclick="tmrExportCsv()">⬇ Export</button>
@@ -1110,6 +1114,8 @@
                 title="The raw ZMMFR022 grid — every SLoc, every date">📊 Raw SAP</button>
         <button class="bond-mbtn" id="bondModeKnq" onclick="BOND.setMode('knq')"
                 title="Bonded warehouse: SLoc 1100 only, one row per batch code, plus vessel / declaration columns and an Actual left column run down on FEED OL1">🛃 Bonded warehouse</button>
+        <button class="bond-mbtn" id="bondModeWms" onclick="BOND.setMode('wms')"
+                title="Fill the Cavern SAP/WMS Batch Stock file: import it, resolve every missing figure (type it, confirm 0, or skip = yellow cell), export">📑 SAP WMS Report</button>
         <span class="bond-mnote">One paste feeds both · bonded-warehouse figures come straight from SAP</span>
       </div>
 
@@ -1296,6 +1302,281 @@
           <div class="bond-grid" id="bondGrid"></div>
         </div>
       </div><!-- /spViewKnq -->
+
+      <!-- ═══ v4.180 — 📑 SAP WMS REPORT (thay tab REPORTS ▸ Cavern Daily) ═══════════
+           Import file Batch Stock ⇒ bảng kiểm từng mục dữ liệu của từng ngày sẽ điền
+           (thiếu thì gõ số / xác nhận 0 / giá không đổi / bỏ qua = ô trống TÔ VÀNG)
+           ⇒ ⬇ Export. CÙNG logic BSXL với email P6. Khối nhập tay + modal cũ của
+           Cavern Daily dời nguyên sang đây (giữ id cavDate / cavModal… cho cav.js). -->
+      <div id="spViewWms" style="display:none">
+      <style>
+        .cav-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+        .cav-bar h3{font-family:'Oswald',sans-serif;font-size:16px;letter-spacing:1px;margin:0;color:var(--ink-1);}
+        .cav-prod{font-size:11px;color:var(--ink-3);}
+        .cav-date{padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
+        .cav-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:8px;}
+        @media(max-width:1100px){.cav-grid{grid-template-columns:repeat(2,1fr);}}
+        .cav-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card,#fff);display:flex;flex-direction:column;gap:6px;}
+        .cav-card h4{margin:0;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--ink-2);}
+        .cav-sub{font-size:10px;color:var(--ink-3);font-weight:400;}
+        .cav-row{display:flex;gap:6px;align-items:center;}
+        .cav-row input,.cav-row select{flex:1;min-width:0;padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
+        .cav-lab{font-size:10px;color:var(--ink-3);width:42px;flex:none;}
+        .cav-add{background:var(--blue);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+        .cav-add:hover{filter:brightness(1.08);}
+        .cav-kind-vlgc{border-left:3px solid #0077b6;}.cav-kind-gr{border-left:3px solid #2a9d8f;}
+        .cav-kind-heater{border-left:3px solid #e76f00;}.cav-kind-ol1{border-left:3px solid #9b2226;}
+        .cav-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+        .cav-tbl th,.cav-tbl td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;}
+        .cav-tbl th{background:var(--head,#f5f6f8);font-size:11px;color:var(--ink-3);position:sticky;top:0;}
+        .cav-tbl td.num{font-family:monospace;text-align:right;font-weight:700;}
+        .cav-badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;color:#fff;}
+        .cav-b-vlgc{background:#0077b6;}.cav-b-gr{background:#2a9d8f;}.cav-b-heater{background:#e76f00;}.cav-b-ol1{background:#9b2226;}
+        .cav-c3{color:#0077b6;font-weight:700;}.cav-c4{color:#e76f00;font-weight:700;}
+        .cav-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:13px;}
+        .cav-empty{padding:24px;text-align:center;color:var(--ink-3);font-size:13px;}
+        .cav-fill-box{border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;background:var(--card,#fff);}
+        .cav-fill-box h4{margin:0 0 6px;font-size:13px;font-family:'Oswald',sans-serif;letter-spacing:.5px;}
+        .cav-src-man{color:#0a7d33;font-weight:700;}.cav-src-app{color:#5b21b6;font-weight:700;}.cav-src-sap{color:#b45309;font-weight:700;}
+        .cav-led{border-collapse:collapse;font-size:10px;white-space:nowrap;}
+        .cav-led th,.cav-led td{border:1px solid #cfd4da;padding:2px 5px;text-align:center;}
+        .cav-led thead th{background:#eef1f5;color:var(--ink-2);font-weight:700;position:sticky;top:0;z-index:2;}
+        .cav-led td.num{text-align:right;font-family:'JetBrains Mono',monospace;}
+        .cav-led td.cav-led-date,.cav-led tfoot td:first-child{font-weight:700;background:#f7f8fa;}
+        .cav-led tfoot .cav-led-tot td{border-top:2px solid #888;background:#eef1f5;font-weight:700;}
+        .cav-led tbody tr:hover td{background:#fff7e6;}
+        .cav-sec-hdr{cursor:pointer;user-select:none;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:.5px;color:var(--ink-2);padding:6px 9px;margin-top:8px;background:var(--head,#eef1f5);border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;gap:8px;}
+        .cav-sec-hdr:hover{filter:brightness(.97);}
+        .cav-caret{display:inline-block;width:12px;color:var(--blue);font-size:11px;}
+        .cav-fill-box h4.cav-sec-hdr{background:none;border:none;padding:0;margin:0;}
+
+        /* ===== v4.56 UI refresh: action bar, modal, tabbed preview ===== */
+        .cav-actbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;}
+        .cav-act{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card,#fff);
+          color:var(--ink-1);border-radius:9px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:.12s;}
+        .cav-act:hover{border-color:var(--blue);box-shadow:0 1px 6px rgba(0,0,0,.08);transform:translateY(-1px);}
+        .cav-act .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+        .cav-act-vlgc .dot{background:#0077b6;}.cav-act-gr .dot{background:#2a9d8f;}
+        .cav-act-heater .dot{background:#e76f00;}.cav-act-ol1 .dot{background:#9b2226;}
+        .cav-act-price .dot{background:#0a7d33;}
+        /* modal */
+        .cav-modal{position:fixed;inset:0;z-index:9999;display:none;align-items:flex-start;justify-content:center;
+          background:rgba(20,28,38,.45);backdrop-filter:blur(2px);padding:6vh 16px 16px;}
+        .cav-modal.on{display:flex;}
+        .cav-modal-box{background:var(--card,#fff);border-radius:14px;width:100%;max-width:520px;box-shadow:0 18px 50px rgba(0,0,0,.28);
+          overflow:hidden;animation:cavPop .16s ease;}
+        @keyframes cavPop{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
+        .cav-modal-hd{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);}
+        .cav-modal-hd h4{margin:0;font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:.5px;flex:1;}
+        .cav-modal-x{border:none;background:none;font-size:20px;line-height:1;color:var(--ink-3);cursor:pointer;padding:2px 6px;border-radius:6px;}
+        .cav-modal-x:hover{background:var(--head,#eef1f5);color:var(--ink-1);}
+        .cav-modal-bd{padding:16px;display:flex;flex-direction:column;gap:9px;max-height:70vh;overflow:auto;}
+        .cav-pane{display:none;}.cav-pane.on{display:flex;flex-direction:column;gap:9px;}
+        .cav-modal-bd .cav-row input,.cav-modal-bd .cav-row select{padding:8px 10px;font-size:14px;}
+        .cav-modal-bd .cav-lab{width:78px;}
+        .cav-modal-ft{display:flex;justify-content:flex-end;gap:8px;padding-top:4px;}
+        .cav-btn{border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;}
+        .cav-btn-primary{background:var(--blue);color:#fff;}.cav-btn-primary:hover{filter:brightness(1.08);}
+        .cav-btn-ghost{background:var(--head,#eef1f5);color:var(--ink-2);}.cav-btn-ghost:hover{filter:brightness(.97);}
+        .cav-price-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+        .cav-price-grp{font-size:11px;font-weight:700;color:var(--ink-3);grid-column:1/-1;margin-top:4px;text-transform:uppercase;letter-spacing:.5px;}
+        /* tabbed preview */
+        .cav-pv-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+        .cav-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+        .cav-seg button{border:none;background:var(--card,#fff);color:var(--ink-2);padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;}
+        .cav-seg button.on{background:var(--blue);color:#fff;}
+        .cav-rd{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid transparent;}
+        .cav-rd.ok{background:#e7f6ec;color:#0a7d33;border-color:#bfe6cd;}
+        .cav-rd.bad{background:#fdecea;color:#b1271b;border-color:#f3c9c4;}
+        .cav-chips{display:flex;gap:5px;flex-wrap:wrap;margin-left:auto;}
+        .cav-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:#f1f3f6;color:#8a97a6;}
+        .cav-chip.has{background:#e7f6ec;color:#0a7d33;}
+        .cav-miss{margin:0 0 12px;padding:10px 12px 10px 28px;font-size:12px;color:var(--ink-2);background:#fff8ed;border:1px solid #f3dcae;border-radius:9px;}
+        .cav-miss li{margin:2px 0;}
+        .cav-sum{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+        .cav-pv-cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start;}
+        @media(max-width:1200px){.cav-pv-cols{grid-template-columns:repeat(2,minmax(0,1fr));}}
+        @media(max-width:680px){.cav-pv-cols{grid-template-columns:1fr;}}
+        .cav-grp{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card,#fff);}
+        .cav-grp-hd{padding:9px 13px;font-size:12px;font-weight:800;letter-spacing:.4px;color:#fff;display:flex;align-items:center;justify-content:space-between;}
+        .cav-grp-man .cav-grp-hd{background:#0a7d33;}.cav-grp-app .cav-grp-hd{background:#5b21b6;}
+        .cav-grp-sap .cav-grp-hd{background:#b45309;}.cav-grp-price .cav-grp-hd{background:#475569;}
+        .cav-grp-hd .ed{font-size:11px;font-weight:700;background:rgba(255,255,255,.22);border-radius:6px;padding:2px 8px;cursor:pointer;}
+        .cav-grp-hd .ed:hover{background:rgba(255,255,255,.35);}
+        .cav-pv-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 13px;border-top:1px solid var(--line);font-size:12px;position:relative;}
+        .cav-pv-row:first-child{border-top:none;}
+        .cav-pv-row .lab{color:var(--ink-2);flex:1;min-width:0;}
+        .cav-pv-row .val{font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;}
+        .cav-pv-row .val.s-man,.cav-pv-row .val.s-app,.cav-pv-row .val.s-sap{color:#0a7d33;}
+        .cav-pv-row .val.s-wait{color:#90a0b0;}.cav-pv-row .val.s-miss{color:#d62839;}.cav-pv-row .val.s-warn{color:#b45309;}
+        .cav-pv-row.editable{cursor:pointer;}.cav-pv-row.editable:hover{background:#f3f8ff;}
+        .cav-pv-row.editable .lab::after{content:' ✎';color:#9bb0c7;font-size:11px;}
+        .cav-dot{width:7px;height:7px;border-radius:50%;flex:none;}
+        .s-man .cav-dot,.s-app .cav-dot,.s-sap .cav-dot{background:#0a7d33;}
+        .s-wait .cav-dot{background:#c2ccd6;}.s-miss .cav-dot{background:#d62839;}.s-warn .cav-dot{background:#f59e0b;}
+        /* tooltip */
+        .cav-tip{position:relative;}
+        .cav-tip:hover .cav-tip-bd{display:block;}
+        .cav-tip-bd{display:none;position:absolute;right:0;top:100%;margin-top:5px;z-index:50;background:#1f2a37;color:#fff;
+          font-size:11px;font-weight:500;line-height:1.5;padding:8px 10px;border-radius:8px;width:230px;box-shadow:0 6px 20px rgba(0,0,0,.25);white-space:normal;}
+        .cav-tip-bd b{color:#ffd479;}
+        details.cav-det{margin-top:12px;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card,#fff);}
+        details.cav-det>summary{cursor:pointer;padding:9px 13px;font-size:12px;font-weight:700;color:var(--ink-2);background:var(--head,#f5f6f8);list-style:none;}
+        details.cav-det>summary::-webkit-details-marker{display:none;}
+        details.cav-det>summary::before{content:'▶ ';color:var(--blue);font-size:10px;}
+        details.cav-det[open]>summary::before{content:'▼ ';}
+        details.cav-det .cav-det-bd{padding:10px 13px;}
+        /* entries manager modal */
+        .cav-modal-box.wide{max-width:940px;}
+        .cav-mgr-ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+        .cav-mgr-ctl label{font-size:11px;color:var(--ink-3);}
+        .cav-mgr-ctl input[type=date]{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
+        .cav-btn-warn{background:#b45309;color:#fff;}.cav-btn-warn:hover{filter:brightness(1.08);}
+        .cav-btn-danger{background:#d62839;color:#fff;}.cav-btn-danger:hover{filter:brightness(1.08);}
+      </style>
+        <div class="swr-bar">
+          <b class="swr-ttl">📑 SAP WMS REPORT</b>
+          <label class="swr-lbl" title="The row to fill. Empty rows before it (since the last filled row) are filled too.">Date <input type="date" id="cavDate" class="cav-date" onchange="SWR.onDate()"></label>
+          <label class="swr-file" title="Pick LPG Cavern_SAP WMS Batch Stock_2026_r2.xlsx — nothing is written until you export">📂 Import Batch Stock file<input type="file" accept=".xlsx" onchange="SWR.pick(this)"></label>
+          <span id="swrFileName" class="swr-cap"></span>
+          <span style="flex:1"></span>
+          <button class="swr-go" onclick="SWR.exportFile()" title="Write the rows and download the filled file. Blocked while an item still needs data or a decision.">⬇ Export filled file</button>
+        </div>
+        <div class="cav-actbar swr-entry">
+          <span class="swr-cap" title="Forms for entries that are not missing (several VLGC entries, a price change, the weekly X plan…). Missing items can be typed straight in the check below.">Data entry</span>
+          <button class="cav-act cav-act-vlgc" onclick="cavOpenModal('vlgc')"><span class="dot"></span>🚢 VLGC In / Out</button>
+          <button class="cav-act cav-act-gr"   onclick="cavOpenModal('gr')"><span class="dot"></span>📥 GR Bonded → 1100</button>
+          <button class="cav-act cav-act-heater" onclick="cavOpenModal('heater')"><span class="dot"></span>🔥 Heater (B100)</button>
+          <button class="cav-act cav-act-ol1"  onclick="cavOpenModal('ol1')"><span class="dot"></span>⛽ OL1 X plan</button>
+          <button class="cav-act cav-act-price" onclick="cavOpenModal('price')"><span class="dot"></span>💲 SAP Prices</button>
+          <button class="cav-act" onclick="cavOpenMgr('all')" style="margin-left:auto">📚 Entries history</button>
+        </div>
+        <div id="swrWarn" class="swr-warn"></div>
+        <div id="swrList" class="swr-list"></div>
+
+      <!-- Manual-input modal (shared shell; panes swapped by cavOpenModal) -->
+      <div class="cav-modal" id="cavModal" onclick="if(event.target===this)cavCloseModal()">
+        <div class="cav-modal-box">
+          <div class="cav-modal-hd"><h4 id="cavModalTitle">Add entry</h4><button class="cav-modal-x" onclick="cavCloseModal()" title="Close">×</button></div>
+          <div class="cav-modal-bd">
+
+            <div class="cav-pane" id="cavPane-vlgc" data-kind="vlgc">
+              <div class="cav-row"><span class="cav-lab">Get-in C3</span><input type="number" id="cavVlgcC3" placeholder="get-in propane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Get-in C4</span><input type="number" id="cavVlgcC4" placeholder="get-in butane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Get-out C3</span><input type="number" id="cavVlgcOutC3" placeholder="get-out propane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Get-out C4</span><input type="number" id="cavVlgcOutC4" placeholder="get-out butane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavVlgcNote" placeholder="vessel / note"></div>
+            </div>
+
+            <div class="cav-pane" id="cavPane-gr" data-kind="gr">
+              <div class="cav-row"><span class="cav-lab">Batch</span><select id="cavGrBatch"><option value="D">D · Domestic</option><option value="E">E · Export</option><option value="P">P · PETCHEM</option><option value="X">X · EX-PETCHEM</option></select></div>
+              <div class="cav-row"><span class="cav-lab">C3</span><input type="number" id="cavGrC3" placeholder="propane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">C4</span><input type="number" id="cavGrC4" placeholder="butane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavGrNote" placeholder="note (blank = manual; SAP auto)"></div>
+            </div>
+
+            <div class="cav-pane" id="cavPane-heater" data-kind="heater">
+              <div class="cav-row"><span class="cav-lab">C3</span><input type="number" id="cavHeaterC3" placeholder="propane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">C4</span><input type="number" id="cavHeaterC4" placeholder="butane (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavHeaterNote" placeholder="note"></div>
+            </div>
+
+            <div class="cav-pane" id="cavPane-ol1" data-kind="ol1">
+              <div class="cav-row"><span class="cav-lab">X + P</span><input type="number" id="cavOl1Tot" placeholder="total (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">X</span>
+                <input type="number" id="cavOl1X" placeholder="EX-PETCHEM (kg)" inputmode="decimal" style="flex:1;min-width:0">
+                <button type="button" class="cav-btn cav-btn-ghost" style="flex:none;padding:6px 9px" onclick="cavTogglePasteX()" title="Paste monthly X usage from the C3-usage Excel">📋 Paste</button>
+                <button type="button" class="cav-btn cav-btn-ghost" style="flex:none;padding:6px 9px" onclick="cavViewXTable()" title="View stored X data (period + last update)">👁</button>
+              </div>
+              <div class="cav-row" id="cavOl1PasteBox" style="display:none;flex-direction:column;align-items:stretch;gap:6px">
+                <div style="font-size:11px;color:var(--ink-3)">Select the <b>whole header row</b> (the row with <b>관세유예</b>) together with the day rows in the C3-usage file, copy &amp; paste here. Columns are found by their <b>header</b>, so hidden columns do not matter: X = <b>J</b> (관세유예…실적) when present, else <b>H</b> (관세유예…계획). Values MT → kg; the year comes from the report Date.</div>
+                <textarea id="cavOl1PasteData" rows="6" placeholder="Paste rows here…" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:6px;border:1px solid var(--line);border-radius:6px"></textarea>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button type="button" class="cav-btn cav-btn-ghost" onclick="cavTogglePasteX(false)">Close</button>
+                  <button type="button" class="cav-btn cav-btn-primary" onclick="cavPasteParseX()">Parse &amp; choose month(s)</button>
+                </div>
+              </div>
+              <div class="cav-row"><span class="cav-lab">P</span><input type="number" id="cavOl1P" placeholder="PETCHEM (kg)" inputmode="decimal"></div>
+              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavOl1Note" placeholder="note"></div>
+            </div>
+
+            <div class="cav-pane" id="cavPane-price" data-kind="price">
+              <div class="cav-price-grid">
+                <div class="cav-price-grp">Propane (C3) — $/ton · Domestic 2100 / 2101 = Domestic 1100 (formula in the file)</div>
+                <div class="cav-row"><span class="cav-lab">PETCHEM</span><input type="number" id="cavPriceP" placeholder="$/t" inputmode="decimal"></div>
+                <div class="cav-row"><span class="cav-lab">EX-PET</span><input type="number" id="cavPriceXP" placeholder="$/t" inputmode="decimal"></div>
+                <div class="cav-row"><span class="cav-lab">Dom 1100</span><input type="number" id="cavPriceD1" placeholder="$/t" inputmode="decimal"></div>
+                <div class="cav-row"><span class="cav-lab">Exp 1100</span><input type="number" id="cavPriceE1" placeholder="$/t" inputmode="decimal"></div>
+                <div class="cav-price-grp">Butane (C4) — $/ton · Domestic 2100 / 2101 = Domestic 1100</div>
+                <div class="cav-row"><span class="cav-lab">Dom 1100</span><input type="number" id="cavPriceD1c4" placeholder="$/t" inputmode="decimal"></div>
+                <div class="cav-row"><span class="cav-lab">Exp 1100</span><input type="number" id="cavPriceE1c4" placeholder="$/t" inputmode="decimal"></div>
+              </div>
+              <div id="cavPriceHint" style="font-size:11px;color:var(--ink-3);margin-top:4px"></div>
+            </div>
+
+          </div>
+          <div class="cav-modal-hd" style="border-top:1px solid var(--line);border-bottom:none">
+            <div class="cav-modal-ft" style="flex:1">
+              <button class="cav-btn cav-btn-ghost" onclick="cavCloseModal()">Cancel</button>
+              <button class="cav-btn cav-btn-primary" id="cavModalSave" onclick="cavModalSave()">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Entries manager modal (history across all dates) -->
+      <div class="cav-modal" id="cavMgrModal" onclick="if(event.target===this)cavCloseMgr()">
+        <div class="cav-modal-box wide">
+          <div class="cav-modal-hd"><h4>📚 Manual entries — history</h4><button class="cav-modal-x" onclick="cavCloseMgr()" title="Close">×</button></div>
+          <div class="cav-modal-bd">
+            <div class="cav-mgr-ctl">
+              <label>From</label><input type="date" id="cavMgrFrom" onchange="cavMgrRefresh()">
+              <label>To</label><input type="date" id="cavMgrTo" onchange="cavMgrRefresh()">
+              <button class="cav-btn cav-btn-ghost" onclick="cavMgrRefresh()">Filter</button>
+              <span style="flex:1"></span>
+              <button class="cav-btn cav-btn-warn" onclick="cavMgrDel('in')" title="Delete entries within the From–To range (keep the rest)">Delete in range</button>
+              <button class="cav-btn cav-btn-warn" onclick="cavMgrDel('keep')" title="Keep only the From–To range (delete everything outside)">Keep range only</button>
+              <button class="cav-btn cav-btn-danger" onclick="cavMgrDel('all')" title="Delete every entry">Delete all</button>
+            </div>
+            <div id="cavMgrBody"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stored X (EX-PETCHEM) usage — view-only table -->
+      <div class="cav-modal" id="cavXTableModal" onclick="if(event.target===this)cavCloseXTable()">
+        <div class="cav-modal-box wide">
+          <div class="cav-modal-hd"><h4>👁 Stored X usage (OL1 · C3 · EX-PETCHEM)</h4><button class="cav-modal-x" onclick="cavCloseXTable()" title="Close">×</button></div>
+          <div class="cav-modal-bd">
+            <div id="cavXTableMeta" style="font-size:12px;color:var(--ink-3);margin-bottom:8px"></div>
+            <div id="cavXTableBody" style="max-height:60vh;overflow:auto"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paste X (month picker shared by the OL1 paste flow) -->
+      <div class="cav-modal" id="cavImportModal" onclick="if(event.target===this)cavCloseImport()">
+        <div class="cav-modal-box">
+          <div class="cav-modal-hd"><h4>📥 Import X usage (pasted)</h4><button class="cav-modal-x" onclick="cavCloseImport()" title="Close">×</button></div>
+          <div class="cav-modal-bd">
+            <div style="font-size:12px;color:var(--ink-3);margin-bottom:8px">Choose which month(s) to load into OL1 · EX-PETCHEM (X); values MT → kg. Unchanged days are kept as-is; only changed days are written (version bumped).</div>
+            <div class="cav-row" style="gap:14px;font-size:12px;margin-bottom:8px" title="The SAP WMS report and its email use this X. Import the plan once a week so the report matches the weekly plan; the X typed in FEED OL1 is for day-to-day tracking only and never goes into the report.">
+              <b>Load:</b>
+              <label style="flex:none;display:flex;gap:4px;align-items:center"><input type="radio" name="cavXMode" value="plan" checked style="width:auto"> PLAN column H — weekly plan (report)</label>
+              <label style="flex:none;display:flex;gap:4px;align-items:center"><input type="radio" name="cavXMode" value="actual" style="width:auto"> ACTUAL J when present, else plan</label>
+            </div>
+            <div id="cavImportMonths"></div>
+          </div>
+          <div class="cav-modal-hd" style="border-top:1px solid var(--line);border-bottom:none">
+            <div class="cav-modal-ft" style="flex:1">
+              <button class="cav-btn cav-btn-ghost" onclick="cavCloseImport()">Cancel</button>
+              <button class="cav-btn cav-btn-primary" onclick="cavDoImportX()">Import selected</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      </div><!-- /spViewWms -->
 
       <!-- ═══ MODAL — ⛽ FEED OL1 (dùng chung node với tab KNQ cũ) ═══ -->
 
@@ -1902,6 +2183,11 @@
       <button class="stab" data-eng-sub="purelog" onclick="engSwitchTab('purelog')">🧪 Pure Log<span class="stab-badge" id="engBadgePurelog">0</span></button>
       <span class="eng-sep"></span>
       <button class="stab" data-eng-sub="odor" onclick="engSwitchTab('odor')">🧴 Odorant<span class="stab-badge" id="engBadgeOdor">0</span></button>
+      <!-- v4.176 — hai sub-tab mới (js/features/engx.js) -->
+      <button class="stab" data-eng-sub="dew" onclick="engSwitchTab('dew')" title="Propane dew point — enter, save, trend and analysis">💧 Dew Point</button>
+      <button class="stab" data-eng-sub="heat" onclick="engSwitchTab('heat')" title="Heater C3 consumption — history (daily / voyages) and PMS per-minute data">🔥 Heater</button>
+      <!-- v4.196 — kết quả GC C3/C4 (js/features/labx.js · GCX) -->
+      <button class="stab" data-eng-sub="gc" onclick="engSwitchTab('gc')" title="Lab GC results C3 / C4 — trend, Aramco limits, analysis">🧪 GC</button>
     </div>
 
     <!-- TANK LOG sub-page -->
@@ -2017,6 +2303,7 @@
             <th style="width:44px;color:#7b2d8e;background:#f6f0fb">i-C₅</th>
             <th style="width:44px;color:#7b2d8e;background:#f6f0fb">n-C₅</th>
             <th style="width:44px;color:#7b2d8e;background:#f6f0fb">n-C₆</th>
+            <th style="width:78px;color:#15803d;background:#f0fdf4" title="Ball Tank Mixing Report email prepared (✉ REPORT MAIL · P1). ⚠ = Tank Log data changed after it was sent — send again.">✉ Mail</th>
           </tr></thead>
           <tbody id="engTbody"></tbody>
           <tfoot id="engTfoot" class="eng-tfoot"></tfoot>
@@ -2776,15 +3063,21 @@
           <div class="vsmix-fld"><label class="vsmix-lbl">RATIO</label>
             <button type="button" id="vs-ratio-btn" class="vsmix-ratio-btn" onclick="VMIX.toggleRatio()">1 RATIO</button>
           </div>
+          <!-- v4.177 — chip ẩn/hiện từng tank (chỉ hiển thị; tank ẩn vẫn tính + lưu). Số chip = số tank của tàu.
+               CHỈ hiện khi tàu có > 2 tank ⇒ thanh tiêu đề của tàu 2 tank giữ nguyên bề ngang như trước -->
+          <div class="vsmix-fld" id="vs-view-fld" style="display:none"><label class="vsmix-lbl" title="Click a tank number to hide / show its column — more room to work on the others. Hidden tanks are still calculated and saved.">TANKS</label>
+            <div class="vsmix-view" id="vs-view"></div>
+          </div>
 
           <div class="vsmix-hdr-actions">
             <button type="button" class="vsmix-act-btn" id="vs-btn-after" onclick="VMIX.toggleAfter()" title="Thu gọn/mở phần AFTER LOADING">🧪 AFTER ▲</button>
             <input type="file" id="vs-coqfile" accept=".xlsx,.xls" style="display:none" onchange="VMIX.coqChosen(this)">
-            <button type="button" class="vsmix-act-btn" style="border-color:#7b2d8e;color:#7b2d8e" onclick="VMIX.importCoqPick()" title="Import COQ Excel (2 tank) → điền GC %vol + Lab Dens + các chỉ tiêu COQ cho cả 2 tank">📄 IMPORT COQ</button>
+            <button type="button" class="vsmix-act-btn" style="border-color:#7b2d8e;color:#7b2d8e" onclick="VMIX.importCoqPick()" title="Import the vessel COQ Excel → fills GC %vol + Lab Dens + COQ items of every tank column found in the file (TANK 1, TANK 2, …)">📄 IMPORT COQ</button>
             <button type="button" class="vsmix-act-btn vsmix-act-vessel" onclick="VMIX.openShipEdit()" title="Manage vessels (name + tank volumes)">⚙ VESSEL</button>
             <button type="button" class="vsmix-act-btn vsmix-act-density" onclick="VMIX.openDensityEdit()" title="Edit density constants">ρ</button>
             <button type="button" class="vsmix-act-btn vsmix-act-reset" onclick="VMIX.reset()" title="Reset all inputs">🔄</button>
             <button type="button" class="vsmix-act-btn vsmix-act-save" onclick="VMIX.saveLog()">💾 SAVE</button>
+            <button type="button" class="vsmix-act-btn vsmix-act-mail" onclick="VMIX.mail()" title="Report mail — Vessel Mixing Report of this lot (P7). Save the lot to Vessel Log first: the mail reads the Vessel Log.">✉</button>
           </div>
         </div>
 
@@ -2799,6 +3092,7 @@
                 <span class="vsmix-card-ttl">TANK 1</span>
                 <span class="vsmix-card-vol" id="vs-tk1-vol"></span>
                 <span class="vsmix-card-status" id="vs-status-0"></span>
+                <select id="vs-mode-0" class="vsmix-mode-sel" onchange="VMIX.setMode(0,this.value)" title="Mix type of this tank — MIX: blend to the target C3%. PURE C3 / PURE C4: no mixing, the whole loaded quantity is booked as one product."><option value="MIX">MIX</option><option value="C3">PURE C3</option><option value="C4">PURE C4</option></select>
               </div>
               <div class="vsmix-plan-grid" id="vs-inputs-0">
                 <div class="vsmix-fld"><label class="vsmix-lbl">QTY (ton)</label>
@@ -2876,6 +3170,7 @@
                 <span class="vsmix-card-ttl">TANK 2</span>
                 <span class="vsmix-card-vol" id="vs-tk2-vol"></span>
                 <span class="vsmix-card-status" id="vs-status-1"></span>
+                <select id="vs-mode-1" class="vsmix-mode-sel" onchange="VMIX.setMode(1,this.value)" title="Mix type of this tank — MIX: blend to the target C3%. PURE C3 / PURE C4: no mixing, the whole loaded quantity is booked as one product."><option value="MIX">MIX</option><option value="C3">PURE C3</option><option value="C4">PURE C4</option></select>
               </div>
               <div class="vsmix-plan-grid" id="vs-inputs-1">
                 <div class="vsmix-fld"><label class="vsmix-lbl">QTY (ton)</label>
@@ -3136,7 +3431,7 @@
       <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:13px;text-align:center;padding:40px">
         <div><div style="font-size:48px;margin-bottom:14px">📊</div>
         <div style="font-family:'Oswald',sans-serif;font-size:18px;color:var(--ink-2);letter-spacing:1px;font-weight:600;margin-bottom:8px">CAVERN DAILY</div>
-        <div>Moved to <b>REPORTS ▸ Cavern Daily</b>.</div></div>
+        <div>Moved to <b>LPG SALES ▸ SAP ▸ 📑 SAP WMS Report</b>.</div></div>
       </div>
     </div>
     <!-- ODORANT CONSUMPTION (v4.62) — replaces Lab Data placeholder.
@@ -3154,6 +3449,46 @@
         <button class="eng-btn" onclick="ODOR.scanAll()" title="Quét toàn bộ Tank Log → tính Mixing Q'ty (Σ Filled LPG) + FQ (Σ Odorant) mọi tháng và lưu Firebase">↻ Scan Tank Log</button>
       </div>
       <div class="eng-table-wrap" id="odorTableWrap" style="overflow:auto"></div>
+    </div>
+    <!-- 💧 DEW POINT (v4.176) — nhập/lưu dew_point/<ngày> (cùng node email P3), biểu đồ,
+         nhận định (vượt spec · sát spec · xu hướng tăng + ngày dự báo chạm giới hạn ·
+         nhảy bất thường · dryer ướt hơn coalescer · lệch A/B), thống kê tháng, xuất Excel.
+         Đọc Firebase MỘT lần khi mở sub-tab lần đầu. -->
+    <div class="eng-pg" id="eng-pg-dew">
+      <div class="eng-toolbar">
+        <span class="eng-lbl">Dew Point — Cavern (C3 / C4)</span>
+        <div class="eng-stats" id="dewStats"></div>
+        <button class="eng-btn blue" onclick="LABX.open()" title="Load the V4 import workbook (DEW_C3 / DEW_C4 / GC / HEATER_DAY / HEATER_VOY) into Firebase — preview first, only new + changed records are written">📥 Import file</button>
+        <button class="eng-btn green" onclick="DEWPT.pasteOpen()" title="Import old readings copied from the Excel dew point sheet">📋 Paste history</button>
+        <button class="eng-btn blue" onclick="DEWPT.exportXlsx()" title="Excel file of the readings in the selected range + monthly statistics + analysis">⬇ Export Excel</button>
+        <button class="eng-btn" onclick="DEWPT.reload()" title="Read the dew point history from the server again">↻ Reload</button>
+      </div>
+      <div class="eng-table-wrap dp-wrap" id="dewWrap"></div>
+    </div>
+    <!-- 🔥 HEATER (v4.176) — file PMS TagMonitoringReport (theo phút) → tự nhận Heater A/B
+         theo tag FQT32331/FQT32341 (không nhận ra thì hỏi), tách đợt chạy, chia ngày 00:00,
+         ghi Cavern Daily, điền file "Heater 연료 사용량" rồi tải về. Dùng chung với email P5. -->
+    <!-- v4.197 — 🔥 HEATER GỘP MỘT MÀN HÌNH (HTRH trong labx.js): 🚢 tàu đang unloading · 📅 từng ngày nạp file PMS
+         (A + B) → kg A/B + Unloaded (t) → 💾 heater_day (số đọc GIỜ) + Cavern Daily · ⬇ file báo cáo cả chuyến · 📊 lịch sử.
+         Công cụ PMS cũ (HTR) không còn ô hiển thị — email P5 vẫn dùng HTR.S (HTRH.syncMail đổ dữ liệu chuyến vào). -->
+    <div class="eng-pg" id="eng-pg-heat">
+      <div class="eng-toolbar">
+        <span class="eng-lbl">Unloading vessels · Heater C3 · history</span>
+        <div class="eng-stats" id="htrStats"></div>
+        <button class="eng-btn blue" onclick="LABX.open()" title="Load the V4 import workbook (DEW_C3 / DEW_C4 / GC / HEATER_DAY / HEATER_VOY) into Firebase — preview first, only new + changed records are written">📥 Import file</button>
+      </div>
+      <div class="eng-table-wrap dp-wrap" id="htrHistWrap"></div>
+    </div>
+    <!-- 🧪 GC (v4.196) — kết quả GC lab C3/C4 (node gc/), tải 2 năm khi mở, ⤓ Load all tải hết. -->
+    <div class="eng-pg" id="eng-pg-gc">
+      <div class="eng-toolbar">
+        <span class="eng-lbl">GC results — Cavern (C3 / C4)</span>
+        <div class="eng-stats" id="gcStats"></div>
+        <button class="eng-btn blue" onclick="LABX.open()" title="Load the V4 import workbook (DEW_C3 / DEW_C4 / GC / HEATER_DAY / HEATER_VOY) into Firebase — preview first, only new + changed records are written">📥 Import file</button>
+        <button class="eng-btn" onclick="GCX.exportXlsx()" title="Excel file of the samples of the selected product and range">⬇ Export Excel</button>
+        <button class="eng-btn" onclick="GCX.reload()" title="Read the GC results from the server again">↻ Reload</button>
+      </div>
+      <div class="eng-table-wrap dp-wrap" id="gcWrap"></div>
     </div>
   </section>
 
@@ -3187,322 +3522,10 @@
 
     <div class="subtabs" id="rptSubs">
       <button class="stab on" data-rpt-sub="daily" onclick="rptSwitchTab('daily')">📋 Daily Stock</button>
-      <button class="stab" data-rpt-sub="cavern" onclick="rptSwitchTab('cavern')">📊 Cavern Daily / SAP WMS<span class="stab-badge" id="engBadgeCavern">0</span></button>
       <button class="stab" data-rpt-sub="monthly" onclick="rptSwitchTab('monthly')">📅 Monthly Report<span class="stab-badge" id="mthr-badge">--</span></button>
     </div>
 
     <!-- ===== CAVERN DAILY pane (manual inputs + SAP-WMS fill) ===== -->
-    <div class="rpt-pg" id="rpt-pg-cavern" style="display:none;flex:1;flex-direction:column;overflow-y:auto;padding:10px;gap:10px">
-      <style>
-        #rpt-pg-cavern{}
-        .cav-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-        .cav-bar h3{font-family:'Oswald',sans-serif;font-size:16px;letter-spacing:1px;margin:0;color:var(--ink-1);}
-        .cav-prod{font-size:11px;color:var(--ink-3);}
-        .cav-date{padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
-        .cav-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:8px;}
-        @media(max-width:1100px){.cav-grid{grid-template-columns:repeat(2,1fr);}}
-        .cav-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card,#fff);display:flex;flex-direction:column;gap:6px;}
-        .cav-card h4{margin:0;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--ink-2);}
-        .cav-sub{font-size:10px;color:var(--ink-3);font-weight:400;}
-        .cav-row{display:flex;gap:6px;align-items:center;}
-        .cav-row input,.cav-row select{flex:1;min-width:0;padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
-        .cav-lab{font-size:10px;color:var(--ink-3);width:42px;flex:none;}
-        .cav-add{background:var(--blue);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
-        .cav-add:hover{filter:brightness(1.08);}
-        .cav-kind-vlgc{border-left:3px solid #0077b6;}.cav-kind-gr{border-left:3px solid #2a9d8f;}
-        .cav-kind-heater{border-left:3px solid #e76f00;}.cav-kind-ol1{border-left:3px solid #9b2226;}
-        .cav-tbl{width:100%;border-collapse:collapse;font-size:12px;}
-        .cav-tbl th,.cav-tbl td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;}
-        .cav-tbl th{background:var(--head,#f5f6f8);font-size:11px;color:var(--ink-3);position:sticky;top:0;}
-        .cav-tbl td.num{font-family:monospace;text-align:right;font-weight:700;}
-        .cav-badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;color:#fff;}
-        .cav-b-vlgc{background:#0077b6;}.cav-b-gr{background:#2a9d8f;}.cav-b-heater{background:#e76f00;}.cav-b-ol1{background:#9b2226;}
-        .cav-c3{color:#0077b6;font-weight:700;}.cav-c4{color:#e76f00;font-weight:700;}
-        .cav-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:13px;}
-        .cav-empty{padding:24px;text-align:center;color:var(--ink-3);font-size:13px;}
-        .cav-fill-box{border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;background:var(--card,#fff);}
-        .cav-fill-box h4{margin:0 0 6px;font-size:13px;font-family:'Oswald',sans-serif;letter-spacing:.5px;}
-        .cav-src-man{color:#0a7d33;font-weight:700;}.cav-src-app{color:#5b21b6;font-weight:700;}.cav-src-sap{color:#b45309;font-weight:700;}
-        .cav-led{border-collapse:collapse;font-size:10px;white-space:nowrap;}
-        .cav-led th,.cav-led td{border:1px solid #cfd4da;padding:2px 5px;text-align:center;}
-        .cav-led thead th{background:#eef1f5;color:var(--ink-2);font-weight:700;position:sticky;top:0;z-index:2;}
-        .cav-led td.num{text-align:right;font-family:'JetBrains Mono',monospace;}
-        .cav-led td.cav-led-date,.cav-led tfoot td:first-child{font-weight:700;background:#f7f8fa;}
-        .cav-led tfoot .cav-led-tot td{border-top:2px solid #888;background:#eef1f5;font-weight:700;}
-        .cav-led tbody tr:hover td{background:#fff7e6;}
-        .cav-sec-hdr{cursor:pointer;user-select:none;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:.5px;color:var(--ink-2);padding:6px 9px;margin-top:8px;background:var(--head,#eef1f5);border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;gap:8px;}
-        .cav-sec-hdr:hover{filter:brightness(.97);}
-        .cav-caret{display:inline-block;width:12px;color:var(--blue);font-size:11px;}
-        .cav-fill-box h4.cav-sec-hdr{background:none;border:none;padding:0;margin:0;}
-
-        /* ===== v4.56 UI refresh: action bar, modal, tabbed preview ===== */
-        .cav-actbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;}
-        .cav-act{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card,#fff);
-          color:var(--ink-1);border-radius:9px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:.12s;}
-        .cav-act:hover{border-color:var(--blue);box-shadow:0 1px 6px rgba(0,0,0,.08);transform:translateY(-1px);}
-        .cav-act .dot{width:9px;height:9px;border-radius:50%;flex:none;}
-        .cav-act-vlgc .dot{background:#0077b6;}.cav-act-gr .dot{background:#2a9d8f;}
-        .cav-act-heater .dot{background:#e76f00;}.cav-act-ol1 .dot{background:#9b2226;}
-        .cav-act-price .dot{background:#0a7d33;}
-        /* modal */
-        .cav-modal{position:fixed;inset:0;z-index:9999;display:none;align-items:flex-start;justify-content:center;
-          background:rgba(20,28,38,.45);backdrop-filter:blur(2px);padding:6vh 16px 16px;}
-        .cav-modal.on{display:flex;}
-        .cav-modal-box{background:var(--card,#fff);border-radius:14px;width:100%;max-width:520px;box-shadow:0 18px 50px rgba(0,0,0,.28);
-          overflow:hidden;animation:cavPop .16s ease;}
-        @keyframes cavPop{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
-        .cav-modal-hd{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);}
-        .cav-modal-hd h4{margin:0;font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:.5px;flex:1;}
-        .cav-modal-x{border:none;background:none;font-size:20px;line-height:1;color:var(--ink-3);cursor:pointer;padding:2px 6px;border-radius:6px;}
-        .cav-modal-x:hover{background:var(--head,#eef1f5);color:var(--ink-1);}
-        .cav-modal-bd{padding:16px;display:flex;flex-direction:column;gap:9px;max-height:70vh;overflow:auto;}
-        .cav-pane{display:none;}.cav-pane.on{display:flex;flex-direction:column;gap:9px;}
-        .cav-modal-bd .cav-row input,.cav-modal-bd .cav-row select{padding:8px 10px;font-size:14px;}
-        .cav-modal-bd .cav-lab{width:78px;}
-        .cav-modal-ft{display:flex;justify-content:flex-end;gap:8px;padding-top:4px;}
-        .cav-btn{border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;}
-        .cav-btn-primary{background:var(--blue);color:#fff;}.cav-btn-primary:hover{filter:brightness(1.08);}
-        .cav-btn-ghost{background:var(--head,#eef1f5);color:var(--ink-2);}.cav-btn-ghost:hover{filter:brightness(.97);}
-        .cav-price-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
-        .cav-price-grp{font-size:11px;font-weight:700;color:var(--ink-3);grid-column:1/-1;margin-top:4px;text-transform:uppercase;letter-spacing:.5px;}
-        /* tabbed preview */
-        .cav-pv-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
-        .cav-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
-        .cav-seg button{border:none;background:var(--card,#fff);color:var(--ink-2);padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;}
-        .cav-seg button.on{background:var(--blue);color:#fff;}
-        .cav-rd{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid transparent;}
-        .cav-rd.ok{background:#e7f6ec;color:#0a7d33;border-color:#bfe6cd;}
-        .cav-rd.bad{background:#fdecea;color:#b1271b;border-color:#f3c9c4;}
-        .cav-chips{display:flex;gap:5px;flex-wrap:wrap;margin-left:auto;}
-        .cav-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:#f1f3f6;color:#8a97a6;}
-        .cav-chip.has{background:#e7f6ec;color:#0a7d33;}
-        .cav-miss{margin:0 0 12px;padding:10px 12px 10px 28px;font-size:12px;color:var(--ink-2);background:#fff8ed;border:1px solid #f3dcae;border-radius:9px;}
-        .cav-miss li{margin:2px 0;}
-        .cav-sum{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
-        .cav-pv-cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start;}
-        @media(max-width:1200px){.cav-pv-cols{grid-template-columns:repeat(2,minmax(0,1fr));}}
-        @media(max-width:680px){.cav-pv-cols{grid-template-columns:1fr;}}
-        .cav-grp{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card,#fff);}
-        .cav-grp-hd{padding:9px 13px;font-size:12px;font-weight:800;letter-spacing:.4px;color:#fff;display:flex;align-items:center;justify-content:space-between;}
-        .cav-grp-man .cav-grp-hd{background:#0a7d33;}.cav-grp-app .cav-grp-hd{background:#5b21b6;}
-        .cav-grp-sap .cav-grp-hd{background:#b45309;}.cav-grp-price .cav-grp-hd{background:#475569;}
-        .cav-grp-hd .ed{font-size:11px;font-weight:700;background:rgba(255,255,255,.22);border-radius:6px;padding:2px 8px;cursor:pointer;}
-        .cav-grp-hd .ed:hover{background:rgba(255,255,255,.35);}
-        .cav-pv-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 13px;border-top:1px solid var(--line);font-size:12px;position:relative;}
-        .cav-pv-row:first-child{border-top:none;}
-        .cav-pv-row .lab{color:var(--ink-2);flex:1;min-width:0;}
-        .cav-pv-row .val{font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;}
-        .cav-pv-row .val.s-man,.cav-pv-row .val.s-app,.cav-pv-row .val.s-sap{color:#0a7d33;}
-        .cav-pv-row .val.s-wait{color:#90a0b0;}.cav-pv-row .val.s-miss{color:#d62839;}.cav-pv-row .val.s-warn{color:#b45309;}
-        .cav-pv-row.editable{cursor:pointer;}.cav-pv-row.editable:hover{background:#f3f8ff;}
-        .cav-pv-row.editable .lab::after{content:' ✎';color:#9bb0c7;font-size:11px;}
-        .cav-dot{width:7px;height:7px;border-radius:50%;flex:none;}
-        .s-man .cav-dot,.s-app .cav-dot,.s-sap .cav-dot{background:#0a7d33;}
-        .s-wait .cav-dot{background:#c2ccd6;}.s-miss .cav-dot{background:#d62839;}.s-warn .cav-dot{background:#f59e0b;}
-        /* tooltip */
-        .cav-tip{position:relative;}
-        .cav-tip:hover .cav-tip-bd{display:block;}
-        .cav-tip-bd{display:none;position:absolute;right:0;top:100%;margin-top:5px;z-index:50;background:#1f2a37;color:#fff;
-          font-size:11px;font-weight:500;line-height:1.5;padding:8px 10px;border-radius:8px;width:230px;box-shadow:0 6px 20px rgba(0,0,0,.25);white-space:normal;}
-        .cav-tip-bd b{color:#ffd479;}
-        details.cav-det{margin-top:12px;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card,#fff);}
-        details.cav-det>summary{cursor:pointer;padding:9px 13px;font-size:12px;font-weight:700;color:var(--ink-2);background:var(--head,#f5f6f8);list-style:none;}
-        details.cav-det>summary::-webkit-details-marker{display:none;}
-        details.cav-det>summary::before{content:'▶ ';color:var(--blue);font-size:10px;}
-        details.cav-det[open]>summary::before{content:'▼ ';}
-        details.cav-det .cav-det-bd{padding:10px 13px;}
-        /* entries manager modal */
-        .cav-modal-box.wide{max-width:940px;}
-        .cav-mgr-ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
-        .cav-mgr-ctl label{font-size:11px;color:var(--ink-3);}
-        .cav-mgr-ctl input[type=date]{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
-        .cav-btn-warn{background:#b45309;color:#fff;}.cav-btn-warn:hover{filter:brightness(1.08);}
-        .cav-btn-danger{background:#d62839;color:#fff;}.cav-btn-danger:hover{filter:brightness(1.08);}
-      </style>
-
-      <div class="cav-bar">
-        <h3>📊 CAVERN DAILY</h3>
-        <span class="cav-prod">Manual inputs → SAP WMS Batch-Stock report (kg in · ton at fill)</span>
-        <label style="font-size:11px;color:var(--ink-3)">Date</label>
-        <input type="date" id="cavDate" class="cav-date" onchange="CAV.render();CAV.preview()">
-        <span id="cavStats" style="font-size:11px;color:var(--ink-3);margin-left:auto"></span>
-      </div>
-
-      <div class="cav-sec-hdr" onclick="cavToggle('cavBodyInput',this)"><span class="cav-caret">▼</span> ✍️ MANUAL INPUT <span class="cav-sub" style="margin-left:6px">click a button to open its entry form</span></div>
-      <div id="cavBodyInput">
-        <div class="cav-actbar">
-          <button class="cav-act cav-act-vlgc" onclick="cavOpenModal('vlgc')"><span class="dot"></span>🚢 VLGC In / Out</button>
-          <button class="cav-act cav-act-gr"   onclick="cavOpenModal('gr')"><span class="dot"></span>📥 GR Bonded → 1100</button>
-          <button class="cav-act cav-act-heater" onclick="cavOpenModal('heater')"><span class="dot"></span>🔥 Heater (B100)</button>
-          <button class="cav-act cav-act-ol1"  onclick="cavOpenModal('ol1')"><span class="dot"></span>⛽ OL1 Supply</button>
-          <button class="cav-act cav-act-price" onclick="cavOpenModal('price')"><span class="dot"></span>💲 SAP Prices</button>
-          <button class="cav-act" onclick="cavOpenMgr('all')" style="margin-left:auto">📚 Entries history</button>
-        </div>
-      </div>
-
-      <!-- Manual-input modal (shared shell; panes swapped by cavOpenModal) -->
-      <div class="cav-modal" id="cavModal" onclick="if(event.target===this)cavCloseModal()">
-        <div class="cav-modal-box">
-          <div class="cav-modal-hd"><h4 id="cavModalTitle">Add entry</h4><button class="cav-modal-x" onclick="cavCloseModal()" title="Close">×</button></div>
-          <div class="cav-modal-bd">
-
-            <div class="cav-pane" id="cavPane-vlgc" data-kind="vlgc">
-              <div class="cav-row"><span class="cav-lab">Get-in C3</span><input type="number" id="cavVlgcC3" placeholder="get-in propane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Get-in C4</span><input type="number" id="cavVlgcC4" placeholder="get-in butane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Get-out C3</span><input type="number" id="cavVlgcOutC3" placeholder="get-out propane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Get-out C4</span><input type="number" id="cavVlgcOutC4" placeholder="get-out butane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavVlgcNote" placeholder="vessel / note"></div>
-            </div>
-
-            <div class="cav-pane" id="cavPane-gr" data-kind="gr">
-              <div class="cav-row"><span class="cav-lab">Batch</span><select id="cavGrBatch"><option value="D">D · Domestic</option><option value="E">E · Export</option><option value="P">P · PETCHEM</option><option value="X">X · EX-PETCHEM</option></select></div>
-              <div class="cav-row"><span class="cav-lab">C3</span><input type="number" id="cavGrC3" placeholder="propane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">C4</span><input type="number" id="cavGrC4" placeholder="butane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavGrNote" placeholder="note (blank = manual; SAP auto)"></div>
-            </div>
-
-            <div class="cav-pane" id="cavPane-heater" data-kind="heater">
-              <div class="cav-row"><span class="cav-lab">C3</span><input type="number" id="cavHeaterC3" placeholder="propane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">C4</span><input type="number" id="cavHeaterC4" placeholder="butane (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavHeaterNote" placeholder="note"></div>
-            </div>
-
-            <div class="cav-pane" id="cavPane-ol1" data-kind="ol1">
-              <div class="cav-row"><span class="cav-lab">X + P</span><input type="number" id="cavOl1Tot" placeholder="total (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">X</span>
-                <input type="number" id="cavOl1X" placeholder="EX-PETCHEM (kg)" inputmode="decimal" style="flex:1;min-width:0">
-                <button type="button" class="cav-btn cav-btn-ghost" style="flex:none;padding:6px 9px" onclick="cavTogglePasteX()" title="Paste monthly X usage from the C3-usage Excel">📋 Paste</button>
-                <button type="button" class="cav-btn cav-btn-ghost" style="flex:none;padding:6px 9px" onclick="cavViewXTable()" title="View stored X data (period + last update)">👁</button>
-              </div>
-              <div class="cav-row" id="cavOl1PasteBox" style="display:none;flex-direction:column;align-items:stretch;gap:6px">
-                <div style="font-size:11px;color:var(--ink-3)">Bôi đen <b>cả dòng tiêu đề</b> (dòng có chữ <b>관세유예</b>) cùng các dòng ngày trong file C3-usage rồi copy &amp; dán vào đây. Cột được nhận theo <b>tiêu đề</b> nên không lo cột ẩn: X = <b>J</b> (관세유예…실적) nếu có, không thì <b>H</b> (관세유예…계획). Giá trị MT→kg; năm lấy từ ô ngày Cavern.</div>
-                <textarea id="cavOl1PasteData" rows="6" placeholder="Paste rows here…" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:6px;border:1px solid var(--line);border-radius:6px"></textarea>
-                <div style="display:flex;gap:6px;justify-content:flex-end">
-                  <button type="button" class="cav-btn cav-btn-ghost" onclick="cavTogglePasteX(false)">Close</button>
-                  <button type="button" class="cav-btn cav-btn-primary" onclick="cavPasteParseX()">Parse &amp; choose month(s)</button>
-                </div>
-              </div>
-              <div class="cav-row"><span class="cav-lab">P</span><input type="number" id="cavOl1P" placeholder="PETCHEM (kg)" inputmode="decimal"></div>
-              <div class="cav-row"><span class="cav-lab">Note</span><input type="text" id="cavOl1Note" placeholder="note"></div>
-            </div>
-
-            <div class="cav-pane" id="cavPane-price" data-kind="price">
-              <div class="cav-price-grid">
-                <div class="cav-price-grp">Propane (C3) — $/ton</div>
-                <div class="cav-row"><span class="cav-lab">PETCHEM</span><input type="number" id="cavPriceP" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">EX-PET</span><input type="number" id="cavPriceXP" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Dom 1100</span><input type="number" id="cavPriceD1" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Dom 2100</span><input type="number" id="cavPriceD21" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Dom 2101</span><input type="number" id="cavPriceD22" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Exp 1100</span><input type="number" id="cavPriceE1" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-price-grp">Butane (C4) — $/ton</div>
-                <div class="cav-row"><span class="cav-lab">Dom 1100</span><input type="number" id="cavPriceD1c4" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Dom 2100</span><input type="number" id="cavPriceD21c4" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Dom 2101</span><input type="number" id="cavPriceD22c4" placeholder="$/t" inputmode="decimal"></div>
-                <div class="cav-row"><span class="cav-lab">Exp 1100</span><input type="number" id="cavPriceE1c4" placeholder="$/t" inputmode="decimal"></div>
-              </div>
-              <div id="cavPriceHint" style="font-size:11px;color:var(--ink-3);margin-top:4px"></div>
-            </div>
-
-          </div>
-          <div class="cav-modal-hd" style="border-top:1px solid var(--line);border-bottom:none">
-            <div class="cav-modal-ft" style="flex:1">
-              <button class="cav-btn cav-btn-ghost" onclick="cavCloseModal()">Cancel</button>
-              <button class="cav-btn cav-btn-primary" id="cavModalSave" onclick="cavModalSave()">Save</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Entries manager modal (history across all dates) -->
-      <div class="cav-modal" id="cavMgrModal" onclick="if(event.target===this)cavCloseMgr()">
-        <div class="cav-modal-box wide">
-          <div class="cav-modal-hd"><h4>📚 Manual entries — history</h4><button class="cav-modal-x" onclick="cavCloseMgr()" title="Close">×</button></div>
-          <div class="cav-modal-bd">
-            <div class="cav-mgr-ctl">
-              <label>From</label><input type="date" id="cavMgrFrom" onchange="cavMgrRefresh()">
-              <label>To</label><input type="date" id="cavMgrTo" onchange="cavMgrRefresh()">
-              <button class="cav-btn cav-btn-ghost" onclick="cavMgrRefresh()">Filter</button>
-              <span style="flex:1"></span>
-              <button class="cav-btn cav-btn-warn" onclick="cavMgrDel('in')" title="Delete entries within the From–To range (keep the rest)">Delete in range</button>
-              <button class="cav-btn cav-btn-warn" onclick="cavMgrDel('keep')" title="Keep only the From–To range (delete everything outside)">Keep range only</button>
-              <button class="cav-btn cav-btn-danger" onclick="cavMgrDel('all')" title="Delete every entry">Delete all</button>
-            </div>
-            <div id="cavMgrBody"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Stored X (EX-PETCHEM) usage — view-only table -->
-      <div class="cav-modal" id="cavXTableModal" onclick="if(event.target===this)cavCloseXTable()">
-        <div class="cav-modal-box wide">
-          <div class="cav-modal-hd"><h4>👁 Stored X usage (OL1 · C3 · EX-PETCHEM)</h4><button class="cav-modal-x" onclick="cavCloseXTable()" title="Close">×</button></div>
-          <div class="cav-modal-bd">
-            <div id="cavXTableMeta" style="font-size:12px;color:var(--ink-3);margin-bottom:8px"></div>
-            <div id="cavXTableBody" style="max-height:60vh;overflow:auto"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Paste X (month picker shared by the OL1 paste flow) -->
-      <div class="cav-modal" id="cavImportModal" onclick="if(event.target===this)cavCloseImport()">
-        <div class="cav-modal-box">
-          <div class="cav-modal-hd"><h4>📥 Import X usage (pasted)</h4><button class="cav-modal-x" onclick="cavCloseImport()" title="Close">×</button></div>
-          <div class="cav-modal-bd">
-            <div style="font-size:12px;color:var(--ink-3);margin-bottom:8px">Choose which month(s) to load into OL1 · EX-PETCHEM (X). Uses J (actual) when present, otherwise H (plan); values MT → kg. Unchanged days are kept as-is; only changed days are written (version bumped).</div>
-            <div id="cavImportMonths"></div>
-          </div>
-          <div class="cav-modal-hd" style="border-top:1px solid var(--line);border-bottom:none">
-            <div class="cav-modal-ft" style="flex:1">
-              <button class="cav-btn cav-btn-ghost" onclick="cavCloseImport()">Cancel</button>
-              <button class="cav-btn cav-btn-primary" onclick="cavDoImportX()">Import selected</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SAP-WMS fill -->
-      <div class="cav-fill-box">
-        <h4 class="cav-sec-hdr" onclick="cavToggle('cavBodyExport',this)"><span class="cav-caret">▼</span> 📑 SAP WMS REPORT — fill .xlsx (Cavern Batch-Stock)</h4>
-        <div id="cavBodyExport">
-        <div class="cav-row" style="flex-wrap:wrap">
-          <input type="file" id="cavFile" accept=".xlsx" style="display:none" onchange="CAV.fileChosen()">
-          <button class="cav-add" style="background:var(--ink-2)" onclick="document.getElementById('cavFile').click()">📂 Choose WMS SAP file</button>
-          <span id="cavFileName" style="font-size:12px;color:var(--ink-3)">No file chosen</span>
-          <button class="cav-add" onclick="CAV.preview()">👁 Preview fill (by date)</button>
-          <button class="cav-add" style="background:#0a7d33" onclick="CAV.exportReport()">⬇ Export filled .xlsx</button>
-        </div>
-        <div id="cavPreview" style="margin-top:8px"></div>
-        </div>
-      </div>
-
-      <!-- SAP WMS table — view report data on screen -->
-      <div class="cav-fill-box">
-        <h4 class="cav-sec-hdr" onclick="cavToggle('cavBodyTable',this)"><span class="cav-caret">▼</span> 📋 SAP WMS TABLE — view report data on screen</h4>
-        <div id="cavBodyTable">
-        <div class="cav-row" style="flex-wrap:wrap;align-items:center">
-          <label style="font-size:11px;color:var(--ink-3)">Product</label>
-          <select id="cavLedProd" style="flex:none;width:78px" onchange="CAV.viewTable('day')"><option value="c3">C3</option><option value="c4">C4</option></select>
-          <span style="color:var(--ink-3)">·</span>
-          <label style="font-size:11px;color:var(--ink-3)">Day</label>
-          <input type="date" id="cavDay" style="flex:none;width:140px" onchange="CAV.viewTable('day')">
-          <button class="cav-add" onclick="CAV.viewTable('day')">View day</button>
-          <span style="color:var(--ink-3)">|</span>
-          <label style="font-size:11px;color:var(--ink-3)">Month</label>
-          <input type="month" id="cavMonth" style="flex:none;width:140px">
-          <button class="cav-add" onclick="CAV.viewTable('month')">View month</button>
-          <span style="color:var(--ink-3)">|</span>
-          <label style="font-size:11px;color:var(--ink-3)">From</label>
-          <input type="date" id="cavFrom" style="flex:none;width:140px">
-          <label style="font-size:11px;color:var(--ink-3)">To</label>
-          <input type="date" id="cavTo" style="flex:none;width:140px">
-          <button class="cav-add" onclick="CAV.viewTable('range')">View range</button>
-        </div>
-        <div id="cavLedger" style="margin-top:8px;overflow:auto;max-height:48vh"></div>
-        </div>
-      </div>
-
-    </div>
 
     <div class="rpt-shell">
       <div class="rpt-help">
@@ -4963,22 +4986,22 @@
      ============================================================ -->
 <!-- core (thứ tự: nav → config → helpers → sync → auth → globals; globals PHẢI trước data) -->
 <script src="js/core/nav.js"></script>
-<script src="js/core/config.js?v=4170"></script><!-- v4.127 — APP_BUILD: số hiệu bản đang chạy · v4.156 — bump build cho 5 cột tham khảo Temp-adj · v4.157 — bump build cho bảng Temp-adj audit thêm cột Adj ST/Gap · v4.159 — Tank Log hiện cột T-adj + Gap WMS−T -->
+<script src="js/core/config.js?v=4208"></script><!-- v4.208 — bump build: dew point dương ⇒ cảnh báo ngay --><!-- v4.207 — bump build: P3 bỏ tự lưu dew point, hỏi khi rời email --><!-- v4.206 — bump build: email P3 biểu đồ Dryer A/B + tự lưu dew point --><!-- v4.205 — bump build: P2 file báo cáo lưu cùng thư mục file nguồn --><!-- v4.204 — bump build: P2 chọn file / ▶ Build tách 2 nút · Today Plan tự ghi kế hoạch đầu ngày --><!-- v4.203 — bump build: email P2 bảng luỹ kế rút gọn (chỉ khách tháng ≠ 0) + khách mới hiện đỏ --><!-- v4.202 — bump build: tồn bồn hiện ngay khi SP/TL/Tank Log nạp xong, bỏ chờ 15–45 giây --><!-- v4.201 — bump build: chọn START/FINISH từ bảng dữ liệu PMS --><!-- v4.200 — bump build: PMS import nhiều ngày + Unloaded tự lưu --><!-- v4.199 — bump build: dán dòng vessel itinerary --><!-- v4.198 — bump build: bảng tàu itinerary + C3/C4 unloading --><!-- v4.197 — bump build: Heater gộp tàu unloading + ngày PMS + lịch sử --><!-- v4.196 — bump build: Dew point C3/C4 + GC tab + heater history + 📥 import file lab/heater --><!-- v4.195 — bump build: P1/P7 bỏ câu đính kèm, Pumped theo tấn COQ, popup tìm người nhận --><!-- v4.194 — bump build: Vessel Log edit + P7 lấy ngày dòng sửa gần nhất --><!-- v4.193 — bump build: copy body giữ định dạng · P2 To Cavern gộp vào From Cavern · bảng kiểm P6 --><!-- v4.192 — bump build: trình bày email báo cáo --><!-- v4.191 — bump build: 👥 Recipients xem theo nhóm/thư/người, ma trận thu vào tab --><!-- v4.190 — bump build: REPORT MAIL ➕ New person tự thêm @hyosung.com + báo lỗi ngay trong form --><!-- v4.189 — bump build: FEED OL1 import/paste ACTUAL đè số gõ tay --><!-- v4.188 — bump build: đối chiếu tổng MT sau link với dòng tổng file sale --><!-- v4.187 — bump build: cancel nhóm ALT = 1 chuyến · xe biến mất khỏi Today Plan (plan_cx) --><!-- v4.186 — bump build: nút ⚠ Fleet check ở Today Plan + Tomorrow Plan gọi lại bảng tổng hợp FCHECK --><!-- v4.185 — bump build: xuất Daily Stock dò + tự chèn khách mới vào bảng by customer (Summary Data) --><!-- v4.184 — bump build: bảng duyệt ghi chú sale (cancel / ALT / multi-DO) · ai_log · ⚙ admin · Cancel List tự điền --><!-- v4.183 — bump build: P1 bỏ lot đã gửi · Directory sắp theo Department · sale note Cancel · kế hoạch đầu ngày · sổ ghi chú sale --><!-- v4.182 — bump build: Recipients thêm nhóm G / email P tự soạn / ẩn cột / thêm tay danh bạ · v4.181 — bump build: SAP WMS tự điền từ nguồn app + email P2 luỹ kế, bỏ chữ ký · v4.180 — bump build: SAP WMS Report dời vào LPG SALES ▸ SAP, một logic kiểm với email P6 · v4.179 — bump build: bỏ ô From trong REPORT MAIL · v4.178 — bump build: Recipients ▸ Directory thêm cột Department + Position · v4.177 — bump build: Vessel Mix N tank + PURE C3/C4 + email P7 · v4.176 — bump build: Engineer thêm 💧 Dew Point + 🔥 Heater · v4.127 — APP_BUILD: số hiệu bản đang chạy · v4.156 — bump build cho 5 cột tham khảo Temp-adj · v4.157 — bump build cho bảng Temp-adj audit thêm cột Adj ST/Gap · v4.159 — Tank Log hiện cột T-adj + Gap WMS−T -->
 <script src="js/core/helpers.js?v=4141"></script><!-- v4.127 — window.TWAVG: nguồn DUY NHẤT tra khối lượng xe rỗng, khớp CẶP đầu xe + rơ-moóc -->
 <script src="js/core/sync.js?v=4130"></script><!-- v4.127 — SC.upsertRows: dán theo kiểu GỘP (cập nhật / thêm mới / giữ nguyên dòng không dán) -->
 <script src="js/core/forcesync.js"></script>
-<script src="js/core/auth.js?v=4142"></script><!-- v4.130 — vai trò sale: QUYỀN THEO Ô (Fleet ▸ Driver ▸ cột Phone) ngoài hai bảng Today/Tomorrow Plan -->
+<script src="js/core/auth.js?v=4187"></script><!-- v4.187 — sale được push plan_cx/<ngày> --><!-- v4.184 — sale được push ai_log (quyết định đề xuất lúc dán) --><!-- v4.183 — sale được ghi plan_day/<ngày>/first + sale_notes (đi kèm lần dán plan) --><!-- v4.130 — vai trò sale: QUYỀN THEO Ô (Fleet ▸ Driver ▸ cột Phone) ngoài hai bảng Today/Tomorrow Plan -->
 <script src="js/core/globals.js?v=4168"></script><!-- v4.127 — dán bảng TW AVG không còn xoá sạch tab: khoá theo cặp đầu xe + rơ-moóc · v4.134 — TW AVG BỎ hai cột ⛔ BLOCK / BLOCK NOTE: tab này chỉ giữ khối lượng bì cho trạm cân tra lúc assign, cấm xe tick ở TANK LORRY / TRACTOR / RMOOC / DRIVER -->
 <!-- paste-guard (chống paste nhầm tab) — nạp sớm, dùng runtime bởi data modules -->
 <script src="js/checks/pasteguard.js"></script>
 <!-- data -->
 <script src="js/data/bulkops.js"></script>
 <!-- v4.86 — js/data/density.js đã gỡ khỏi bản chạy: phương pháp tra bảng density không còn dùng -->
-<script src="js/data/tl.js?v=4112"></script><!-- v4.112 — thêm cột Multi-DO (mdoG): mấy dòng TL của cùng MỘT lượt xe gộp mang chung một khoá, để báo cáo đếm đúng số lượt xe -->
+<script src="js/data/tl.js?v=4202"></script><!-- v4.112 — thêm cột Multi-DO (mdoG): mấy dòng TL của cùng MỘT lượt xe gộp mang chung một khoá, để báo cáo đếm đúng số lượt xe -->
 <script src="js/data/tlxk.js?v=486"></script><!-- v4.86 — TL Data → sheet "Detail" của PHIẾU XUẤT KHO (.xlsm) -->
 <script src="js/data/wg.js"></script>
 <script src="js/data/ws.js"></script>
-<script src="js/data/sp.js?v=4154"></script><!-- v4.108 — SP.tankEnd(sloc,date): End Stock của một bồn tại một ngày, tách C3/C4, cho bảng đối chiếu chuyển kho -->
+<script src="js/data/sp.js?v=4202"></script><!-- v4.108 — SP.tankEnd(sloc,date): End Stock của một bồn tại một ngày, tách C3/C4, cho bảng đối chiếu chuyển kho -->
 <!-- v4.99 — SLoc 1100 LUÔN tách theo mã batch (mã lạ vẫn giữ dòng, chỉ cảnh báo), tìm/sắp theo mã batch; dòng gộp cũ dọn ngay trong bảng xác nhận khi dán -->
 <script src="js/data/ct.js"></script>
 <script src="js/data/pp.js"></script>
@@ -4987,27 +5010,27 @@
 <script src="js/checks/wgcheck.js?v=4143"></script><!-- v4.112 — phiếu PTT của xe GỘP liệt kê đủ mọi DO kèm số của từng DO (trước đây chỉ in một đơn) -->
 <!-- features -->
 <script src="js/features/fleet.js"></script>
-<script src="js/features/plan.js?v=4141"></script><!-- v4.124 — GIỮ NGUYÊN VỊ TRÍ CUỘN khi đổi trạng thái: ledger vẽ lại bằng innerHTML nên khung .pv-scroll bị thay mới và văng lên đầu bảng; nay mỗi dòng có data-oid, trước khi vẽ ghi lại dòng sát mép trên + khoảng lệch, vẽ xong kéo về đúng chỗ (bù được cả khi bảng đổi chiều cao). Chế độ TABLE giữ scrollTop của .tabulator-tableholder quanh replaceData · v4.109 — 🔗 LINK ORDERS: một đơn hàng thật nằm trên nhiều dòng kế hoạch. Nhóm ALT (một trong N xe sẽ vào lấy) chỉ được tính MỘT lần vào PLAN/LOADED/REMAIN — trước đây 1 đơn 25 MT khai 3 xe bị cộng thành 75 MT; xe nào vào station trước thì các dòng anh em tự park (cancel + cờ _altSkip) và tự mở lại nếu xe đó rời station. Nhóm MDO (một xe nhiều DO) khai trước để tab Scale gộp thẳng lúc assign. Cột ACTUAL + mọi số MT hiện 3 số thập phân (đọc được tới kg) · v4.112 — TP.lnkLinkMdo: nhân viên cân chọn "bán gộp" ngay lúc assign thì nhóm 🔗 MULTI-DO được lập luôn trên Today Plan · v4.133 — modal 🔗 Link orders thêm CỘT NOTE (+ hàng tiêu đề cột): lý do phải link hai dòng gần như luôn nằm ở ô Note của kế hoạch · v4.135 — reconcile chống dòng “ma” (đã có từ trước, ?v= quên bump nên vô hình) nay còn tự chạy lại mỗi lần .info/connected nối lại, không chỉ lúc mở trang -->
+<script src="js/features/plan.js?v=4204"></script><!-- v4.204 — PLANDAY tự ghi kế hoạch đầu ngày (_pdayAuto), reset khi sang ngày --><!-- v4.188 — dòng tổng Quantity của sale đọc lúc dán; tổng plan sau khi áp link/cancel/chia MT phải bằng — ✓/⚠ ở hộp diff, bảng duyệt, dải Plan; tự tick nhóm "khác xe mỗi xe DO" nếu chỉ khi đó mới khớp --><!-- v4.187 — cancel nhóm "1 trong các xe" gộp 1 mục + link ALT · 🕳 xe biến mất khỏi Today Plan khi dán (bỏ qua Change TL, Tomorrow không dò) · PLANCX plan_cx/<ngày> push, không listener, xoá khi đã gửi P2 + xuất file --><!-- v4.184 — 📋 bước duyệt ghi chú sale sau hộp diff (tick/bỏ tick): cancel nhiều kiểu chữ, 🔗 ALT "1 trong các xe", 🔗 MULTI-DO ô MT gộp + chia MT theo note (_qtyFix giữ qua dán lại) · AILOG ai_log chỉ ghi · ADMSET ⚙ admin tải/xoá --><!-- v4.183 — sale note Cancel ⇒ gợi ý 🚫 lúc dán (tick được) · promote giữ cancel · PLANDAY plan_day/<ngày>/first (kế hoạch đầu ngày, ghi 1 lần) · SNOTE sale_notes (gom ghi chú sale theo mẫu) + nút 📝 Sale notes --><!-- v4.124 — GIỮ NGUYÊN VỊ TRÍ CUỘN khi đổi trạng thái: ledger vẽ lại bằng innerHTML nên khung .pv-scroll bị thay mới và văng lên đầu bảng; nay mỗi dòng có data-oid, trước khi vẽ ghi lại dòng sát mép trên + khoảng lệch, vẽ xong kéo về đúng chỗ (bù được cả khi bảng đổi chiều cao). Chế độ TABLE giữ scrollTop của .tabulator-tableholder quanh replaceData · v4.109 — 🔗 LINK ORDERS: một đơn hàng thật nằm trên nhiều dòng kế hoạch. Nhóm ALT (một trong N xe sẽ vào lấy) chỉ được tính MỘT lần vào PLAN/LOADED/REMAIN — trước đây 1 đơn 25 MT khai 3 xe bị cộng thành 75 MT; xe nào vào station trước thì các dòng anh em tự park (cancel + cờ _altSkip) và tự mở lại nếu xe đó rời station. Nhóm MDO (một xe nhiều DO) khai trước để tab Scale gộp thẳng lúc assign. Cột ACTUAL + mọi số MT hiện 3 số thập phân (đọc được tới kg) · v4.112 — TP.lnkLinkMdo: nhân viên cân chọn "bán gộp" ngay lúc assign thì nhóm 🔗 MULTI-DO được lập luôn trên Today Plan · v4.133 — modal 🔗 Link orders thêm CỘT NOTE (+ hàng tiêu đề cột): lý do phải link hai dòng gần như luôn nằm ở ô Note của kế hoạch · v4.135 — reconcile chống dòng “ma” (đã có từ trước, ?v= quên bump nên vô hình) nay còn tự chạy lại mỗi lần .info/connected nối lại, không chỉ lúc mở trang -->
 <script src="js/data/sfdens.js?v=4168"></script><!-- v4.143 — SAFE FILL ALLOW LẤY DENSITY THEO LOT ĐANG BÁN: trước đây mọi xe dùng chung một hằng số gõ tay 0.538 nên xe chở lot nặng bị cho phép nạp quá mức an toàn còn xe chở lot nhẹ thì bị cắt oan. Bốn nấc: đơn Pure C3/C4 tra bảng density bão hoà theo nhiệt độ → lot đang bán có density trong Tank Log thì dùng thẳng → lot draft chưa có COQ thì dò lot GẦN SÁT NHẤT theo %vol/%wt C3 (COQ [44]/[45] → %C3 [8] → Target C3% [29]) → cuối cùng mới lùi về số gõ tay. Tank Log chỉ nạp 10 lot gần nhất nên khi thiếu thì đọc MỘT LẦN cả node eng_tkmix và giữ TRONG RAM suốt phiên — KHÔNG ghi localStorage để không bao giờ ăn phải dữ liệu cũ. Cột Safe Fill T ở tab Fleet và modal chứng chỉ xe GIỮ density gõ tay vì không gắn đơn hàng nào. -->
 <script src="js/features/scale.js?v=4167"></script><!-- ⭐⭐ v4.167 — refreshLotFromTankLog quét CẢ HAI thẻ tank chứ không chỉ bồn đang được chọn: lot 417 trộn ở TK-3502 trong khi trạm chọn TK-3501 thì thẻ TK-3502 đứng yên ở lot cũ mãi, kéo theo density/Safe Fill/phiếu in đều nói sai lot. Bồn để MANUAL thì không động; chỉ tiến không lùi; đang gõ trong ô LOT thì hoãn. --><!-- v4.110 — SỬA LỖI IN GỘP/TÁCH MULTI-DO chạy chập chờn: hộp hỏi chuyển từ ô kết quả tìm kiếm của trạm (bị handler click-outside + scRenderCtrl ghi đè) sang MODAL riêng không đóng khi bấm ra nền; CẢ HAI đường assign (dò tìm & đã link) đều hỏi cách in một lần duy nhất; số chia per-DO (_mdoNets), turn đã chốt (_tlTurn) và cách in (_pttMode) lưu lên trạm nên sống sót qua F5 và sang máy khác; chặn dòng thiếu số DO; hộp hỏi phiếu DN mở sẵn đúng lựa chọn lúc assign · v4.109 — thẻ PLAN dùng chung TP.lnkTotals nên không còn lệch với Today Plan (+3 số thập phân) · v4.112 — KHÔI PHỤC phép dò tìm multi-DO lúc assign chạy SONG SONG với 🔗 Link Orders: bỏ cửa chặn im lặng (tổng ≤27, bắt buộc trùng tài xế, anh em đang xếp hàng đợi), chọn gộp thì link ngược về Today Plan, PTT in đủ mọi DO, TL Data ghi khoá mdoG -->
 <script src="js/features/fnote.js?v=484"></script><!-- Sổ ghi chú xe/tài xế — lazy, không tự đọc Firebase -->
-<script src="js/features/eng.js?v=4167"></script><!-- ⭐⭐ v4.167 — LOT DO BẢN CŨ GHI KHÔNG CÒN TÀNG HÌNH: cửa sổ nạp Tank Log dùng orderByChild('_ord').limitToLast(25), mà bản trước v4.161 (ví dụ bản publish 4.160) không ghi _ord — Firebase xếp null lên đầu nên lot mới nhất rơi ra ngoài cửa sổ VÀ listener child_added cũng không nổ (nó gắn trên chính cửa sổ đó): lot có thật mà máy bản mới không thấy, không một dòng báo lỗi. Nay có cửa sổ sống riêng equalTo(null) nạp thẳng dòng đó vào RAM rồi mới vá _ord (đọc không phụ thuộc quyền ghi). --><!-- v4.161 — CUA SO NAP doi sang khoa _ord (theo SO LOT) thay cho _ts (thoi diem ghi cuoi): sua mot lot cu khong con hat lot moi ra khoi cua so; INIT_LOTS 10→25; tu back-fill _ord mot lan; dai canh bao lot THIEU + o Date hong; o Date hong to do tren bang va trong modal; chuan hoa DD/MM/YY khi roi o · v4.107 — cột Filled LPG = ΣCOQ (lùi GC khi lot chưa có COQ), hai cột Filled C3/C4 (GC) hạ nổi bật · v4.108 — thêm 4 cột Open/End C3/C4 THỰC TẾ (INIT/FINAL VOL đo được × nền COQ), chỉ tính trên máy · v4.111 — thêm 4 cột Gap C3/C4 + Adj ST C3/C4 (kg) ghi kết quả đối chiếu chuyển kho · v4.131 — thêm 2 cột WMS C3/C4 (kg) đứng TRƯỚC Gap, và cả 6 ô đối chiếu SỬA ĐƯỢC TAY ngay trên bảng (ENG.stxEdit) · v4.132 — tổng THEO THÁNG cũng cộng theo COQ (lùi GC từng lot), khớp với cột Filled LPG · v4.156 — thêm 5 cột THAM KHẢO [75]-[79]: Filled C3/C4 quy đổi theo NHIỆT ĐỘ THỰC lúc kết thúc trộn (so với COQ chuẩn 15°C), nút 🌡 Temp-adj audit để xem/back-fill, không đổi số liệu chính thức nào · v4.157 — bảng Temp-adj audit thêm cột Adj ST C3/C4 (kg, ghim đậm — số nhập WMS) và Gap C3/C4 (kg) cạnh nhau để so sánh · v4.158 — Adj ST ghim đậm trên Tank Log · v4.159 — Tank Log thêm 5 cột T-adj C3/C4, Δ%, Gap WMS−T C3/C4; bảng audit thêm 2 cột Gap WMS−QD · v4.160 — đóng khung cụm đối chiếu / cụm COQ@T, Adj ST nổi bật, cụm @T làm mờ -->
+<script src="js/features/eng.js?v=4202"></script><!-- v4.175 — ROW_W 80→81: cột cuối ✉ Mail = dấu đã gửi Ball Tank Mixing Report (ms|người|chữ ký số liệu), ⚠ khi Tank Log đổi sau khi gửi; ghi đúng 1 ô eng_tkmix/<rid>/cells/80 --><!-- ⭐⭐ v4.167 — LOT DO BẢN CŨ GHI KHÔNG CÒN TÀNG HÌNH: cửa sổ nạp Tank Log dùng orderByChild('_ord').limitToLast(25), mà bản trước v4.161 (ví dụ bản publish 4.160) không ghi _ord — Firebase xếp null lên đầu nên lot mới nhất rơi ra ngoài cửa sổ VÀ listener child_added cũng không nổ (nó gắn trên chính cửa sổ đó): lot có thật mà máy bản mới không thấy, không một dòng báo lỗi. Nay có cửa sổ sống riêng equalTo(null) nạp thẳng dòng đó vào RAM rồi mới vá _ord (đọc không phụ thuộc quyền ghi). --><!-- v4.161 — CUA SO NAP doi sang khoa _ord (theo SO LOT) thay cho _ts (thoi diem ghi cuoi): sua mot lot cu khong con hat lot moi ra khoi cua so; INIT_LOTS 10→25; tu back-fill _ord mot lan; dai canh bao lot THIEU + o Date hong; o Date hong to do tren bang va trong modal; chuan hoa DD/MM/YY khi roi o · v4.107 — cột Filled LPG = ΣCOQ (lùi GC khi lot chưa có COQ), hai cột Filled C3/C4 (GC) hạ nổi bật · v4.108 — thêm 4 cột Open/End C3/C4 THỰC TẾ (INIT/FINAL VOL đo được × nền COQ), chỉ tính trên máy · v4.111 — thêm 4 cột Gap C3/C4 + Adj ST C3/C4 (kg) ghi kết quả đối chiếu chuyển kho · v4.131 — thêm 2 cột WMS C3/C4 (kg) đứng TRƯỚC Gap, và cả 6 ô đối chiếu SỬA ĐƯỢC TAY ngay trên bảng (ENG.stxEdit) · v4.132 — tổng THEO THÁNG cũng cộng theo COQ (lùi GC từng lot), khớp với cột Filled LPG · v4.156 — thêm 5 cột THAM KHẢO [75]-[79]: Filled C3/C4 quy đổi theo NHIỆT ĐỘ THỰC lúc kết thúc trộn (so với COQ chuẩn 15°C), nút 🌡 Temp-adj audit để xem/back-fill, không đổi số liệu chính thức nào · v4.157 — bảng Temp-adj audit thêm cột Adj ST C3/C4 (kg, ghim đậm — số nhập WMS) và Gap C3/C4 (kg) cạnh nhau để so sánh · v4.158 — Adj ST ghim đậm trên Tank Log · v4.159 — Tank Log thêm 5 cột T-adj C3/C4, Δ%, Gap WMS−T C3/C4; bảng audit thêm 2 cột Gap WMS−QD · v4.160 — đóng khung cụm đối chiếu / cụm COQ@T, Adj ST nổi bật, cụm @T làm mờ -->
 <!-- v4.101 — Density (cột 33) & ρ COQ đầu (cột 63) giữ ĐỦ 4 số thập phân ở ô sửa dòng + bảng Tank Log + bản in -->
 <script src="js/features/odor.js?v=4142"></script><!-- v4.132 — C (LPG Mixing Q'Ty) = Σ Filled LPG theo COQ (lot chưa có COQ mới lùi về GC), dấu ᴳᶜ trên ô C · v4.142 — BỎ export CSV, thêm ODOR.snapshot() làm nguồn cho ODORXL -->
 <script src="js/data/odorxl.js?v=4142"></script><!-- v4.142 — ⬇ Export Excel của tab Odorant: CHÈN DÒNG tháng báo cáo thẳng vào file "Cavern Odorant Stock" (cả sheet ODR_Consumption_Cavern lẫn sheet Cavern) rồi lưu ra file MỚI. Sửa trực tiếp XML trong zip bằng JSZip nên style · viền · comment · conditional formatting · print setting giữ nguyên 100% (SheetJS ghi lại workbook là mất sạch). Chèn dòng làm ĐÚNG ngữ nghĩa Excel: gỡ shared formula, dịch mọi tham chiếu (SUM(C9:C28) tự thành SUM(C9:C29), LOOKUP sang sheet ODR tự nới), dịch mergeCells/dimension/sqref, xoá calcChain + bật fullCalcOnLoad, và BỎ giá trị cache của ô nào đổi công thức (còn cache là Total hiện số cũ mà không báo lỗi). Công thức dòng mới DỊCH từ dòng cuối bảng chứ không hard-code. Tháng đã có dòng thì cập nhật tại chỗ ⇒ chạy lại không sinh dòng trùng. -->
-<script src="js/features/rpt.js?v=4112"></script><!-- v4.112 — cột Trips: dòng TL mang chung khoá mdoG chỉ tính MỘT lượt xe -->
+<script src="js/features/rpt.js?v=4205"></script><!-- v4.205 — useFile(file, handle) --><!-- v4.203 — accumulation() trả thêm extra (khách mới chưa có dòng) --><!-- v4.187 — Cancel List đọc plan_cx (force) trước khi điền, xong đánh dấu rpt --><!-- v4.185 — khách có hàng trong tháng mà bảng "by customer" dưới Yearly Accumulation chưa có ⇒ hỏi, OK tự chèn dòng (chép công thức, mở rộng SUM dòng tháng), Cancel cảnh báo đỏ --><!-- v4.184 — xuất Daily Stock tự điền sheet Cancel List (plan đầu ngày, actual, xe huỷ + xe bị gỡ), chuyển bộ lọc ngày --><!-- v4.181 — tách summaryGroups() + accumulation() (luỹ kế Summary data) dùng chung với email P2 · v4.112 — cột Trips: dòng TL mang chung khoá mdoG chỉ tính MỘT lượt xe -->
 <script src="js/features/mthr.js"></script>
-<script src="js/features/bond.js?v=4118"></script><!-- v4.106 — ⭐ KHO NGOẠI QUAN GỘP THẲNG VÀO TAB SAP: nút gạt "📊 SAP thô | 🛃 Kho ngoại quan", bảng KNQ đọc SỐ SỐNG từ SP.ROWS (SLoc 1100 tại D-1) chứ không giữ sổ riêng nữa. Cột TRÁI = STT tàu · Tên tàu · TK nhập · TK get out (người dùng gõ, lưu ở node knq_info theo mã batch, dán SAP ngày mới là tự ghép lại); GIỮA = nguyên văn SAP (Date·SLoc·Mat·Batch·Batch code·Init·GR·GI·Trs·End); PHẢI = HQ approved · Thực còn · % · VASSCM · Ghi chú. TRỪ LÙI: lô P/X lấy thẳng End Stock D-1 làm tồn đầu kỳ (đã kiểm chứng SAP KHÔNG động vào P/X suốt tháng) rồi trừ FIFO theo FEED OL1 của kỳ — BỎ HẲN đóng kỳ / tồn đầu kỳ op[] / cờ ✔Done / 🔒 khoá lô. Lô End=0 hoặc rơi khỏi ZMMFR022 thì tô màu mời xoá. 💾 Lưu kỳ = ảnh chụp cả bảng vào knq_period/<kỳ>, xem lại và xoá được để Firebase khỏi phình. Sửa ô bằng Tabulator tại chỗ ⇒ HẾT lỗi nuốt chữ khi gõ. Tab KNQ cũ vẫn chạy song song để đối chiếu, dùng chung node FEED OL1. -->
-<script src="js/features/inv.js?v=4170"></script><!-- ⭐⭐⭐ v4.170 — APP TỰ TÍNH THÌ Ở TRONG RAM, CHỈ SỐ NGƯỜI GÕ MỚI LÊN FIREBASE. Tồn đầu tự lấy và dòng cavern của mẻ nay là số RAM; mọi dòng auto:true đọc về từ Firebase (do máy chạy bản cũ ghi) đều bị LỌC BỎ ⇒ không thể tái diễn vụ hai bản ghi đè nhau vô tận ngày 18/09. Và: mẻ trong ngày ĐÃ CÓ COQ thì live stock = END của Tank Log − hàng đã bán TỪ lot đó (cột Lot của TL Data) − xe đang nạp. --><!-- v4.167 — tick một mẻ trộn TRONG NGÀY (dòng Cavern receipt, chỉ đổi Live stock) không còn gỡ TRẦN VẬT LÝ của tồn đầu: từ v4.166 hai loại mẻ dùng chung /lotSel nên chỉ cần add một batch trong ngày là số Open có thể nhảy sang nhánh suy khác. --><!-- v4.162 — tồn đầu: hỏi người dán SAP (chỉ khi bảng là của D hoặc D-1) xem số SAP đã gồm stock transfer tới lot nào, lưu /sap_lot/<ngày>/<bồn> confirmed:true và app không bao giờ đè lên; có xác nhận thì chỉ so SỐ LOT, bỏ hẳn chuỗi suy cờ ST + ngày tick + giờ dán. Thêm TRẦN VẬT LÝ: tồn đầu không được vượt END đo thật của mẻ gần nhất trừ hàng đã xuất; vượt thì KHÔNG điền và xoá số auto cũ để nhân viên tự gõ · v4.108 — ⚖ Stock-transfer reconciliation: tồn C3/C4 thực tế vs tồn hệ thống (SAP End Stock tự lấy theo giờ finish) → số chuyển kho đã điều chỉnh · v4.111 — lot đang tính hiện cạnh tên bồn, nút 💾 Save to Tank Log, tồn đầu hệ thống dùng chung với ô thông báo Tank Mix · v4.113 — số tồn đầu gõ tay lưu tạm lên /stx_draft theo TỪNG LOT (sống sót qua F5 / đổi máy / bồn trộn mẻ mới) và tự xoá khi đã lưu vào Tank Log · v4.114 — VÁ LỖI GÕ: ô WMS initial không còn bị cắt focus sau mỗi chữ số (cập nhật tại chỗ, type=text) · v4.117 — 🔍 WMS stock check (modal #stxWmsModal): gõ thể tích vừa đo + số C3/C4 WMS đang hiện ⇒ độ vênh và CÂU LỆNH chuyển kho rõ chiều (bồn ➜ hầm 1100 để GIẢM, hầm 1100 ➜ bồn để TĂNG); không lưu gì, số gõ giữ trong RAM suốt phiên · v4.131 — 💾 Save ghi luôn tồn đầu hệ thống vào 2 cột WMS của Tank Log · v4.152 — P2: tồn đầu ngày tự lấy (End Stock SAP D-1, hoặc trạng thái FINISH của mẻ nếu mẻ kết thúc SAU lúc dán SAP) · P4: ✅ cộng luôn số cavern đưa lên bồn vào tồn, có dấu /mixIn chống cộng trùng · v4.154 — End Stock SAP gồm lot nào xét theo cờ + NGÀY tick ST (không theo giờ dán), ghi /sap_lot mỗi lần dán SAP; tồn đầu của app tự tính lại liên tục; mẻ xong trong ngày có COQ tự ghi cavern receipt -->
+<script src="js/features/bond.js?v=4189"></script><!-- v4.189 — FEED OL1: import/paste ngày có ACTUAL luôn đè số gõ tay (Keyed); PLAN vẫn nhường --><!-- v4.106 — ⭐ KHO NGOẠI QUAN GỘP THẲNG VÀO TAB SAP: nút gạt "📊 SAP thô | 🛃 Kho ngoại quan", bảng KNQ đọc SỐ SỐNG từ SP.ROWS (SLoc 1100 tại D-1) chứ không giữ sổ riêng nữa. Cột TRÁI = STT tàu · Tên tàu · TK nhập · TK get out (người dùng gõ, lưu ở node knq_info theo mã batch, dán SAP ngày mới là tự ghép lại); GIỮA = nguyên văn SAP (Date·SLoc·Mat·Batch·Batch code·Init·GR·GI·Trs·End); PHẢI = HQ approved · Thực còn · % · VASSCM · Ghi chú. TRỪ LÙI: lô P/X lấy thẳng End Stock D-1 làm tồn đầu kỳ (đã kiểm chứng SAP KHÔNG động vào P/X suốt tháng) rồi trừ FIFO theo FEED OL1 của kỳ — BỎ HẲN đóng kỳ / tồn đầu kỳ op[] / cờ ✔Done / 🔒 khoá lô. Lô End=0 hoặc rơi khỏi ZMMFR022 thì tô màu mời xoá. 💾 Lưu kỳ = ảnh chụp cả bảng vào knq_period/<kỳ>, xem lại và xoá được để Firebase khỏi phình. Sửa ô bằng Tabulator tại chỗ ⇒ HẾT lỗi nuốt chữ khi gõ. Tab KNQ cũ vẫn chạy song song để đối chiếu, dùng chung node FEED OL1. -->
+<script src="js/features/inv.js?v=4202"></script><!-- ⭐⭐⭐ v4.170 — APP TỰ TÍNH THÌ Ở TRONG RAM, CHỈ SỐ NGƯỜI GÕ MỚI LÊN FIREBASE. Tồn đầu tự lấy và dòng cavern của mẻ nay là số RAM; mọi dòng auto:true đọc về từ Firebase (do máy chạy bản cũ ghi) đều bị LỌC BỎ ⇒ không thể tái diễn vụ hai bản ghi đè nhau vô tận ngày 18/09. Và: mẻ trong ngày ĐÃ CÓ COQ thì live stock = END của Tank Log − hàng đã bán TỪ lot đó (cột Lot của TL Data) − xe đang nạp. --><!-- v4.167 — tick một mẻ trộn TRONG NGÀY (dòng Cavern receipt, chỉ đổi Live stock) không còn gỡ TRẦN VẬT LÝ của tồn đầu: từ v4.166 hai loại mẻ dùng chung /lotSel nên chỉ cần add một batch trong ngày là số Open có thể nhảy sang nhánh suy khác. --><!-- v4.162 — tồn đầu: hỏi người dán SAP (chỉ khi bảng là của D hoặc D-1) xem số SAP đã gồm stock transfer tới lot nào, lưu /sap_lot/<ngày>/<bồn> confirmed:true và app không bao giờ đè lên; có xác nhận thì chỉ so SỐ LOT, bỏ hẳn chuỗi suy cờ ST + ngày tick + giờ dán. Thêm TRẦN VẬT LÝ: tồn đầu không được vượt END đo thật của mẻ gần nhất trừ hàng đã xuất; vượt thì KHÔNG điền và xoá số auto cũ để nhân viên tự gõ · v4.108 — ⚖ Stock-transfer reconciliation: tồn C3/C4 thực tế vs tồn hệ thống (SAP End Stock tự lấy theo giờ finish) → số chuyển kho đã điều chỉnh · v4.111 — lot đang tính hiện cạnh tên bồn, nút 💾 Save to Tank Log, tồn đầu hệ thống dùng chung với ô thông báo Tank Mix · v4.113 — số tồn đầu gõ tay lưu tạm lên /stx_draft theo TỪNG LOT (sống sót qua F5 / đổi máy / bồn trộn mẻ mới) và tự xoá khi đã lưu vào Tank Log · v4.114 — VÁ LỖI GÕ: ô WMS initial không còn bị cắt focus sau mỗi chữ số (cập nhật tại chỗ, type=text) · v4.117 — 🔍 WMS stock check (modal #stxWmsModal): gõ thể tích vừa đo + số C3/C4 WMS đang hiện ⇒ độ vênh và CÂU LỆNH chuyển kho rõ chiều (bồn ➜ hầm 1100 để GIẢM, hầm 1100 ➜ bồn để TĂNG); không lưu gì, số gõ giữ trong RAM suốt phiên · v4.131 — 💾 Save ghi luôn tồn đầu hệ thống vào 2 cột WMS của Tank Log · v4.152 — P2: tồn đầu ngày tự lấy (End Stock SAP D-1, hoặc trạng thái FINISH của mẻ nếu mẻ kết thúc SAU lúc dán SAP) · P4: ✅ cộng luôn số cavern đưa lên bồn vào tồn, có dấu /mixIn chống cộng trùng · v4.154 — End Stock SAP gồm lot nào xét theo cờ + NGÀY tick ST (không theo giờ dán), ghi /sap_lot mỗi lần dán SAP; tồn đầu của app tự tính lại liên tục; mẻ xong trong ngày có COQ tự ghi cavern receipt -->
 <script src="js/features/tkv.js"></script>
-<script src="js/features/vlog.js"></script>
+<script src="js/features/vlog.js?v=4194"></script><!-- v4.194 — modal sửa có nhóm/nhãn/gợi ý định dạng, kiểm tra ngày giờ, Lot/Ship/Customer/Date chép cho mọi dòng cùng lot, số gõ tay thắng RECALC, bỏ cờ chặn echo toàn cục --><!-- v4.177 — sửa dòng Vessel Log đủ N tank (GC TANK 3…) · COQ đọc mọi cột TANK n · đẩy sang Vessel tab: hàng thuần ghi type Pure Propane/Butane -->
 <script src="js/features/plog.js"></script>
 <script src="js/features/staff.js"></script>
-<script src="js/features/mixctrl.js?v=4161"></script><!-- v4.161 — canh bao khi co lot CHUA NAP nam giua lot truoc va lot dang tron (trang thai DAU co the lay tu sai lot); checkDupLot noi ro chi quet trong so lot da nap; fmtDateBlur khong con tu bien 4 chu so thanh "dd/mm" khong nam · v4.107 — MIX PLANNER: ô tuần hoàn đường ống MẶC ĐỊNH TẮT (trước là bật sẵn và tự trừ 74 m³) -->
+<script src="js/features/mixctrl.js?v=4171"></script><!-- v4.161 — canh bao khi co lot CHUA NAP nam giua lot truoc va lot dang tron (trang thai DAU co the lay tu sai lot); checkDupLot noi ro chi quet trong so lot da nap; fmtDateBlur khong con tu bien 4 chu so thanh "dd/mm" khong nam · v4.107 — MIX PLANNER: ô tuần hoàn đường ống MẶC ĐỊNH TẮT (trước là bật sẵn và tự trừ 74 m³) -->
 <!-- v4.101 — ★ MIX PLANNER: chọn CÓ/KHÔNG tuần hoàn đường ống (mặc định CÓ) + ô PIPE VOL; hàng tỉ lệ cũ trong ống được tính vào phần phải đưa về tỉ lệ thường -->
-<script src="js/features/vmix.js"></script>
+<script src="js/features/vmix.js?v=4177"></script><!-- v4.177 — tàu N tank (mặc định 2; cột tank 3+ nhân bản từ cột 1/2), chip TANKS ẩn/hiện cột, kiểu trộn MIX / PURE C3 / PURE C4 từng tank, ⚙ VESSEL thêm/bớt tank, nút ✉ MAIL mở email P7 -->
 <script src="js/features/mixnotify.js?v=4150"></script><!-- v4.111 — thẻ thông báo Tank Mix hiện thêm WMS initial (sửa được tại chỗ), Gap và số chuyển kho ĐÃ ĐIỀU CHỈNH; ✅ ghi luôn kết quả đối chiếu vào 4 cột mới của Tank Log · v4.113 — hiện dòng "+N thông báo nữa đang chờ" khi vượt quá 4 ô · v4.114 — ô nhập đổi sang type=text để giữ được con trỏ · v4.131 — thêm hàng nhãn C3 / C4 ở đầu thẻ để không gõ nhầm cột -->
-<script src="js/features/cav.js?v=4125"></script>
+<script src="js/features/cav.js?v=4197"></script><!-- v4.197 — heat → HTRH.refresh() --><!-- v4.196 — engSwitchTab: gc → GCX, heat → HTRH (History mặc định) --><!-- v4.176 — engSwitchTab biết hai sub-tab dew / heat · v4.173 — CAV.src (nguồn số cho BSXL/MAIL); OL1 báo cáo: X = bản PLAN tuần, TỔNG = FEED OL1 gõ tay (không bao giờ dùng 2.000 T tạm tính); ST liên bồn tính vào ST thuần -->
 <script src="js/features/vs.js"></script>
 <script src="js/features/fcst.js?v=4125"></script><!-- v4.120 — ⭐ DỰ BÁO TỒN KHO trên thanh SCALE CONSOLE · CHỈ lô D + E (P/X không tính), đơn xuất khẩu trừ lô E, nội địa trừ lô D, thêm ô nhập tàu/heater tạm tính · v4.119 — bản đầu: tồn ĐÃ THÔNG QUAN của SAP (1100+2100+2101) trừ MỌI kế hoạch có ngày SAU ngày SAP (Today Plan + Tomorrow Plan). Tỉ lệ bán (%vol) được ghép với lot có %vol gần nhất — lot đang trong bồn → lịch sử Tank Log → tạm tính — rồi lấy %wt của lot đó tách ra kg C3/C4. Cảnh báo khi kế hoạch bán LỐ hơn hàng đã thông quan (rủi ro bơm nhầm hàng chưa thông quan) -->
 <script src="js/features/xsplit.js?v=4153"></script><!-- v4.136 — 🔀 CROSS-TANK GI SPLIT: xe phải lấy hàng từ CẢ HAI ball tank nhưng phiếu cân + GI trên WMS chỉ làm được từ MỘT bồn. Chọn xe theo ngày/biển số/tài xế/DO trong TL Data, gõ KL lấy từ bồn kia, app tách C3/C4 theo %wt COQ của lot và duyệt mọi cách gán xe→bồn GI để ra phương án phải chuyển kho ÍT NHẤT (thay vì chuyển trọn cục làm tổng GI vượt LPG bồn đó có theo COQ). Không ghi gì — số giữ trong RAM suốt phiên · v4.153 — bảng xe rộng đúng theo nội dung: ngày, biển số và cột GI AT không còn bị cắt chữ -->
@@ -5023,6 +5046,14 @@
      giết js/21-zalo.js bên Chấm Công bằng HTTP 499. -->
 <script src="js/integrations/loadnotify.js?v=484"></script>
 <!-- boot (cuối cùng) -->
+<script src="js/data/bsxl.js?v=4193"></script><!-- v4.193 — GỢI Ý (bấm Use mới ghi): get-out P/X/D/E ← SAP 1100 GR, heater ← SAP B100 GI / PMS, OL1 X ← FEED OL1 --><!-- v4.181 — TỰ ĐIỀN: get-out P/X/D/E ← SAP GR 1100 (KNQ), heater ← tab Heater, OL1 X ← kế hoạch (CAV hoặc FEED OL1 import), WS/TL/Vessel trống mà nguồn đã có ngày sau ⇒ 0; số gõ tay thay số tự điền · v4.173 — ghi số ngày vào file Batch Stock (sheet Propane/Butane): chép công thức dòng trước + điền ô nhập · v4.180 — MỘT logic kiểm dữ liệu cho SAP ▸ SAP WMS Report + email P6: mục thiếu phải được gõ số / xác nhận 0 / giá không đổi / bỏ qua (ô trống TÔ VÀNG); không còn lấy giá ngày trước âm thầm; BN/BP · AO/AQ là công thức; quyết định lưu sapwms_ok/<ngày>/<mục> -->
+<script src="js/features/swr.js?v=4193"></script><!-- v4.193 — bảng kiểm gom theo ngày, ô nhập có nhãn C3/C4 + đơn vị, nút chữ, ✓ Use / Use suggestions --><!-- v4.181 — bảng kiểm hiện đủ mục + nhãn nguồn, ✎ sửa từng dòng · v4.180 — LPG SALES ▸ SAP ▸ 📑 SAP WMS Report (thay REPORTS ▸ Cavern Daily): import file ⇒ bảng kiểm ⇒ export; SWR.html() dùng chung với email P6 -->
+<script src="js/data/pmsheat.js?v=4197"></script><!-- v4.197 — buildMaster(o.name): xuất lại cùng chuyến thì GHI ĐÈ sheet `YY.NN항차_Data + sửa đúng dòng Sumary --><!-- v4.176 — nhận Heater A/B chắc tay: dò "32331"/"32341" ở tiêu đề cột, chữ phía trên, tên sheet, TÊN FILE; không nhận ra ⇒ heater=null để người dùng gán; file có cả 2 tag ⇒ .all · gộp nhiều file cùng tag (mergePts) · v4.173 — Heater C3 từ dữ liệu PMS theo phút: tách đợt chạy, START/STOP, chia ngày tại 00:00, thêm sheet chuyến vào file Heater master -->
+<script src="js/features/engx.js?v=4208"></script><!-- v4.208 — ENGX_U.dewSign dùng chung --><!-- v4.206 — DEWPT.c3Rows/c3Hist cho biểu đồ email P3 --><!-- v4.196 — Dew point thêm C4 (dew_point_c4), tải 2 năm khi mở + ⤓ Load all, lần đo thêm trong ngày (x/HHMM); PMS Save ghi thêm heater_day/heater_voy -->
+<script src="js/features/labx.js?v=4201"></script><!-- v4.201 — PMS import: bảng dữ liệu file (A+B theo thời điểm) bấm dòng = START, ⏹ = FINISH --><!-- v4.200 — 📂 nạp file PMS cho cả tàu (nhiều ngày, START lần đầu / FINISH tick), tự tạo dòng ngày, Unloaded tự lưu, xoá tàu --><!-- v4.199 — 📋 dán dòng vessel itinerary (tự điền form tàu, ô đoán/thiếu tô vàng để sửa tay; Ref trùng ⇒ cập nhật) --><!-- v4.198 — 🚢 bảng tàu theo vessel itinerary, tàu C3/C4, unloading từng ngày lưu theo tàu (heater_voy/<vk>/d) --><!-- v4.197 — 🔥 Heater gộp: tàu unloading + ngày PMS + Unloaded (t) + báo cáo cả chuyến + lịch sử --><!-- v4.196 — MỚI: LABX (📥 nạp file tổng hợp lab/heater lên Firebase) · GCX (🧪 GC C3/C4) · HTRH (🔥 lịch sử heater 3 tháng). Nạp SAU engx.js (dùng ENGX_U) --><!-- v4.176 — Engineer ▸ 💧 DEW POINT (DEWPT) + 🔥 HEATER (HTR). PHẢI nạp TRƯỚC mail.js: email P5 dùng chung HTR.S -->
+<script src="js/data/mailcfg.js?v=4182"></script><!-- v4.182 — cfg thêm MAILS (email tự soạn) + CTX (người thêm tay danh bạ), chuẩn hoá mảng rỗng Firebase bỏ --><!-- v4.177 — thêm tuyến P7 Vessel Mixing Report; cấu hình mail_cfg cũ trên Firebase thiếu P7 thì tự bù tuyến mặc định --><!-- v4.172 — ✉ REPORT MAIL: danh bạ + nhóm người nhận CỐ ĐỊNH của 6 email báo cáo (đổi người nhận chỉ sửa file này) -->
+<script src="js/data/contacts.js?v=4182"></script><!-- v4.182 — gộp người thêm tay (MAILCFG.CTX) vào search/byEmail; file công ty cùng email thì file thắng --><!-- v4.174 — 📇 danh bạ công ty (HSVC Internal Contact List): import 1 lần, Firebase contact_list/meta + rows (1 chuỗi), đọc meta 1 lần/phiên, cache theo ver — tìm kiếm & dò người nghỉ tính trong RAM -->
+<script src="js/features/mail.js?v=4208"></script><!-- v4.208 — P3 số dương cảnh báo ngay --><!-- v4.207 — P3 chỉ lưu khi bấm 💾; rời email chưa lưu ⇒ hộp Save/Discard/Stay --><!-- v4.206 — P3 biểu đồ Dew Point of C3 Dryer Outlet (PNG, cid trong .eml) + số gõ tự lưu --><!-- v4.205 — P2 📂 showOpenFilePicker giữ handle ⇒ Save cùng thư mục --><!-- v4.204 — P2 📂 chỉ chọn file, ▶ Build report mới điền + lưu + đính kèm; đổi ngày bỏ bản dựng cũ --><!-- v4.203 — P2 Summary data rút gọn: chỉ khách tháng này ≠ 0, dòng Other N customers, khách mới tô đỏ --><!-- v4.195 — P1/P7 bỏ câu + gợi ý đính kèm · P1 Pumped from cavern = tấn COQ (cột 66/67) · tìm người nhận nổi, báo đã có trong To/CC, không thêm trùng --><!-- v4.194 — P7: ngày lot lấy từ dòng sửa gần nhất + cảnh báo khi các dòng lệch ngày --><!-- v4.193 — Copy body ghi HTML thô (không bị Chrome làm sạch) + align thuộc tính + dòng đệm trước bảng · P2 To Cavern = 0 gộp vào From Cavern --><!-- v4.192 — email: bảng thụt lề 32px + dòng đệm, tiêu đề mục đậm ■, ô bảng padding 3/8px, chữ giãn dòng --><!-- v4.191 — 👥 Recipients: tab By group (thành viên + nhận TO/CC thư nào) · By mail (thêm người thẳng TO/CC) · By person (ở nhóm nào, nhận gì, gỡ khi nghỉ) · ▦ Matrices --><!-- v4.190 — ctNewAdd: email thiếu @ tự thêm @hyosung.com, lỗi hiện ngay trong form, nhớ nhóm "add to" --><!-- v4.187 — p2Cancel: nhóm ALT huỷ = 1 dòng, nhóm có xe đã nạp không tính · thêm xe biến mất đã xác nhận (plan_cx) · gửi P2 đánh dấu mail --><!-- v4.184 — MAIL.p2Cancel: một logic xe huỷ cho email P2 và sheet Cancel List --><!-- v4.183 — P1 không tự đưa lot đã gửi · P2 Daily plan = kế hoạch đầu ngày + xe bị gỡ khỏi plan · Directory mặc định sắp theo Department --><!-- v4.182 — 👥 Recipients: + Group / + Mail (chỉ chữ, admin soạn), bật tắt cột Department/Position/Email/Title, ➕ New person / 📇+ thêm tay danh bạ --><!-- v4.181 — bỏ chữ ký; P2 Daily summary = RPT.summaryGroups + bảng luỹ kế Summary data đọc từ file Daily Stock --><!-- v4.180 — P6 dùng chung bảng kiểm SWR/BSXL; chọn file ⇒ bảng kiểm ⇒ Fill & attach; giá thân thư không lấy ngày trước âm thầm --><!-- v4.179 — REPORT MAIL: From = tài khoản đang đăng nhập (dò email → mã NV → danh bạ công ty), bỏ ô chọn From + cột From ở Recipients --><!-- v4.178 — 👥 Recipients ▸ Directory: cột Department + Position đọc từ danh bạ công ty (RAM, không ghi Firebase), lọc + sắp xếp theo cột --><!-- v4.177 — email P7 Vessel Mixing Report (đọc Vessel Log, mỗi tank một cột, hàng thuần C3/C4) --><!-- v4.176 — P1 bỏ khối STOCK TRANSFER, Odorant chỉ BD SET; P5 dùng chung HTR.S; P3 lưu bằng update() · v4.172 — ✉ REPORT MAIL: soạn sẵn 6 email báo cáo (P1 gộp DCS Report + Mixing Lot), bảng tự điền từ Tank Log / TL Data / WMS ST / SAP / Today Plan, xuất thư nháp Outlook (.eml) hoặc copy thân thư — CHỈ ĐỌC RAM, không ghi Firebase -->
 <script src="js/boot.js?v=4141"></script><!-- v4.127 — canh bản đang chạy trước khi boot -->
 </body>
 </html>

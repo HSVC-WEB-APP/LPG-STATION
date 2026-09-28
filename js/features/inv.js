@@ -2557,7 +2557,20 @@ const INV = (function(){
     try{ if(typeof canWrite === 'function' && !canWrite('inv')) return false; }catch(_){ return false; }
     return true;
   }
-  function _autoReady(){ return !!_clock || (_bootAt > 0 && Date.now() - _bootAt > 15000); }
+  /* ⭐ v4.202 — CỔNG "ĐỦ DỮ LIỆU" THEO SỰ KIỆN, không chờ mù 15 giây.
+     Trước đây: mở app ⇒ tồn đầu (auto) bị chặn 15 giây, rồi KHÔNG có gì
+     gọi render() lại ⇒ phải đợi nhịp 30 giây ⇒ thẻ tank trống 15–45 giây.
+     Nay SP / TL / ENG báo "đã nạp xong bản Firebase" qua INV.dataReady(k);
+     đủ cả ba là tính ngay. 15 giây vẫn giữ làm lưới an toàn (nhánh lạ
+     như migrate/back-fill không báo), và có hẹn giờ vẽ lại đúng mốc đó. */
+  const _ready = { sp:false, tl:false, eng:false };
+  function _dataAllReady(){ return _ready.sp && _ready.tl && _ready.eng; }
+  function _autoReady(){ return !!_clock || _dataAllReady() || (_bootAt > 0 && Date.now() - _bootAt > 15000); }
+  function dataReady(k){
+    if(!(k in _ready) || _ready[k]) return;
+    _ready[k] = true;
+    if(_dataAllReady()) setTimeout(()=>{ try{ render(); }catch(_){} }, 0);
+  }
   /* ⚠ v4.170 — MỌI lượt ghi `_ver` PHẢI đi qua đây, ĐỪNG dùng Date.now().
      Listener chỉ nạp lại khi `_ver` ĐỔI (`fbVer !== _localVer[sl]`). Hai
      lượt ghi rơi vào CÙNG một mili-giây thì Date.now() cho ra cùng một số
@@ -3744,6 +3757,8 @@ const INV = (function(){
     _bootAt = Date.now();
     render();
     attachFirebase();
+    /* v4.202 — lưới an toàn: hết 15 giây thì vẽ lại NGAY, không đợi nhịp 30 giây */
+    try{ setTimeout(()=>{ try{ render(); }catch(_){} }, 15100); }catch(_){}
     /* v4.154 — nhịp 30 giây: SAP / Tank Log / cờ ST đổi ở máy khác cũng
        được tính lại mà không cần ai bấm gì. */
     try{
@@ -3755,7 +3770,7 @@ const INV = (function(){
   }
   let _tickTimer = null;
 
-  return { init, view, onTankSwitch, render, renderRow1, stockFor,
+  return { init, view, onTankSwitch, render, renderRow1, stockFor, dataReady,
            openInit, pickInit, saveInit,
            /* v4.146 — lưu từ Tank Console, KHÔNG đóng bảng đang mở */
            saveInitFor, saveWtFor,
