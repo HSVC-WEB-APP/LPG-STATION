@@ -1,5 +1,10 @@
 /* ============================================================
- * MAIL — mail.js  (v4.208)
+ * MAIL — mail.js  (v4.216)
+ * v4.216: xe huỷ P2 KHÔNG điền sẵn — nút 🚫 Cancel list mở bảng ứng viên (🚫 Cancelled · 🕳 biến mất lúc dán ·
+ *         📌 có trong kế hoạch đầu ngày), gộp trùng biển số, gợi ý "đã nạp hôm nay" / "còn trong Today Plan";
+ *         người dùng tick + ✓ Confirm. Chỉ 🚫 Cancelled được tick sẵn. Dùng chung cho thư P2 và sheet Cancel List.
+ * v4.210: đóng REPORT MAIL ⇒ MAILCFG.detach() (không giữ listener mail_cfg); P5 tự tải dữ liệu heater (HTRH, 3 tháng,
+ *         một lần) nếu máy chưa mở tab Heater.
  * v4.208: P3 gõ dew point DƯƠNG ⇒ cảnh báo NGAY (ENGX_U.dewSign: OK đổi sang âm · Cancel giữ để tự sửa), ô tô đỏ.
  * v4.207: P3 BỎ tự lưu — số dew point CHỈ lưu khi bấm 💾 Save reading. Rời email P3 (đổi báo cáo / ngày / 👥 /
  *         đóng / tắt trang) mà còn số vừa gõ chưa lưu ⇒ hộp hỏi: 💾 Save & continue · Discard & continue · Stay.
@@ -459,50 +464,110 @@ const MAIL = (function(){
   }
   /* ⭐ v4.184 — XE HUỶ + DAILY PLAN/ACTUAL của một ngày: nguồn DUY NHẤT cho email P2 và
      sheet "Cancel List" (RPT). Chỉ đọc RAM (Today Plan · PLANDAY đã nạp · TL Data · Vessel).
-     rows: { customer, plate, rmooc, driver, qty, note, src:'cancel'|'removed' }            */
+     ⭐⭐ v4.216 — KHÔNG CÒN TỰ ĐIỀN xe huỷ theo luật "sáng có – chiều không". App chỉ gom
+     DANH SÁCH ỨNG VIÊN (cands) từ 3 nguồn, gộp trùng theo biển số, kèm gợi ý kiểm tra
+     (đã nạp hôm nay? còn nằm trong Today Plan?). NGƯỜI DÙNG tick chọn xe nào là huỷ:
+       • 🚫 Cancelled trong Today Plan  → tick sẵn (chính người dùng đã bấm Cancel)
+       • 🕳 biến mất lúc dán (plan_cx)   → KHÔNG tick sẵn
+       • 📌 có trong kế hoạch đầu ngày, cuối ngày không còn → KHÔNG tick sẵn
+     Lý do: có xe ĐÃ NẠP rồi, hoặc chỉ có tên trong danh sách để thông báo / phối hợp
+     (vd. KNHC "ngủ lại nhà máy, sáng làm hải quan") ⇒ biến mất ≠ huỷ.
+     Lựa chọn giữ trong RAM (ST.cnSel / ST.cnOk), dùng chung cho thân thư P2 và file Daily.
+     rows  : xe ĐƯỢC TICK { customer, plate, rmooc, driver, qty, note, src }
+     cands : mọi ứng viên { key, src, sel, loadedMT, inPlan, by, …row }                   */
+  function _cnPl(t){ return String(t||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+  function _cnPlates(p){ return String(p||'').split(' / ').map(_cnPl).filter(Boolean); }
+  function _cnSel(iso){ ST.cnSel = ST.cnSel || {}; return ST.cnSel[iso] || (ST.cnSel[iso] = {}); }
   function p2Cancel(iso){
     const warn = [];
     const tl = _tlDay(iso), vs = _vsRows().filter(r => r.giDate && anyIso(r.giDate) === iso);
     const plan = _planRows().filter(r => (r._forDate || '') === iso || !r._forDate);
-    /* v4.187 — nhóm 🔗 ALT ("1 trong các xe"): huỷ = MỘT chuyến; có xe đã nạp ⇒ không tính */
+    const cands = [];
+    const add = c => {                                   /* gộp trùng theo biển số (ưu tiên nguồn thêm trước) */
+      const ps = _cnPlates(c.plate);
+      if(ps.length && cands.some(x => _cnPlates(x.plate).some(p => ps.indexOf(p) >= 0))) return;
+      c.key = ps.length ? 'P|' + ps.slice().sort().join('+') : 'N|' + c.src + '|' + _cnPl(c.customer) + '|' + (c.oid || c.no || '') + '|' + (num(c.qty) || 0);
+      if(cands.some(x => x.key === c.key)) return;
+      cands.push(c);
+    };
+    /* ① 🚫 Cancelled trong Today Plan — nhóm 🔗 ALT huỷ = MỘT chuyến; có xe đã nạp ⇒ không tính (v4.187) */
     const altG = r => String(r._lnkK||'') === 'alt' ? String(r._lnkG||'') : '';
     const liveAlt = new Set(plan.filter(r => altG(r) && /^(loading|done)$/.test(_planStatus(r))).map(altG));
     const seenAlt = new Set(), uniq = a => a.filter((x, i) => x && a.indexOf(x) === i);
-    const rows = [];
     plan.filter(r => _planStatus(r) === 'cancel' && !r._altSkip).forEach(r => {
       const g = altG(r);
       if(g){
         if(liveAlt.has(g) || seenAlt.has(g)) return;
         seenAlt.add(g);
         const mem = plan.filter(x => altG(x) === g);
-        rows.push({ customer:r.customer||'', plate:uniq(mem.map(x => x.plate||'')).join(' / '), rmooc:uniq(mem.map(x => x.rmooc||'')).join(' / '),
-                    driver:uniq(mem.map(x => x.driver||'')).join(' / '), qty:num(r.qty), note:(String(r.note||'').trim() || 'Cancel') + (mem.length > 1 ? ' (1 of '+mem.length+' trucks/drivers)' : ''), src:'cancel' });
+        add({ customer:r.customer||'', plate:uniq(mem.map(x => x.plate||'')).join(' / '), rmooc:uniq(mem.map(x => x.rmooc||'')).join(' / '),
+              driver:uniq(mem.map(x => x.driver||'')).join(' / '), qty:num(r.qty), note:(String(r.note||'').trim() || 'Cancel') + (mem.length > 1 ? ' (1 of '+mem.length+' trucks/drivers)' : ''), src:'cancel', oid:r._oid||'' });
         return;
       }
-      rows.push({ customer:r.customer||'', plate:r.plate||'', rmooc:r.rmooc||'', driver:r.driver||'', qty:num(r.qty), note:String(r.note||'').trim() || 'Cancel', src:'cancel' });
+      add({ customer:r.customer||'', plate:r.plate||'', rmooc:r.rmooc||'', driver:r.driver||'', qty:num(r.qty), note:String(r.note||'').trim() || 'Cancel', src:'cancel', oid:r._oid||'' });
     });
-    /* v4.187 — xe BIẾN MẤT khỏi Today Plan, đã xác nhận lúc dán (plan_cx) */
+    /* ② 🕳 biến mất khỏi Today Plan, xác nhận lúc dán (plan_cx) */
     const PX = (typeof PLANCX !== 'undefined') ? PLANCX : null;
     const vx = PX ? PX.get(iso) : [];
-    (vx || []).filter(v => +v.cx === 1).forEach(v => rows.push({ customer:v.c||'', plate:v.p||'', rmooc:v.m||'', driver:v.d||'', qty:num(v.q),
-      note:(v.nt && !/^arrived/i.test(v.nt) ? v.nt + ' · ' : '') + 'Removed from plan (confirmed at paste' + (+v.n > 1 ? ', 1 of '+v.n+' trucks/drivers' : '') + ')', src:'vanish' }));
-    const _pl = t => String(t||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
-    const covered = x => (vx || []).some(v => String(v.oids||'').split(',').indexOf(x.o) >= 0 || String(v.p||'').split(' / ').some(pp => _pl(pp) && _pl(pp) === _pl(x.p)))
-                      || rows.some(r => String(r.plate||'').split(' / ').some(pp => _pl(pp) && _pl(pp) === _pl(x.p)));
+    (vx || []).filter(v => +v.cx === 1).forEach(v => add({ customer:v.c||'', plate:v.p||'', rmooc:v.m||'', driver:v.d||'', qty:num(v.q), by:v.by||'', oid:v.oids||'', no:v.no||'',
+      note:(v.nt && !/^arrived/i.test(v.nt) ? v.nt + ' · ' : '') + 'Removed from plan' + (+v.n > 1 ? ' (1 of '+v.n+' trucks/drivers)' : ''), src:'vanish' }));
+    /* ③ 📌 có trong kế hoạch đầu ngày mà Today Plan không còn */
     let planMT = 0;
     try{ planMT = TP.lnkTotals(plan).planMT; }catch(_){ plan.forEach(r => { if(_planStatus(r) !== 'cancel') planMT += num(r.qty) || 0; }); }
     const PD = (typeof PLANDAY !== 'undefined') ? PLANDAY : null;
     const first = PD ? PD.get(iso) : null;
-    const drop = first ? PD.dropped(iso, plan).filter(x => !covered(x)) : [];      /* v4.187 — không đếm hai lần với plan_cx / xe đã huỷ */
-    ST.p2drop = ST.p2drop || {};
-    drop.filter(x => ST.p2drop[iso + '|' + x.o + '|' + x.p] !== false).forEach(x => rows.push({ customer:x.c, plate:x.p, rmooc:x.m, driver:x.d, qty:num(x.q),
+    const drop = first ? PD.dropped(iso, plan) : [];
+    drop.forEach(x => add({ customer:x.c, plate:x.p, rmooc:x.m, driver:x.d, qty:num(x.q), oid:x.o||'', no:x.n||'',
       note:(x.nt && !/^arrived/i.test(x.nt) ? x.nt + ' · ' : '')+'Removed from plan'+(x.grpN > 1 ? ' (1 of '+x.grpN+' trucks/drivers)' : ''), src:'removed' }));
+    /* gợi ý kiểm tra: xe đã có GI hôm nay? còn nằm trong Today Plan (không phải Cancelled)? */
+    const S = _cnSel(iso);
+    cands.forEach(c => {
+      const ps = _cnPlates(c.plate);
+      c.loadedMT = 0;
+      if(ps.length) tl.forEach(r => { if(ps.indexOf(_cnPl(r.truck)) >= 0) c.loadedMT += _c34(r).nw / 1000; });
+      c.inPlan = !ps.length || c.src === 'cancel' ? '' : uniq(plan.filter(r => ps.indexOf(_cnPl(r.plate)) >= 0).map(r => _planStatus(r) || 'waiting')).join(', ');
+      c.sel = S[c.key] !== undefined ? !!S[c.key] : c.src === 'cancel';
+    });
+    const rows = cands.filter(c => c.sel).map(c => ({ customer:c.customer, plate:c.plate, rmooc:c.rmooc, driver:c.driver, qty:c.qty, note:c.note, src:c.src }));
+    const reviewed = !!(ST.cnOk && ST.cnOk[iso]);
+    if(cands.length && !reviewed) warn.push('Cancel list not confirmed: '+cands.length+' candidate truck(s) — '+rows.length+' ticked. Open 🚫 Cancel list, tick the trucks that are really cancelled and press ✓ Confirm list.');
     const dailyPlan = first ? num(first.mt) : planMT;
     if(first === null) warn.push('The first plan of '+iso+' was not recorded (it is saved at the first paste / promote of the day) — "Daily plan" shows the current plan. Use 📌 Record to keep the current plan as the first plan.');
     if(!plan.length) warn.push('Today Plan has no rows for '+iso+' (cancelled-vehicle table is empty).');
     let giKg = 0; tl.forEach(r => { giKg += _c34(r).nw; }); vs.forEach(r => { giKg += num(r.lpg) || 0; });
-    return { iso, plan, rows, planMT, first, drop, dailyPlan, giKg, dailyActual:giKg / 1000, warn, hasPlan:plan.length > 0, vanish:(vx || []).filter(v => +v.cx === 1), vanishLoaded:vx !== undefined };
+    return { iso, plan, rows, cands, reviewed, sig:rows.map(r => _cnPlates(r.plate).join('+') || r.customer).join('|'),
+             planMT, first, drop, dailyPlan, giKg, dailyActual:giKg / 1000, warn, hasPlan:plan.length > 0,
+             vanish:(vx || []).filter(v => +v.cx === 1), vanishLoaded:vx !== undefined };
   }
+  /* v4.216 — bảng chọn xe huỷ (nằm trong ô 🚫 Cancel list, thu gọn) */
+  function _cnPanel(CX){
+    const iso = CX.iso, SRC = { cancel:['🚫','Cancelled in Today Plan'], vanish:['🕳','Removed from Today Plan at paste'], removed:['📌','In the first plan, not in Today Plan now'] };
+    const th = t => '<th style="padding:3px 6px;border:1px solid #cbd5e1;background:#e2e8f0;text-align:left;white-space:nowrap">'+t+'</th>';
+    const tdc = (t, st) => '<td style="padding:3px 6px;border:1px solid #e2e8f0;'+(st||'')+'">'+t+'</td>';
+    let h = '<div style="padding:4px 2px">'+
+      '<div class="ml-cap" style="margin-bottom:4px">Tick the trucks that are <b>really cancelled</b> on '+esc(iso)+'. Only 🚫 Cancelled (set in Today Plan) is ticked for you — '+
+      'a truck removed from the plan may already be loaded, or be listed only for coordination.</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;flex-wrap:wrap">'+
+      '<button class="ml-mini" onclick="MAIL.cnAll(1)">☑ Tick all</button><button class="ml-mini" onclick="MAIL.cnAll(0)">☐ Untick all</button>'+
+      '<button class="ml-save" onclick="MAIL.cnOk()" title="Confirm this list for the mail and the Daily Stock file (Cancel List sheet)">✓ Confirm list ('+CX.rows.length+' cancelled)</button>'+
+      (CX.reviewed ? '<span class="ml-ok">✓ confirmed</span>' : '<span class="ml-cap" style="color:#b45309;font-weight:600">● not confirmed yet</span>')+'</div>'+
+      '<table style="border-collapse:collapse;font-size:11.5px;width:100%"><tr>'+th('✓')+th('Source')+th('Customer')+th('T/L')+th('Romooc')+th('Driver')+th('MT')+th('Note')+th('Check')+'</tr>';
+    CX.cands.forEach(c => {
+      const s = SRC[c.src] || ['',''], k = esc(c.key).replace(/'/g, '&#39;');
+      const chk = [];
+      if(c.loadedMT > 0) chk.push('<span style="color:#15803d;font-weight:600">✓ loaded today '+fmt(c.loadedMT,3)+' MT</span>');
+      if(c.inPlan) chk.push('<span style="color:#1d4ed8">still in Today Plan ('+esc(c.inPlan)+')</span>');
+      h += '<tr style="'+(c.sel ? 'background:#fef2f2' : 'opacity:.75')+'">'+
+        tdc('<input type="checkbox"'+(c.sel ? ' checked' : '')+' onchange="MAIL.cnPick(\''+k+'\',this.checked)">','text-align:center')+
+        tdc(s[0]+' <span class="ml-cap">'+s[1]+(c.by ? ' · by '+esc(c.by) : '')+'</span>')+
+        tdc(esc(c.customer))+tdc('<b>'+esc(c.plate || '(no truck)')+'</b>','white-space:nowrap')+tdc(esc(c.rmooc),'white-space:nowrap')+tdc(esc(c.driver))+
+        tdc(fmt(num(c.qty),3),'text-align:right')+tdc(esc(c.note))+tdc(chk.join('<br>'))+'</tr>';
+    });
+    return h + '</table></div>';
+  }
+  function cnPick(k, on){ _cnSel(ST.date)[k] = !!on; ST.cnOk = ST.cnOk || {}; delete ST.cnOk[ST.date]; _renderAll(); }
+  function cnAll(on){ const S = _cnSel(ST.date); p2Cancel(ST.date).cands.forEach(c => { S[c.key] = !!on; }); ST.cnOk = ST.cnOk || {}; delete ST.cnOk[ST.date]; _renderAll(); }
+  function cnOk(){ ST.cnOk = ST.cnOk || {}; ST.cnOk[ST.date] = true; const F = _fold(); F.cx = false; _lsSet('lpg_v4_mail_fold', F); _renderAll(); }
   function buildP2(){
     const iso = ST.date, prev = isoAdd(iso, -1);
     const tl = _tlDay(iso), vs = _vsRows().filter(r => r.giDate && anyIso(r.giDate) === iso);
@@ -510,9 +575,12 @@ const MAIL = (function(){
     if(!tl.length) warn.push('No TL Data rows with GI date '+iso+'.');
     /* ① xe huỷ (Today Plan) — v4.184: MAIL.p2Cancel (dùng chung với Cancel List của RPT) */
     const PD = (typeof PLANDAY !== 'undefined') ? PLANDAY : null;
-    if(PD && PD.get(iso) === undefined) PD.load(iso).then(() => { if(_isOpen() && ST.view === 'rep' && ST.rep === 'P2' && ST.date === iso) _renderAll(); });
+    /* v4.211 — mỗi ngày chỉ THỬ đọc MỘT lần/phiên: load() lỗi hoặc chưa có db thì không ghi cache ⇒ trước đây
+       vẽ lại → đọc lại → vẽ lại… vòng lặp vô tận (treo trình duyệt / đọc Firebase liên tục) */
+    const _ld = ST.p2ld || (ST.p2ld = {}), _rr = () => { if(_isOpen() && ST.view === 'rep' && ST.rep === 'P2' && ST.date === iso) _renderAll(); };
+    if(PD && PD.get(iso) === undefined && !_ld['pd|'+iso]){ _ld['pd|'+iso] = 1; PD.load(iso).then(_rr); }
     /* v4.187 — xe biến mất đã xác nhận: đọc Firebase MỘT lần khi mở P2 cho ngày đó */
-    if(typeof PLANCX !== 'undefined' && PLANCX.get(iso) === undefined) PLANCX.load(iso).then(() => { if(_isOpen() && ST.view === 'rep' && ST.rep === 'P2' && ST.date === iso) _renderAll(); });
+    if(typeof PLANCX !== 'undefined' && PLANCX.get(iso) === undefined && !_ld['cx|'+iso]){ _ld['cx|'+iso] = 1; PLANCX.load(iso).then(_rr); }
     const CX = p2Cancel(iso);
     const plan = CX.plan, cancel = CX.rows, planMT = CX.planMT, first = CX.first, drop = CX.drop, dailyPlan = CX.dailyPlan, giKg = CX.giKg;
     CX.warn.forEach(w => warn.push(w));
@@ -742,7 +810,7 @@ const MAIL = (function(){
       if(typeof DEWPT === 'undefined' || !DEWPT.c3Hist) return { warn:'Dew point history module not loaded — chart not included.' };
       if(!ST.dewHistReq){ ST.dewHistReq = true;
         DEWPT.c3Hist().then(() => { ST.dewHistErr = ''; if(_isOpen() && ST.rep === 'P3') _renderAll(); },
-                            e => { ST.dewHistErr = e.message || String(e); ST.dewHistReq = false; if(_isOpen() && ST.rep === 'P3') _renderAll(); }); }
+                            e => { ST.dewHistErr = e.message || String(e); if(_isOpen() && ST.rep === 'P3') _renderAll(); }); }   /* v4.211 — lỗi thì KHÔNG thử lại ngay (tránh vòng lặp vẽ lại ↔ đọc lại); mở lại email mới thử lại */
       return { warn: ST.dewHistErr ? 'Dew point history not loaded ('+ST.dewHistErr+') — chart not included.' : 'Loading dew point history for the chart…' };
     }
     const S = _dewSeries(d);
@@ -972,6 +1040,9 @@ const MAIL = (function(){
     }catch(e){ console.error(e); _toast('⚠ Heater file: '+e.message, 'er'); }
   }
   function buildP5(){
+    /* v4.210 — máy mở P5 mà chưa mở tab 🔥 Heater ⇒ tải dữ liệu heater (cửa sổ 3 tháng, MỘT lần) để email có số của chuyến;
+       máy khác không bao giờ tải */
+    try{ if(typeof HTRH !== 'undefined' && HTRH.S && !HTRH.S.loaded && !HTRH.S.loading) HTRH.refresh(); }catch(_){}
     const H = ST.heat, warn = [], days = heatDays();
     if(H.pending && H.pending.length) warn.push(H.pending.length+' PMS file(s) not recognised as Heater A or B — assign them (buttons above or Engineer ▸ 🔥 Heater).');
     if(!H.A) warn.push('Heater A PMS file (PRO2.FQT32331) not loaded.');
@@ -1168,7 +1239,7 @@ const MAIL = (function(){
         ST.files = ST.files.filter(f => !(f.auto && f.rep === 'P2'));      /* bỏ bản dựng trước */
         await _accFrom(out.blob);
         await attachBlob(out.blob, out.name, false);
-        const a = ST.files.find(f => f.name === out.name); if(a) a.date = iso;
+        const a = ST.files.find(f => f.name === out.name); if(a){ a.date = iso; a.cnSig = p2Cancel(iso).sig; }   /* v4.216 — nhớ danh sách huỷ lúc dựng */
         _toast('📎 '+out.name+' attached', 'ok');
       } else _toast('Report file not generated — see REPORT ▸ Daily Stock log', 'er');
     }catch(e){ console.error(e); _toast('⚠ Daily Stock file: '+e.message, 'er'); }
@@ -1475,11 +1546,13 @@ const MAIL = (function(){
     try{ MAILCFG.attach(); }catch(_){}
     if(rep && RP(rep)){ ST.rep = rep; ST.view = 'rep'; }
     if(!ST.date) ST.date = _defaultDate(ST.rep);
+    if(ST.dewHistErr){ ST.dewHistReq = false; ST.dewHistErr = ''; }   /* v4.211 — mở lại thì cho đọc lại lịch sử dew point */
     _el.classList.add('on');
     _renderAll();
   }
   function close(){ if(_dewDirty()){ _dewGuard(close); return; }      /* v4.207 */
-    if(_el) _el.classList.remove('on'); try{ if(typeof CONTACTS !== 'undefined') CONTACTS.setPreview(null); }catch(_){} }
+    if(_el) _el.classList.remove('on'); try{ if(typeof CONTACTS !== 'undefined') CONTACTS.setPreview(null); }catch(_){}
+    try{ if(typeof MAILCFG !== 'undefined' && MAILCFG.detach && !(ST.view === 'rc' && ST.rcDirty)) MAILCFG.detach(); }catch(_){} }   /* v4.210 — không giữ listener khi không làm email */
   function _defaultDate(rep){
     if(rep === 'P1'){ const t = isoToday(); return lotsOfDay(t).length ? t : (lastMixDay() || t); }
     if(rep === 'P6'){ const d = _sapDates(isoToday()); return d.length ? d[d.length-1] : isoToday(); }
@@ -1499,11 +1572,18 @@ const MAIL = (function(){
           '<div class="ml-nav" id="mlNav"></div>'+
           '<div class="ml-main" id="mlMain">'+
             '<div class="ml-opts" id="mlOpts"></div>'+
-            '<div class="ml-rcp" id="mlRcp"></div>'+
-            '<div class="ml-warn" id="mlWarn"></div>'+
-            '<div class="ml-subj"><span>Subject</span><input id="mlSubj" type="text" spellcheck="false"></div>'+
-            '<div class="ml-prev-hd"><span>Preview — click to edit text before sending</span><span id="mlEdited" class="ml-edited"></span></div>'+
-            '<div class="ml-prev" id="mlPrev" contenteditable="true" spellcheck="false"></div>'+
+            /* v4.211 — gọn phần đầu: người nhận / cảnh báo / xe huỷ thu thành nút-badge bấm mở; Subject + zoom trên CÙNG một hàng */
+            '<div class="ml-strip"><span class="ml-chips" id="mlChips"></span>'+
+              '<label class="ml-subj"><span>Subject</span><input id="mlSubj" type="text" spellcheck="false"></label>'+
+              '<span id="mlEdited" class="ml-edited"></span>'+
+              '<span class="ml-zoom" title="Preview size only — the mail itself is not changed">'+
+                '<button class="ml-mini" onclick="MAIL.zoom(-1)" title="Smaller">A−</button><button class="ml-mini ml-zv" id="mlZoomV" onclick="MAIL.zoom(0)" title="Back to 100%">100%</button><button class="ml-mini" onclick="MAIL.zoom(1)" title="Larger">A+</button></span>'+
+              '<button class="ml-mini ml-foc" id="mlFocBtn" onclick="MAIL.focus()" title="Focus: hide the report list and the options above to read the mail body on a small screen">⛶ Focus</button>'+
+            '</div>'+
+            '<div class="ml-pnl ml-rcp" id="mlRcp"></div>'+
+            '<div class="ml-pnl ml-warn" id="mlWarn"></div>'+
+            '<div class="ml-pnl ml-cxp" id="mlFold"></div>'+
+            '<div class="ml-prev" id="mlPrev" contenteditable="true" spellcheck="false" title="Click to edit text before sending"></div>'+
           '</div>'+
           '<div class="ml-main" id="mlRcMain" style="display:none"></div>'+
         '</div>'+
@@ -1518,15 +1598,53 @@ const MAIL = (function(){
       '</div>'+
       '<div class="ml-gate" id="mlGate" style="display:none"></div>';
     document.body.appendChild(_el);
+    _applyView();
     _el.addEventListener('mousedown', e => { if(e.target === _el) close(); });
     $('mlPrev').addEventListener('input', () => { ST.edited = true; $('mlEdited').textContent = '✎ edited'; });
     document.addEventListener('mailcfg:changed', () => { if(_el && _el.classList.contains('on') && ST.view === 'rep') _renderAll(); });
   }
   function _renderNav(){
-    $('mlNav').innerHTML = repKeys().map(k => { const R0 = RP(k);
-      return '<button class="ml-it'+(ST.view === 'rep' && k === ST.rep ? ' on' : '')+'" onclick="MAIL.pick(\''+k+'\')"><b>'+k+'</b> '+esc(R0.ttl)+'<small>'+esc(R0.sub)+'</small></button>'; }).join('') +
+    /* v4.211 — danh sách thu gọn được (« / ») — thu thì chỉ còn mã P1…P7, rê chuột xem tên */
+    $('mlNav').innerHTML = '<button class="ml-navtg" onclick="MAIL.navMin()" title="'+(_navMin() ? 'Show report names' : 'Collapse the list — more room for the mail')+'">'+(_navMin() ? '»' : '« collapse')+'</button>'+
+      repKeys().map(k => { const R0 = RP(k);
+      return '<button class="ml-it'+(ST.view === 'rep' && k === ST.rep ? ' on' : '')+'" onclick="MAIL.pick(\''+k+'\')" title="'+esc(k+' '+R0.ttl+' — '+R0.sub)+'"><b>'+k+'</b><span class="ml-it-t"> '+esc(R0.ttl)+'<small>'+esc(R0.sub)+'</small></span></button>'; }).join('') +
       '<div style="flex:1"></div>'+
-      '<button class="ml-it ml-it-rc'+(ST.view === 'rc' ? ' on' : '')+'" onclick="MAIL.recips()"><b>👥 Recipients</b><small>Directory · groups · who gets which mail</small></button>';
+      '<button class="ml-it ml-it-rc'+(ST.view === 'rc' ? ' on' : '')+'" onclick="MAIL.recips()" title="Recipients — directory · groups · who gets which mail"><b>👥</b><span class="ml-it-t"><b> Recipients</b><small>Directory · groups · who gets which mail</small></span></button>';
+  }
+  /* ── v4.211 — bố cục gọn cho laptop: thu danh sách · Focus · zoom preview · mở/đóng từng khối (nhớ theo máy) ── */
+  const FOLD_EL = { rcp:'mlRcp', warn:'mlWarn', cx:'mlFold' };
+  function _navMin(){ const v = _lsGet('lpg_v4_mail_navmin', null); return v === null ? window.innerWidth < 1600 : !!v; }
+  function _zoomV(){ const z = +_lsGet('lpg_v4_mail_zoom', 1.1); return z >= 0.6 && z <= 1.6 ? z : 1.1; }
+  function _applyView(){
+    if(!_el) return;
+    const box = _el.querySelector('.ml-box');
+    box.classList.toggle('nav-min', _navMin());
+    box.classList.toggle('ml-focus', !!ST.focus);
+    const b = $('mlFocBtn'); if(b){ b.textContent = ST.focus ? '⤡ Exit focus' : '⛶ Focus'; b.classList.toggle('on', !!ST.focus); }
+    const z = _zoomV(), pv = $('mlPrev'); if(pv) pv.style.zoom = z;
+    const zv = $('mlZoomV'); if(zv) zv.textContent = Math.round(z * 100) + '%';
+  }
+  function navMin(){ _lsSet('lpg_v4_mail_navmin', !_navMin()); _applyView(); _renderNav(); }
+  function focusT(){ ST.focus = !ST.focus; _applyView(); _placePop(); }
+  function zoom(d){ const z = d ? Math.round((_zoomV() + d * 0.1) * 10) / 10 : 1; _lsSet('lpg_v4_mail_zoom', Math.max(0.6, Math.min(1.6, z))); _applyView(); }
+  function _fold(){ return ST.fold || (ST.fold = _lsGet('lpg_v4_mail_fold', {})); }
+  function fold(k){ const F = _fold(); F[k] = !F[k]; _lsSet('lpg_v4_mail_fold', F); _renderChips(); _placePop(); }
+  function _renderChips(){
+    const el = $('mlChips'); if(!el) return;
+    const F = _fold(), r = recipients(ST.rep), A = ST.adj[ST.rep], w = ST.wN || 0;
+    const tg = (k, cls, html, tip) => '<button class="ml-tg '+cls+(F[k] ? ' open' : '')+'" onclick="MAIL.fold(\''+k+'\')" title="'+esc(tip)+'">'+html+'<span class="ml-car">'+(F[k] ? '▴' : '▾')+'</span></button>';
+    let h = '';
+    if(ST.big){ const kb = 'big_' + ST.big.k; if(F[kb] === undefined) F[kb] = !!ST.big.dflt; h += tg(kb, ST.big.cls, ST.big.html, ST.big.tip + ' — click to show / hide'); }
+    h += tg('rcp', r.noMail.length ? 'bad' : '', '👥 To <b>'+r.to.length+'</b> · CC <b>'+r.cc.length+'</b>'+(A && (A.to.length + A.cc.length + A.rm.length) ? ' <i>· changed</i>' : '')+(r.noMail.length ? ' · ⚠'+r.noMail.length : ''),
+      'Recipients — click to show / hide the list, add or remove people for this mail');
+    h += tg('warn', w ? 'warn' : 'ok', w ? '⚠ <b>'+w+'</b> to check' : '✓ Data OK', w ? 'Missing data / items to check — click to see the list. You will also be asked to confirm before sending.' : 'All data present — click to see details');
+    if(ST.cxHtml){ const C0 = ST.cnCur || { cands:[], reviewed:false };      /* v4.216 — bấm để hiện danh sách ứng viên, tick chọn xe huỷ */
+      h += tg('cx', C0.reviewed ? 'info' : 'warn', '🚫 Cancel list <b>'+ST.cxN+'</b>/'+C0.cands.length+(C0.reviewed ? ' ✓' : ' · pick'),
+        'Candidate trucks (🚫 Cancelled / removed from Today Plan) — click to show the list and tick the ones that are really cancelled'); }
+    el.innerHTML = h;
+    Object.keys(FOLD_EL).forEach(k => { const p = $(FOLD_EL[k]); if(p) p.classList.toggle('open', !!F[k] && !(k === 'cx' && !ST.cxHtml)); });
+    const bigOpen = !!(ST.big && F['big_' + ST.big.k]);
+    document.querySelectorAll('#mlOpts .ml-big').forEach(e => e.classList.toggle('open', bigOpen));
   }
   /* ô nhập nhỏ + nút lưu (dùng chung) */
   function inBox(label, val, ph, onSave, w, title){
@@ -1535,6 +1653,8 @@ const MAIL = (function(){
   }
   function _renderOpts(){
     const C = MAILCFG;
+    ST.cxHtml = ''; ST.cxN = 0; ST.cnCur = null;          /* v4.211 — khối xe huỷ (P2) nằm trong ô 🚫 thu gọn */
+    ST.big = null;                       /* v4.211 — khối nhập liệu lớn (P1 lot · P5 heater · P6 bảng kiểm) thu vào một nút-badge */
     let h = '<label>Date <input type="date" value="'+ST.date+'" onchange="MAIL.set(\'date\',this.value)"></label>';
     { const me = meId(), p = me ? P(me) : null;       /* v4.179 — From = tài khoản đang đăng nhập, không chọn tay */
       h += '<span class="ml-in" title="The sender is the account you are logged in with ('+esc(meEmail() || 'not logged in')+'). No signature is added — Outlook adds your own.">From <b>'+(p ? esc(p.n) : '<span style="color:#b91c1c">'+esc(meEmail() || '—')+'</span>')+'</b></span>'; }
@@ -1545,6 +1665,10 @@ const MAIL = (function(){
       if(Object.keys(ST.ovr).length) h += '<button class="ml-save" onclick="MAIL.ovrSaveAll()" title="Write every value typed below into its lot in Tank Log">💾 Save typed values to Tank Log</button>';
       h += '<div id="mlLotRes" class="ml-lots">'+_lotResults()+'</div>';
       const all = p1Lots();
+      { const nNeed = all.filter(r0 => { const r = withOvr(r0); return ['temp','pres','dens'].some(f => num(r[OVR_COLS[f]]) == null); }).length;
+        ST.big = { k:'P1', dflt:true, cls: nNeed ? 'warn' : (all.length ? 'ok' : ''), tip:'Lots in this mail — tick / untick, pumping order, missing T / P / ρ',
+                   html:'🧪 Lots <b>'+all.length+'</b>'+(nNeed ? ' · ⚠'+nNeed+' missing' : '') }; }
+      h += '<div class="ml-big">';
       h += '<div class="ml-lots">'+(all.length ? all.map(r0 => {
         const k = lotKey(r0), o = ST.order[k] || 'C4', r = withOvr(r0), ov = ST.ovr[k] || {};
         const cell = (f, lbl, w) => { const has = num(r[OVR_COLS[f]]) != null, typed = ov[f] != null && ov[f] !== '';
@@ -1560,6 +1684,7 @@ const MAIL = (function(){
       const sk = p1Skipped();
       if(sk.length) h += '<div class="ml-lots"><span class="ml-cap">Already sent — not in this mail (tick to send again):</span>'+sk.map(r =>
         '<label class="ml-lot"><input type="checkbox" onchange="MAIL.lot(\''+esc(lotKey(r))+'\',this.checked)"> '+esc(r[1])+' · '+esc(tankName(r[2]))+' '+sentBadge(r)+'</label>').join('')+'</div>';
+      h += '</div>';
     }
     if(ST.rep === 'P2'){
       /* v4.183 — kế hoạch đầu ngày ⟷ kế hoạch cuối + xe bị gỡ khỏi plan (tick bỏ được) */
@@ -1568,10 +1693,9 @@ const MAIL = (function(){
       if(f) h += '<span class="ml-cap" title="Saved once at the first paste / promote of the day (plan_day). The final plan is Today Plan now.">📌 First plan '+t2(f.at)+' ('+esc(f.src||'')+', '+esc(f.by||'')+'): <b>'+fmt(num(f.mt),3)+' MT</b> · '+(f.n||0)+' orders → final plan now <b>'+fmt(F.final,3)+' MT</b></span>'+
         (_canEditRc() ? ' <button class="ml-mini" onclick="MAIL.p2Record(true)" title="Admin: replace the first plan with Today Plan as it is now">↻ Re-record</button>' : '');
       else if(f === null) h += '<button class="ml-save" onclick="MAIL.p2Record(false)" title="No first plan was saved for this day. Keep Today Plan as it is now as the first plan.">📌 Record current plan as first plan</button>';
-      { const CXd = p2Cancel(ST.date); if(CXd.vanish.length) h += '<div class="ml-lots"><span class="ml-cap">🕳 Removed from Today Plan without a cancel note — confirmed at paste, counted as cancelled:</span>'+CXd.vanish.map(v => '<span class="ml-lot on">'+esc(v.p || '(no truck)')+' · '+esc(v.c)+' · '+fmt(num(v.q),3)+' MT'+(+v.n > 1 ? ' · 1 of '+v.n : '')+' <span class="ml-cap">by '+esc(v.by||'')+'</span></span>').join('')+'</div>'; }
-      if(F && F.drop.length) h += '<div class="ml-lots"><span class="ml-cap">In the first plan but no longer in Today Plan — counted as cancelled (untick if not):</span>'+F.drop.map(x => {
-        const k = ST.date + '|' + x.o + '|' + x.p;
-        return '<label class="ml-lot'+(ST.p2drop[k] !== false ? ' on' : '')+'"><input type="checkbox"'+(ST.p2drop[k] !== false ? ' checked' : '')+' onchange="MAIL.p2Drop(\''+esc(k)+'\',this.checked)"> '+esc(x.p || '(no truck)')+' · '+esc(x.c)+' · '+fmt(num(x.q),3)+' MT</label>'; }).join('')+'</div>';
+      /* v4.216 — xe huỷ: KHÔNG điền sẵn; bảng ứng viên nằm trong ô 🚫 Cancel list, người dùng tick chọn */
+      const CXd = p2Cancel(ST.date); ST.cxN = CXd.rows.length; ST.cnCur = CXd;
+      if(CXd.cands.length) ST.cxHtml = _cnPanel(CXd);
       /* v4.204 — ① chọn file (không xử lý) · ② bấm Build mới điền + lưu + đính kèm */
       const DS = ST.dsSrc, built = ST.files.find(f => f.auto && f.rep === 'P2');
       h += '<span><button class="ml-file ml-file-in" onclick="MAIL.dsPick(this)" title="Pick the Daily Stock report of the PREVIOUS day (.xlsx). Nothing is processed until you press ▶ Build report. The new report is saved in the SAME folder.">'+
@@ -1581,6 +1705,7 @@ const MAIL = (function(){
       h += '<button class="ml-save" onclick="MAIL.dsBuild()"'+(!DS || ST.dsBusy ? ' disabled style="opacity:.5;cursor:not-allowed"' : '')+
         ' title="Fill '+ST.date+' into the selected file, save the new report, attach it and fill the mail body">'+(ST.dsBusy ? '⏳ Building…' : '▶ Build report '+ST.date+' & attach')+'</button>';
       if(built && built.date && built.date !== ST.date) h += '<span class="ml-cap" style="color:#b45309">⚠ attached report is for '+esc(built.date)+'</span>';
+      else if(built && built.cnSig !== undefined && built.cnSig !== CXd.sig) h += '<span class="ml-cap" style="color:#b91c1c;font-weight:600">⚠ Cancel list changed after the report was built — press ▶ Build again</span>';
     }
     if(ST.rep === 'P3'){
       const d = ST.dew;
@@ -1602,6 +1727,11 @@ const MAIL = (function(){
           '<button onclick="HTR.assign('+i+',\'A\')">A</button><button onclick="HTR.assign('+i+',\'B\')">B</button></span>').join('')+'</div>' : '')+
         inBox('Vessel', H.vessel, 'e.g. BW VAR', "MAIL.heatSet('vessel',this.value)", 110)+
         inBox('Amount (ton)', H.amount, 'optional', "MAIL.heatSet('amount',this.value)", 80, 'Written to the Sumary sheet');
+      if(H.runs.length || H.start){
+        ST.big = { k:'P5', dflt:false, cls: H.start ? 'ok' : 'warn', tip:'Heater runs, START / STOP, save to Cavern Daily, master file and chart',
+                   html:'🔥 Heater run '+(H.start ? '<b>'+PMSHEAT.fmtTs(H.start).slice(5,16)+'</b>' : '<b>not set</b>') };
+        h += '<div class="ml-big">';
+      }
       if(H.runs.length){
         h += '<div class="ml-lots"><span class="ml-cap">Heater runs found:</span>'+H.runs.map((r,i) =>
           '<label class="ml-lot'+(i === H.run ? ' on' : '')+'"><input type="radio" name="mlRun"'+(i === H.run ? ' checked' : '')+' onchange="MAIL.heatRun('+i+')"> '+
@@ -1615,6 +1745,7 @@ const MAIL = (function(){
           (H.lastOut && !ST.files.some(f => f.rep === 'P5' && f.name === H.lastOut.name) ? '<button class="ml-save" onclick="MAIL.heatAttachLast()" title="Attach the report already built in Engineer ▸ 🔥 Heater">📎 Attach '+esc(H.lastOut.name)+'</button>' : '')+'</div>'+
           '<div class="ml-lots" style="display:block">'+heatChart()+'</div>';
       }
+      if(H.runs.length || H.start) h += '</div>';
     }
     if(ST.rep === 'P7'){
       /* v4.177 — chọn lot tàu (mới nhất trước); đổi Date ⇒ tự lấy lot của ngày đó */
@@ -1643,7 +1774,10 @@ const MAIL = (function(){
       h += '<label class="ml-file ml-file-in" title="Pick the LPG Cavern_SAP WMS Batch Stock file. The app shows which rows it will fill (this day and any empty days before it) and what is still missing; nothing is written until you press Fill & attach.">📂 Batch Stock file<input type="file" accept=".xlsx" onchange="MAIL.bsFile(this)"></label>';
       if(ST.bsF) h += '<span class="ml-cap"><b>'+esc(ST.bsF.name)+'</b> · fills '+(ST.bsPlan ? ST.bsPlan.dates.map(d => d.slice(8)+'/'+d.slice(5,7)).join(', ') : '…')+'</span>'+
         '<button class="ml-save" onclick="MAIL.bsBuild()" title="Fill the rows, download the file and attach it. Blocked while an item below still needs data or a decision.">⬇ Fill &amp; attach</button>';
-      h += '<div class="ml-swr">'+(typeof SWR !== 'undefined' ? SWR.html(_bsDates()) : '')+'</div>';
+      { let nOpen = 0; try{ nOpen = BSXL.check(_bsDates()).open || 0; }catch(_){}
+        ST.big = { k:'P6', dflt:false, cls: nOpen ? 'warn' : 'ok', tip:'Batch Stock check — the same check as LPG SALES ▸ SAP ▸ SAP WMS Report. Type the figure, confirm 0, price unchanged or skip.',
+                   html:'📋 Batch Stock check '+(nOpen ? '· ⚠ <b>'+nOpen+'</b> open' : '· ✓ ready') }; }
+      h += '<div class="ml-big ml-swr">'+(typeof SWR !== 'undefined' ? SWR.html(_bsDates()) : '')+'</div>';
     }
     $('mlOpts').innerHTML = h;
   }
@@ -1752,9 +1886,11 @@ const MAIL = (function(){
     _cur = o;
     _renderOpts(); _renderRcp();
     $('mlSubj').value = o.subject;
-    const w = _allWarn(o);
+    const w = _allWarn(o); ST.wN = w.length;
+    $('mlFold').innerHTML = ST.cxHtml || ''; $('mlFold').style.maxHeight = ST.rep === 'P2' ? '46vh' : '';   /* v4.216 — bảng chọn xe huỷ cần chỗ hơn 130px */
     $('mlWarn').innerHTML = (w.length ? '<div class="ml-wh">⚠ '+w.length+' item(s) to check — you will be asked to confirm before sending</div>' : '<div class="ml-okh">✓ All data present</div>') +
       w.map(x=>'<div>• '+x+'</div>').join('') + (o.attach ? '<div class="ml-att">📎 Expected attachment: <b>'+esc(o.attach)+'</b></div>' : '');
+    _renderChips(); _applyView();
     $('mlPrev').innerHTML = _polish(o.body);   /* v4.192 bảng thụt lề + dòng đệm · v4.181 — không kèm chữ ký (Outlook tự thêm) */
     ST.edited = false; $('mlEdited').textContent = '';
     _renderFiles();
@@ -2330,7 +2466,6 @@ const MAIL = (function(){
   }
   function dirSort(k){ ST.dirSort = ST.dirSort === k ? '' : k; _renderRc(); }
   /* v4.183 — P2: xe bị gỡ khỏi plan có tính là huỷ không · ghi tay kế hoạch đầu ngày */
-  function p2Drop(k, on){ ST.p2drop = ST.p2drop || {}; ST.p2drop[k] = !!on; _renderAll(); }
   function p2Record(force){
     if(typeof PLANDAY === 'undefined') return;
     if(force && !confirm('Replace the first plan of '+ST.date+' with Today Plan as it is NOW?\nThe original first plan will be lost.')) return;
@@ -2547,13 +2682,13 @@ const MAIL = (function(){
 
   return {
     init, open, close, pick, set, lot, lotSearch, vlot, openVessel, ord:ordT, ovr, ovrSave, ovrSaveAll, dew, dewSave, dewRange, dewCopyChart, _dewDraw, _dewSeries,
-    rcpFocus, rcpSearch, rcpAdd, rcpRm, rcpReset,
+    rcpFocus, rcpSearch, rcpAdd, rcpRm, rcpReset, fold, zoom, navMin, focus:focusT,
     heatFiles, heatRun, heatSet, heatSave, heatMaster, heatAttachLast, heatChartHtml, refreshIf, dewReload,
     bsFile, bsBuild, ol1Save, priceSave, dsFile, dsPick, dsBuild, dsClear,
     pickFiles, dropFile, eml, copyBody, mailto, copyList, _gateClose,
     recips, rcSet, rcGroup, rcSender, rcRoute, rcAdd, rcDel, rcReset, rcSave,
     ctSearch, ctAdd, ctImport, ctCancel, ctSave, dirFilter, dirSort,
-    p2Drop, p2Record, _p1Skipped:p1Skipped, p2Cancel,
+    p2Record, _p1Skipped:p1Skipped, p2Cancel, cnPick, cnAll, cnOk,
     rcGrpAdd, rcGrpRen, rcGrpDel, rcMailAdd, rcMailRen, rcMailDel, rcCol, cxEdit, cxSet, cxCancel, cxPreview, cxSave,
     ctNewOpen, ctNewFrom, ctNewSet, ctNewCancel, ctNewAdd, ctxDel,
     rcRouteSet, rcGrpMember, rcMailGrp, rcTab, rcSel, rcFind, rcDelId, rcCtToggle, rcPickQ, rcPickAdd, rcPQ, rcPMissT, rcPAllT,

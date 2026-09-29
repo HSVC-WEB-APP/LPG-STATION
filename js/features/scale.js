@@ -474,6 +474,7 @@ const SCALE = (function(){
        Today Plan không bao giờ lệch nhau nữa. */
     let planTotalMt = 0, planDoneLoadMt = 0, planRowCount = 0, planDoneCount = 0;
     const hasTP = (typeof TP !== 'undefined' && TP.PLAN);
+    let _typeRows = [];          /* v4.213 — giữ lại để chia PLAN theo loại hàng (50:50 · 70:30 …) */
     if(hasTP){
       /* v4.141 — cộng đúng những ngày ĐANG BÁN ĐƯỢC (MDAY.allows), không phải
          cứng "hôm nay". Bật 📆 MULTI-DAY mà tổng vẫn chỉ đếm hôm nay thì xe
@@ -483,6 +484,7 @@ const SCALE = (function(){
         if(!MDAY.allows(String(r._forDate || '').trim())) return false;
         return (parseFloat(r.qty || 0) || 0) > 0;            /* qty only — no contractQty */
       });
+      _typeRows = todayRows;
       if(typeof TP.lnkTotals === 'function'){
         const t = TP.lnkTotals(todayRows);
         planTotalMt = t.planMT; planDoneLoadMt = t.loadedMT;
@@ -539,6 +541,23 @@ const SCALE = (function(){
         if(wrap) wrap.title='Loaded '+fmtMt(planDoneLoadMt)+' / '+fmtMt(planTotalMt)+' MT';
       }
     })();
+
+    /* ⭐ v4.213 — PLAN CHIA THEO LOẠI HÀNG. Tổng chung không cho thấy 70:30 còn
+       bao nhiêu, trong khi mỗi loại đi một lot / một bồn khác nhau. Mỗi nhóm
+       cộng bằng CHÍNH TP.lnkTotals (thu gọn nhóm ALT) nên tổng các dòng luôn
+       khớp số tổng ở trên. Trống loại ⇒ "50:50 ?" như chip trên thẻ trạm. */
+    try{
+      if(typeof SCX2 !== 'undefined' && SCX2.renderPlanBreak){
+        let groups = null;
+        if(hasTP && typeof TP.lnkTotals === 'function'){
+          const g = {};
+          _typeRows.forEach(r => { const k = _scProdRatio(r.type) || '50:50 ?'; (g[k] = g[k] || []).push(r); });
+          groups = Object.keys(g).map(k => Object.assign({ type:k, special:(k !== '50:50' && k !== '50:50 ?') }, TP.lnkTotals(g[k])))
+                                 .filter(x => x.planCnt > 0);
+        }
+        SCX2.renderPlanBreak(groups);
+      }
+    }catch(_){}
 
     /* Row 2: cross-tank STOCK total (TK-3501 + TK-3502) is owned by
        INV.renderRow1 (called below). It runs on every INV change, so the

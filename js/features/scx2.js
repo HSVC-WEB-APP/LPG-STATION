@@ -78,7 +78,11 @@ const SCX2 = (function(){
       +   '<button onclick="'+stop+'TKC.open(\''+sloc+'\',\'split\')"'
       +     ' title="Split a quantity into C3/C4 on the WMS basis — one number, the export list, or a truck loaded from both tanks">🧮 Split</button>'
       + '</div>';
-      main.appendChild(box);
+      /* v4.212 — gắn vào CẢ THẺ (dưới quả cầu + cột số) thay vì cột số bên phải:
+         cột số chỉ rộng ~150px nên ba nút ⚖ Stock · 📏 Recon · 🧮 Split bị cắt chữ
+         thành "St… R… S…" trên laptop. Nay hàng nút dài bằng cả thẻ. */
+      const card = document.getElementById('scTk'+n+'Card');
+      (card || main).appendChild(box);
     });
   }
 
@@ -124,6 +128,7 @@ const SCX2 = (function(){
   function renderTankExtras(){
     if(!_on) return;
     renderDens();
+    try{ renderPace(); }catch(_){}            /* v4.218 — ⏱ LOADING PACE thay khối BY TANK */
     if(typeof INV === 'undefined' || !INV.stockFor) return;
     [['2100',1],['2101',2]].forEach(([sloc, n])=>{
       const el = document.getElementById('scx2Open'+n);
@@ -293,6 +298,20 @@ const SCX2 = (function(){
       certCell.classList.add('scx2-certcell');
       certCell.appendChild(certRes);
       infoH.appendChild(planCell);
+      /* v4.213 — hai khối chi tiết nằm DƯỚI vòng tròn: BY PRODUCT TYPE · (v4.218) ⏱ LOADING PACE.
+         Chỉ hiện khi thẻ đủ rộng + đủ cao (container query, xem core.css v4.213);
+         màn nhỏ tự ẩn, số chi tiết vẫn đọc được bằng tooltip trên vòng tròn. */
+      try{
+        const halves = planCell.querySelectorAll('.sc-r1-plan-half');
+        [['scx2PlanBrk', 0], ['scx2StockBrk', 1]].forEach(([id, i]) => {
+          const hf = halves[i]; if(!hf || document.getElementById(id)) return;
+          const d = document.createElement('div'); d.id = id; d.className = 'scx2-brk empty';
+          const row = hf.querySelector('.sc-pp-row');
+          if(row && row.nextSibling) hf.insertBefore(d, row.nextSibling); else hf.appendChild(d);
+        });
+        if(_lastPlan) renderPlanBreak(_lastPlan);
+        _paceTick();
+      }catch(_){}
       infoH.appendChild(queueCell);
       infoH.appendChild(certCell);
       dockH.appendChild(dock);
@@ -311,10 +330,126 @@ const SCX2 = (function(){
     }
   }
 
+  /* ══ v4.213 — PLAN theo LOẠI HÀNG + STOCK theo BỒN ════════════════════
+     Số đều là RAM (không đọc/ghi Firebase): nhóm loại hàng do SCALE._updateRow1
+     tính bằng TP.lnkTotals, tồn bồn lấy INV.stockFor — cùng nguồn với vòng tròn. */
+  const _esc = t => String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const _f3  = v => (+v||0).toLocaleString('en-US',{ minimumFractionDigits:3, maximumFractionDigits:3 });
+  const _kg  = v => Math.round(+v||0).toLocaleString('en-US');
+  let _lastPlan = null;
+  function renderPlanBreak(groups){
+    _lastPlan = groups || null;
+    const el = document.getElementById('scx2PlanBrk');
+    if(!el) return;
+    if(!groups || !groups.length){ el.innerHTML = ''; el.classList.add('empty'); try{ renderPace(); }catch(_){} return; }
+    el.classList.remove('empty');
+    const ord = t => t === '50:50' ? 0 : (t === '50:50 ?' ? 1 : 2);
+    const G = groups.slice().sort((a, b) => ord(a.type) - ord(b.type) || b.planMT - a.planMT);
+    const max = Math.max.apply(null, G.map(g => g.planMT)) || 1;
+    let h = '<div class="scx2-brk-hd"><span>BY PRODUCT TYPE</span></div>'
+          + '<div class="scx2-bt hd"><span>TYPE</span><span>PLAN</span><span>LOADED</span><span>REMAIN</span><span>TRIPS</span></div>';
+    const tip = [];
+    G.forEach(g => {
+      const pL = g.planMT > 0 ? Math.min(1, g.loadedMT / g.planMT) : 0;
+      const t = g.type + ': plan ' + _f3(g.planMT) + ' · loaded ' + _f3(g.loadedMT) + ' · remain ' + _f3(g.remainMT) + ' MT · ' + g.doneCnt + '/' + g.planCnt + ' trips';
+      tip.push(t);
+      h += '<div class="scx2-br'+(g.special ? ' sp' : '')+(g.type === '50:50 ?' ? ' unk' : '')+'" title="'+_esc(t + (g.type === '50:50 ?' ? ' — Sale Plan has no type; printed as 50:50' : ''))+'">'
+         +   '<div class="scx2-bt"><span class="ty">'+(g.special ? '⚠ ' : '')+_esc(g.type)+'</span>'
+         +     '<span class="n">'+_f3(g.planMT)+'</span><span class="n ld">'+_f3(g.loadedMT)+'</span>'
+         +     '<span class="n rm">'+_f3(g.remainMT)+'</span><span class="n tr">'+g.doneCnt+'/'+g.planCnt+'</span></div>'
+         +   '<div class="scx2-bar"><i style="width:'+(g.planMT / max * 100).toFixed(1)+'%"><b style="width:'+(pL * 100).toFixed(1)+'%"></b></i></div>'
+         + '</div>';
+    });
+    el.innerHTML = h;
+    try{ renderPace(); }catch(_){}            /* v4.218 — vẽ lại cùng lượt với PLAN (TL Data vừa đổi) */
+    /* màn nhỏ khối này ẩn ⇒ rê chuột lên vòng tròn PLAN vẫn đọc được từng loại */
+    const w = document.getElementById('scPlanDonutWrap');
+    if(w){ const base = String(w.title || '').split('\n')[0]; w.title = base + '\n' + tip.join('\n'); }
+  }
+  /* ══ ⭐ v4.218 — ⏱ LOADING PACE & ETA (thay khối BY TANK của v4.213) ═════════
+     BY TANK chỉ lặp lại số của hai thẻ bồn ⇒ gỡ. Chỗ đó nay trả lời câu hỏi mà
+     chưa màn nào trả lời: "HÔM NAY NẠP NHANH HAY CHẬM, BAO GIỜ XONG KẾ HOẠCH?"
+       • cột t/giờ theo giờ cân lần 2 (timeOut) của TL Data hôm nay
+       • tốc độ 2 giờ gần nhất · trung bình ngày · xe/giờ · thời gian xe ở trạm
+         (cân lần 1 → cân lần 2)
+       • REMAIN của kế hoạch (cùng số với vòng PLAN) ÷ tốc độ ⇒ giờ xong dự kiến
+     Toàn bộ tính trên RAM (TL.ROWS) — không đọc/ghi Firebase.
+     ⛔ v4.220 — ĐÃ BỎ REMAIN → ETA (user: xe chưa vào nhà máy thì không nạp được, ETA theo tốc độ nạp là vô nghĩa). */
+  const _p2 = x => String(x).padStart(2, '0');
+  function _dKey(s){
+    s = String(s || '');
+    let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return _p2(+m[3]) + '/' + _p2(+m[2]) + '/' + m[1].slice(-2);
+    m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); return m ? _p2(+m[1]) + '/' + _p2(+m[2]) + '/' + m[3].slice(-2) : '';
+  }
+  function _mins(t){ const m = String(t || '').match(/(\d{1,2})\s*[:h.]\s*(\d{2})/); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; }
+  function _hm(min){ min = Math.round(min); const d = Math.floor(min / 1440); min -= d * 1440; return _p2(Math.floor(min / 60)) + ':' + _p2(min % 60) + (d ? ' (+' + d + 'd)' : ''); }
+  function _tlToday(){
+    const d = new Date(), key = _p2(d.getDate()) + '/' + _p2(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(-2);
+    let R = [];
+    try{ const X = (typeof TL !== 'undefined' && TL.ROWS) ? TL.ROWS : []; R = Array.isArray(X) ? X : Object.values(X); }catch(_){}
+    return R.filter(r => r && !r.disabled && _dKey(r.date || r.giDate) === key);
+  }
+  function paceStats(rows, nowMin, remainMT){
+    const B = {}, seen = new Set(), dur = [];
+    let tons = 0, trips = 0, first = null, winT = 0, winN = 0;
+    rows.forEach(r => {
+      const kg = parseFloat(String(r.lpgQty || '').replace(/,/g, '')) || 0;
+      const tIn = _mins(r.timeIn), tOut = _mins(r.timeOut), at = tOut != null ? tOut : (kg > 0 ? tIn : null);   /* chưa cân lần 2 ⇒ xe còn ở trạm, chưa tính */
+      const g = String(r.mdoG || '').trim(), key = g ? 'M|' + g : [r.doNo, r.truck, r.scaleNo, r.turn].join('|');
+      const newTrip = !seen.has(key); seen.add(key);
+      tons += kg / 1000; if(newTrip) trips++;
+      const st = tIn != null ? tIn : at; if(st != null && (first == null || st < first)) first = st;
+      if(tIn != null && tOut != null){ let d = tOut - tIn; if(d < 0) d += 1440; if(d > 0 && d < 600 && newTrip) dur.push(d); }
+      if(at == null || at > nowMin) return;
+      const h = Math.floor(at / 60); B[h] = B[h] || { t:0, n:0 }; B[h].t += kg / 1000; if(newTrip) B[h].n++;
+      if(at >= nowMin - 120){ winT += kg / 1000; if(newTrip) winN++; }
+    });
+    const span = first == null ? 0 : Math.min(120, nowMin - first);
+    const rate2 = span >= 20 ? winT / (span / 60) : 0;
+    const dayH = first == null ? 0 : (nowMin - first) / 60;
+    const rateD = dayH >= 0.33 ? tons / dayH : 0;
+    const rate = rate2 > 0 ? rate2 : rateD;
+    const eta = remainMT > 0 && rate > 0 ? nowMin + remainMT / rate * 60 : null;
+    return { B, tons, trips, first, rate2, rateD, truckH: span >= 20 ? winN / (span / 60) : 0,
+             stay: dur.length ? dur.reduce((a, b) => a + b, 0) / dur.length : null, stayN: dur.length, rate, eta };
+  }
+  function renderPace(){
+    const el = document.getElementById('scx2StockBrk');
+    if(!el) return;
+    const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+    /* v4.220 — BỎ dòng REMAIN → ETA: xe chưa vào nhà máy thì không có gì để nạp, nên
+       không suy giờ xong kế hoạch từ tốc độ nạp được. Chỗ trống dành cho biểu đồ giờ cao điểm. */
+    const S = paceStats(_tlToday(), nowMin, 0);
+    const hNow = now.getHours(), h0 = S.first == null ? hNow : Math.min(hNow, Math.floor(S.first / 60));
+    const hs = []; for(let h = Math.max(0, Math.min(h0, hNow - 5)); h <= hNow; h++) hs.push(h);
+    const vals = hs.map(h => (S.B[h] || {}).t || 0), max = Math.max.apply(null, vals.concat([1]));
+    const peakH = vals.some(v => v > 0) ? hs[vals.indexOf(Math.max.apply(null, vals))] : -1;
+    const f1 = v => (+v || 0).toFixed(1), f0 = v => Math.round(+v || 0);
+    let h = '<div class="scx2-brk-hd"><span>⏱ RUSH HOUR — LOADED PER HOUR</span><span class="u">t · trucks (2nd weighing)</span></div>';
+    h += '<div class="scx2-pc-ch">' + hs.map(x => {
+      const b = S.B[x] || { t:0, n:0 }, cur = x === hNow, pk = x === peakH;
+      return '<div class="scx2-pc-c' + (cur ? ' now' : '') + (pk ? ' peak' : '') + '" title="' + _p2(x) + ':00–' + _p2(x) + ':59 · ' + f1(b.t) + ' t · ' + b.n + ' truck(s)' + (pk ? ' · busiest hour' : '') + (cur ? ' · hour in progress' : '') + '">'
+           + '<span class="v">' + (b.t ? f0(b.t) : '') + '</span><span class="b"><i style="height:' + (b.t / max * 100).toFixed(1) + '%"></i></span>'
+           + '<span class="h">' + _p2(x) + '</span><span class="n">' + (b.n ? b.n + '🚚' : '') + '</span></div>';
+    }).join('') + '</div>';
+    const k = (lab, val, tip, cls) => '<span class="scx2-pc-k' + (cls ? ' ' + cls : '') + '" title="' + _esc(tip) + '"><i>' + lab + '</i><b>' + val + '</b></span>';
+    h += '<div class="scx2-pc-ks">'
+       + k('LAST 2 H', S.rate2 ? f0(S.rate2) + ' t/h' : '—', 'Tonnes weighed out in the last 2 hours ÷ elapsed time')
+       + k('DAY AVG', S.rateD ? f0(S.rateD) + ' t/h' : '—', 'All tonnes today ÷ time since the first truck weighed in (' + (S.first != null ? _hm(S.first) : '—') + ')')
+       + k('PEAK', peakH >= 0 ? _p2(peakH) + 'h · ' + f0(vals[hs.indexOf(peakH)]) + ' t' : '—', 'Busiest hour today')
+       + k('IN STATION', S.stay != null ? f0(S.stay) + ' min' : '—', 'Average 1st → 2nd weighing time (' + S.stayN + ' trucks with both times) · ' + S.trips + ' trips · ' + f1(S.tons) + ' t today', S.stay != null && S.stay > 60 ? 'warn' : '')
+       + '</div>';
+    el.innerHTML = h;
+    el.classList.remove('empty');
+  }
+  const renderStockBreak = renderPace;      /* tên cũ — INV / các chỗ gọi cũ vẫn chạy */
+  let _paceTmr = null;
+  function _paceTick(){ if(_paceTmr) return; _paceTmr = setInterval(() => { try{ if(document.getElementById('scx2StockBrk')) renderPace(); }catch(_){} }, 60000); }
+
   function toggleRpt(){
     const p = document.getElementById('scx2RptPop');
     if(p) p.classList.toggle('on');
   }
 
-  return { init, renderTankExtras, renderDens, toggleRpt };
+  return { init, renderTankExtras, renderDens, toggleRpt, renderPlanBreak, renderStockBreak, renderPace, paceStats };
 })();

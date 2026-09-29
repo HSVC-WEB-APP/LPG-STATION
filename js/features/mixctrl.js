@@ -402,13 +402,79 @@ const MC = (function(){
   }
 
   /* ---------- duplicate-lot check (RAM-only — reads ENG.ROWS) ---------- */
+  /* ═══ v4.215 — DẢI CẢNH BÁO trên hàng LOT (chỗ trống giữa trạng thái và ngày giờ)
+     Mọi cảnh báo của bồn gom về MỘT chỗ ngay tầm mắt, chữ to, có màu — trước đây
+     nằm rải rác bằng chữ nhỏ phía dưới (vd. thiếu CURRENT C3 ⇒ odorant không tính,
+     user không thấy). Bấm một ô ⇒ nhảy tới đúng chỗ cần sửa. Chỉ ĐỌC dữ liệu đang
+     có trên form (RAM), không tính gì mới, không đụng Firebase. */
+  const DUP = { '1':null, '2':null };
+  function _warnList(n){
+    const W = [];
+    if(ST[n] === 'idle') return W;
+    const add = (lv, t, tip, go) => W.push({ lv, t, tip: tip || t, go });
+    if(DUP[n]) add('bad', 'Lot '+DUP[n].lot+' already in Tank Log', DUP[n].name+' · '+DUP[n].tank+' · '+DUP[n].date+' · '+DUP[n].q+' — enter a different lot number', 'mc-l'+n);
+    if(OVER_HARD[n]) add('bad', 'TARGET VOL over 90% cap', 'Final volume is above the 90% tank limit — ▶START is blocked', 'mc-tv'+n);
+    else if(OVER_WARN[n]) add('warn', 'TARGET VOL high-risk zone', 'Final volume is above the warning level — ▶START needs a second confirmation', 'mc-tv'+n);
+    const iv = _gnum('mc-iv'+n), tv = _gnum('mc-tv'+n), tr = _gnum('mc-tr'+n), cr = _gnum('mc-cr'+n);
+    if(!cr){
+      const h = (_gid('mc-h'+n) || {}).textContent || '';
+      add('warn', 'CURRENT C3 % empty', (h ? h + ' — ' : '') + 'switch the badge to MANUAL and type it', 'mc-cr'+n);
+    }
+    const miss = [];
+    if(!iv) miss.push(['INIT VOL','mc-iv'+n]); if(!tv) miss.push(['TARGET VOL','mc-tv'+n]);
+    if(!tr) miss.push(['TARGET C3 %','mc-tr'+n]); if(!cr) miss.push(['CURRENT C3 %','mc-cr'+n]);
+    /* v4.219 — lúc đang nhập (calc) các ô này là ô bắt buộc của CALCULATE, báo "odorant" là sai chỗ;
+       chỉ báo khi ĐÃ ▶START mà vẫn thiếu (odorant BD SET sẽ không vào Tank Log) */
+    if(miss.length && ST[n] !== 'calc') add('bad', 'Odorant not calculated', 'Odorant (BD SET) is only written to the Tank Log when INIT VOL, TARGET VOL, TARGET C3 % and CURRENT C3 % are all filled. Missing: '+miss.map(x=>x[0]).join(', '), miss[0][1]);
+    const q = ALTR[n] && ALTR[n].coq;
+    if((GCR[n] || _gnum('gc'+n+'-fvol')) && q && q.error) add('bad', 'COQ not computed', q.error, 'mc-alt'+n);
+    if(GCR[n] && q && !q.error && GCR[n].fLPG){
+      const p = (q.fLPG - GCR[n].fLPG) / GCR[n].fLPG * 100;
+      if(Math.abs(p) >= 3) add('warn', 'COQ vs GC Δ '+(p >= 0 ? '+' : '')+p.toFixed(1)+'%', 'Filled LPG by COQ differs from GC by more than 3% — check the COQ figures', 'mc-gcres'+n);
+    }
+    if(GCR[n]){ try{ const ev = evalQuality(n); if(ev.fails.length) add('bad', 'Quality FAIL ('+ev.fails.length+')', ev.fails.join(' · '), 'mc-qc'+n); }catch(_){} }
+    return W;
+  }
+  function _renderWarnbar(n){
+    const el = _gid('mc-wb'+n);
+    if(!el) return;
+    const W = _warnList(n);
+    if(!W.length){ el.innerHTML = ''; el.classList.remove('on'); return; }
+    W.sort((a, b) => (a.lv === 'bad' ? 0 : 1) - (b.lv === 'bad' ? 0 : 1));
+    /* hiện nhiều nhất số ô VỪA CHỖ (đo thật), phần còn lại gom vào "+N" — bấm để xem hết */
+    el.classList.add('on');
+    _WB[n] = W;
+    const draw = k => {
+      const shown = W.slice(0, k), more = W.length - k;
+      el.innerHTML = shown.map(w => '<button type="button" class="mc-wchip '+w.lv+(k === 1 ? ' solo' : '')+'" title="'+_escHtml(w.tip).replace(/"/g,'&quot;')+'" onclick="MC.warnGo(\''+w.go+'\')">'+(w.lv === 'bad' ? '⛔ ' : '⚠ ')+_escHtml(w.t)+'</button>').join('')
+        + (more > 0 ? '<button type="button" class="mc-wchip more" onclick="MC.warnAll(\''+n+'\')" title="Show all warnings of this tank">+'+more+' more</button>' : '');
+    };
+    let k = Math.min(W.length, 4);
+    draw(k);
+    while(k > 1 && el.scrollWidth > el.clientWidth + 1){ k--; draw(k); }
+  }
+  const _WB = { '1':[], '2':[] };
+  function warnAll(n){
+    const W = _WB[n] || [];
+    if(!W.length) return;
+    UIDLG.alert('⚠ TK-'+(n === '1' ? '3501' : '3502')+' — '+W.length+' WARNING'+(W.length > 1 ? 'S' : '')+'\n\n'
+      + W.map(w => (w.lv === 'bad' ? '⛔ ' : '⚠ ') + w.t + ': ' + w.tip).join('\n'));
+  }
+  function warnGo(id){
+    const e = _gid(id); if(!e) return;
+    try{ e.scrollIntoView({ behavior:'smooth', block:'center' }); }catch(_){}
+    if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !e.readOnly){ try{ e.focus({ preventScroll:true }); }catch(_){} }
+    e.classList.add('mc-flash'); setTimeout(() => e.classList.remove('mc-flash'), 1600);
+  }
+
   function checkDupLot(n){
     const lotEl = _gid('mc-l'+n);
     if(!lotEl) return;
     /* v4.85.1 — đổi lot thì trạng thái ĐẦU của cách 2 phải lấy lại theo lot mới */
     try{ _autoFillIcq(n); }catch(_){}
     const val = parseInt(lotEl.value);
-    if(!val || val <= 0) return;
+    if(val > 0 && DUP[n] && DUP[n].lot !== val) DUP[n] = null;      /* v4.215 — gõ lot khác thì gỡ cảnh báo trùng */
+    if(!val || val <= 0){ _renderWarnbar(n); return; }
     const tk = n==='1' ? '3501' : '3502';
     const otherN = n==='1' ? '2' : '1';
     const otherLot = parseInt(_gid('mc-l'+otherN)?.value) || 0;
@@ -439,6 +505,8 @@ const MC = (function(){
               '• Quality: '+statusTxt+'\n\n'+
               'Please use a different lot number.');
         toast('❌ Lot '+val+' already exists in Tank Log','er');
+        DUP[n] = { lot:val, name:_lotName(val), tank:String(r[2]||''), date:String(r[3]||''), q:statusTxt };
+        _renderWarnbar(n);
         lotEl.value = ''; lotEl.focus();
         return;
       }
@@ -498,6 +566,7 @@ const MC = (function(){
 
   /* ---------- panel state rendering ---------- */
   function _renderStatus(n){
+    try{ setTimeout(()=>_renderWarnbar(n), 0); }catch(_){}
     const badge = _gid('mc-status'+n);
     const hdr = _gid('mc-hdr'+n);
     if(!badge || !hdr) return;
@@ -925,7 +994,7 @@ const MC = (function(){
 
   /* v4.67 — SPECIAL RATIO toggle (exclusive with LOW PRESSURE)
      v4.77 — also exclusive with FILL C3/C4 ONLY */
-  function toggleSP(n){
+  async function toggleSP(n){
     /* ── v4.79 (R9) — Ô "TARGET C3 %" ĐỔI NGHĨA khi bật/tắt SPECIAL RATIO
        • TẮT SP: số nhập = tỉ lệ C3 PHA TRONG BỒN
        • BẬT SP: số nhập = tỉ lệ C3 CUỐI CÙNG **sau khi tuần hoàn ống**
@@ -938,7 +1007,7 @@ const MC = (function(){
       const toOn = !SP[n];
       let ok = true;
       try{
-        ok = confirm('TK-'+tk+' — '+(toOn ? 'BẬT' : 'TẮT')+' ★ MIX TỈ LỆ ĐẶC BIỆT\n\n'
+        ok = await UIDLG.ask('TK-'+tk+' — '+(toOn ? 'BẬT' : 'TẮT')+' ★ MIX TỈ LỆ ĐẶC BIỆT\n\n'
           + 'Ô TARGET C3 % sẽ ĐỔI Ý NGHĨA:\n'
           + (toOn
               ? '  • Trước: tỉ lệ C3 pha TRONG BỒN\n  • Sau  : tỉ lệ C3 CUỐI CÙNG (sau khi tuần hoàn ống)\n'
@@ -1022,6 +1091,15 @@ const MC = (function(){
   }
 
   /* ---------- main mass-balance calc (RAM) ---------- */
+  /* v4.219 — các ô BẮT BUỘC để tính STOP C3 / STOP C4 (cùng điều kiện với _calcOne) */
+  function _calcMissing(n){
+    const M = [];
+    if(!(_gnum('mc-iv'+n) > 0)) M.push(['INIT VOL (m³)', 'mc-iv'+n, 'LPG volume already in the tank (heel) before mixing']);
+    if(!FILL[n] && !(_gnum('mc-tv'+n) > 0)) M.push(['TARGET VOL (m³)', 'mc-tv'+n, 'final volume after mixing']);
+    if(!(_gnum('mc-tr'+n) > 0)) M.push(['TARGET C3 %', 'mc-tr'+n, 'C3 %vol wanted at the end']);
+    if(!(_gnum('mc-cr'+n) > 0)) M.push(['CURRENT C3 %', 'mc-cr'+n, 'C3 %vol of the heel (AUTO from the previous lot, or MANUAL)']);
+    return M;
+  }
   function _calcOne(n){
     const tk = n==='1' ? '3501' : '3502';
     const iv = _gnum('mc-iv'+n);
@@ -1036,7 +1114,7 @@ const MC = (function(){
     resEl.classList.remove('mc-res-over');
     const fm = FILL[n];   /* v4.72: 'C3' | 'C4' | null — TARGET VOL tự tính khi bật */
     if(!(iv > 0) || (!fm && !(tv > 0)) || !(trC3 > 0) || !(crC3 > 0)){
-      if(!_calcSilent) toast('⚠ TK-'+tk+': '+(fm ? 'fill INIT VOL + TARGET C3 % (TARGET VOL is auto)' : 'fill all four inputs'),'er');
+      if(!_calcSilent) toast('⚠ TK-'+tk+': fill '+_calcMissing(n).map(x => x[0]).join(', ')+(fm ? ' (TARGET VOL is auto)' : ''),'er');
       resEl.classList.remove('on');
       return;
     }
@@ -1212,7 +1290,8 @@ const MC = (function(){
           _overAsked[n] = key;
           const autoTv = !fm;   /* chế độ CHỈ BƠM: TARGET VOL tự tính, không sửa được */
           try{
-            const ok = confirm(
+            /* v4.215 — hộp của app (không chặn luồng): trả lời xong mới xử lý */
+            UIDLG.ask(
               (hard ? '⛔ TK-'+tk+' — VƯỢT TRẦN QUY ĐỊNH 90% DUNG TÍCH'
                     : '🚨 TK-'+tk+' — VÙNG RỦI RO CAO (trên '+_fmt(WARN,0)+' m³)')+'\n\n'
               + 'Thể tích cuối tính ra    : '+_fmt(tvEff,1)+' m³\n'
@@ -1229,7 +1308,7 @@ const MC = (function(){
                   : 'Mức này VẪN NẠP ĐƯỢC (quy định cho phép tới 90% dung tích),\nnhưng trên '+_fmt(WARN,0)+' m³ là RỦI RO CAO.\n\n'
                     + 'Phần mềm KHÔNG tự sửa số của anh/chị.\n'
                     + '[OK] / [Cancel] đều giữ nguyên '+_fmt(tvEff,1)+' m³ — muốn hạ thì tự sửa\nTARGET VOL rồi tính lại.\n\n'
-                    + '⚠ Khi bấm ▶START MIX sẽ phải xác nhận thêm một lần nữa\n   và tên người xác nhận sẽ được GHI LẠI.'));
+                    + '⚠ Khi bấm ▶START MIX sẽ phải xác nhận thêm một lần nữa\n   và tên người xác nhận sẽ được GHI LẠI.')).then(ok => {
             _mlog('OVERLIM', n, _fmt(tvEff,1)+' m³ (cảnh báo '+_fmt(WARN,0)+' · trần '+_fmt(CAP,1)+') — '
                    + (hard ? (ok && autoTv ? 'hạ về trần '+_fmt(CAP,1) : 'giữ nguyên, VƯỢT TRẦN')
                            : (ok ? 'giữ nguyên, chấp nhận rủi ro' : 'hạ về '+_fmt(WARN,0))));
@@ -1249,6 +1328,7 @@ const MC = (function(){
                 return;
               }
             }
+            });
           }catch(_){}
         }
       }
@@ -1571,7 +1651,7 @@ const MC = (function(){
     }
   }
 
-  function _startMix(n){
+  async function _startMix(n){
     if(ST[n] !== 'calc'){ toast('⚠ Click TK header to activate calculation first','er'); return; }
     const tk = n==='1' ? '3501' : '3502';
     /* v4.78 — TARGET VOL từ PLAN đã lệch %C3 → chặn luôn ở bước START */
@@ -1582,44 +1662,54 @@ const MC = (function(){
        auto-calc (đổi hằng số ⚙, sửa xong bấm START ngay, tính lỗi...).
        Nếu lệch → LIỆT KÊ rõ từng ô rồi hỏi: TÍNH LẠI hay BỎ QUA. */
     let _sigSkipped = false;
+    /* v4.219 — nói ĐÍCH DANH ô còn thiếu (trước đây chỉ báo chung "chưa tính toán") */
+    const _miss = _calcMissing(n);
+    if(_miss.length){
+      toast('⛔ TK-'+tk+': fill '+_miss.map(x => x[0]).join(', ')+' before ▶START','er');
+      await UIDLG.alert('⛔ TK-'+tk+' — CANNOT START: '+_miss.length+' INPUT'+(_miss.length > 1 ? 'S' : '')+' MISSING\n\n'
+        + _miss.map(x => '• '+x[0]+' — '+x[2]).join('\n')+'\n\n'
+        + 'Fill '+(_miss.length > 1 ? 'them' : 'it')+', press 🖩 CALCULATE, check STOP C3 / STOP C4, then ▶START.');
+      warnGo(_miss[0][1]);
+      return;
+    }
     const resOn = _gid('mc-r'+n)?.classList.contains('on');
     if(!resOn || !CALC_SIG[n]){
-      toast('⛔ TK-'+tk+': chưa có kết quả tính hợp lệ — bấm 🖩 CALCULATE trước khi START','er');
-      try{
-        alert('TK-'+tk+' — CHƯA TÍNH TOÁN\n\n'
-          + 'Chưa có kết quả tính hợp lệ cho các thông số đang nhập.\n'
-          + 'Bấm 🖩 CALCULATE, kiểm tra STOP C3 / STOP C4 rồi mới ▶START MIX.');
-      }catch(_){}
+      const go = await UIDLG.ask('⚠ TK-'+tk+' — STOP LEVELS NOT CALCULATED YET\n\n'
+        + 'All inputs are filled, but STOP C3 / STOP C4 have not been calculated for them.\n\n'
+        + 'OK = Calculate now · Cancel = go back');
+      if(go){
+        _calcOne(n);
+        if(_gid('mc-r'+n)?.classList.contains('on')) toast('🖩 TK-'+tk+': calculated — check STOP C3 / STOP C4, then press ▶START again','warn');
+      }
       return;
     }
     const diff = _sigDiff(CALC_SIG[n], _calcSig(n));
     if(diff.length){
-      const msg = 'TK-'+tk+' — DỮ LIỆU ĐÃ THAY ĐỔI SAU KHI TÍNH\n\n'
-        + 'Kết quả STOP C3 / STOP C4 đang hiển thị được tính từ bộ số CŨ.\n'
-        + 'Những ô sau đã bị sửa nhưng CHƯA được tính lại:\n\n'
+      const msg = '⚠ TK-'+tk+' — INPUTS CHANGED AFTER THE CALCULATION\n\n'
+        + 'The STOP C3 / STOP C4 shown were calculated from the OLD figures.\n'
+        + 'These inputs were changed and not recalculated:\n\n'
         + diff.join('\n') + '\n\n'
-        + '──────────────────────────────\n'
-        + '[OK]     = TÍNH LẠI theo dữ liệu hiện tại rồi bắt đầu  (khuyến nghị)\n'
-        + '[Cancel] = BỎ QUA, giữ nguyên kết quả cũ';
+        + 'OK = Recalculate with the current inputs (recommended) · Cancel = Keep the old result';
       let doRecalc = true;
-      try{ doRecalc = confirm(msg); }catch(_){}
+      try{ doRecalc = await UIDLG.ask(msg); }catch(_){}
       if(doRecalc){
         _calcOne(n);
         autoGcRecalc(n);
         if(!_gid('mc-r'+n)?.classList.contains('on')){
-          toast('⛔ TK-'+tk+': tính lại KHÔNG thành công — kiểm tra lại dữ liệu','er');
+          toast('⛔ TK-'+tk+': recalculation failed — check the inputs','er');
           return;
         }
-        toast('🔄 TK-'+tk+': đã tính lại theo dữ liệu mới — kiểm tra STOP C3 / STOP C4 trước khi xác nhận','warn');
+        toast('🔄 TK-'+tk+': recalculated — check STOP C3 / STOP C4 before confirming','warn');
       } else {
         let ok2 = false;
         try{
-          ok2 = confirm('TK-'+tk+' — XÁC NHẬN BỎ QUA\n\n'
-            + 'Bắt đầu pha với kết quả CŨ, KHÔNG khớp dữ liệu đang nhập?\n\n'
+          ok2 = await UIDLG.ask('⛔ TK-'+tk+' — START WITH THE OLD RESULT?\n\n'
+            + 'The STOP levels do NOT match the inputs now on the form:\n\n'
             + diff.join('\n') + '\n\n'
-            + 'Thao tác này sẽ được ghi lại kèm tên người xác nhận.');
+            + 'Your name is recorded with this confirmation.\n\n'
+            + 'OK = Start with the old result · Cancel = Go back');
         }catch(_){ ok2 = false; }
-        if(!ok2){ toast('Đã hủy — hãy bấm 🖩 CALCULATE để tính lại','warn'); return; }
+        if(!ok2){ toast('Cancelled — press 🖩 CALCULATE to recalculate','warn'); return; }
         _sigSkipped = true;
       }
     }
@@ -1646,7 +1736,7 @@ const MC = (function(){
       const tvNow = _gnum('mc-tv'+n);
       let okOver = false;
       try{
-        okOver = confirm('⚠⚠ TK-'+tk+' — XÁC NHẬN PHA TRONG VÙNG RỦI RO CAO ⚠⚠\n\n'
+        okOver = await UIDLG.ask('⚠⚠ TK-'+tk+' — XÁC NHẬN PHA TRONG VÙNG RỦI RO CAO ⚠⚠\n\n'
           + 'Thể tích cuối của mẻ này TRÊN ngưỡng cảnh báo '+_fmt(WARN,0)+' m³.\n\n'
           + '   Ngưỡng cảnh báo     : '+_fmt(WARN,0)+' m³\n'
           + '   TARGET VOL hiện tại : '+_fmt(tvNow,1)+' m³   (+'+_fmt(Math.max(0,tvNow-WARN),1)+')\n'
@@ -1681,7 +1771,7 @@ const MC = (function(){
     if(lotEl && !lotEl.value){ lotEl.value = String(maxLot + 1); }
     MIXING_LOT[n] = parseInt(lotEl?.value) || 0;
     if(!MIXING_LOT[n]){ toast('⚠ TK-'+tk+': enter a lot number first','er'); return; }
-    if(!confirm('TK-'+tk+': start mixing Lot '+MIXING_LOT[n]+'?\n\n• Locks INIT VOL / TARGET VOL / TARGET C3 inputs\n• Pushes mixing state to Firebase (~120 bytes)\n• Other operators will see TK-'+tk+' is MIXING in real time\n\nOK to proceed?')){
+    if(!await UIDLG.ask('TK-'+tk+': start mixing Lot '+MIXING_LOT[n]+'?\n\n• Locks INIT VOL / TARGET VOL / TARGET C3 inputs\n• Pushes mixing state to Firebase (~120 bytes)\n• Other operators will see TK-'+tk+' is MIXING in real time\n\nOK to proceed?')){
       toast('Mix start cancelled','warn');
       return;
     }
@@ -1708,10 +1798,10 @@ const MC = (function(){
     clearTimeout(_startTimer[n]);
     _revertMix(n);
   }
-  function _revertMix(n){
+  async function _revertMix(n){
     if(ST[n] !== 'mixing') return;
     const tk = n==='1' ? '3501' : '3502';
-    if(!confirm('Revert TK-'+tk+' to CALCULATION?\n\n• Clears Start time + Lot number\n• Deletes mixing state from Firebase')) return;
+    if(!await UIDLG.ask('Revert TK-'+tk+' to CALCULATION?\n\n• Clears Start time + Lot number\n• Deletes mixing state from Firebase')) return;
     const sdEl = _gid('mc-sd'+n), sEl = _gid('mc-s'+n), lotEl = _gid('mc-l'+n);
     if(sdEl) sdEl.value = ''; if(sEl) sEl.value = ''; if(lotEl) lotEl.value = '';
     MIXING_LOT[n] = 0;
@@ -1801,38 +1891,59 @@ const MC = (function(){
       qty: lpgDen > 0 ? fvol*lpgDen : fvol*(rC3*MC_D.c3l + rC4*MC_D.c4l),
       dens: lpgDen
     };
-    /* Render 3 result cards + SAVE button */
+    /* ⭐ v4.214 — KẾT QUẢ CUỐI = SỐ THEO COQ (chính thức). GC chỉ còn là một dòng
+       ĐỐI CHIẾU chéo bên dưới. Thẻ kết quả chỉ hiện sau khi bấm 🧮 CALC như cũ
+       (logic lưu PASS vẫn cần GCR), COQ tính lại ngay trong lượt này. */
     const resEl = _gid('mc-gcres'+n);
     if(!resEl) return;
-    const _ord = ORD[n] || 'C4';
-    const _fc = '<div style="background:var(--blue-soft);padding:8px 6px;border-radius:6px;text-align:center">'+
-      '<div style="display:flex;align-items:baseline;justify-content:center;gap:4px"><span style="font-size:10px;color:var(--blue);font-weight:700;text-transform:uppercase;letter-spacing:1px">FILLED C3</span><span style="font-size:9px;color:var(--ink-2);font-weight:600">ton</span></div>'+
-      '<div style="font-family:monospace;font-size:22px;font-weight:800;color:var(--blue);margin:2px 0">'+_fmt(fC3)+'</div>'+
-      '<div style="font-size:9px;color:var(--ink-2)">'+(rC3*100).toFixed(2)+'%</div></div>';
-    const _f4 = '<div style="background:var(--orange-soft);padding:8px 6px;border-radius:6px;text-align:center">'+
-      '<div style="display:flex;align-items:baseline;justify-content:center;gap:4px"><span style="font-size:10px;color:var(--orange);font-weight:700;text-transform:uppercase;letter-spacing:1px">FILLED C4</span><span style="font-size:9px;color:var(--ink-2);font-weight:600">ton</span></div>'+
-      '<div style="font-family:monospace;font-size:22px;font-weight:800;color:var(--orange);margin:2px 0">'+_fmt(fC4)+'</div>'+
-      '<div style="font-size:9px;color:var(--ink-2)">'+(rC4*100).toFixed(2)+'%</div></div>';
-    const _fl = '<div style="background:var(--red-soft);padding:8px 6px;border-radius:6px;text-align:center">'+
-      '<div style="display:flex;align-items:baseline;justify-content:center;gap:4px"><span style="font-size:10px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:1px">FILLED LPG</span><span style="font-size:9px;color:var(--ink-2);font-weight:600">ton</span></div>'+
-      '<div style="font-family:monospace;font-size:22px;font-weight:800;color:var(--red);margin:2px 0">'+_fmt(fLPG)+'</div>'+
-      '<div style="font-size:9px;color:var(--ink-2)">'+(lpgDen ? 'ρ='+lpgDen : '')+'</div></div>';
-    resEl.innerHTML =
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'+
-        (_ord === 'C4' ? _f4 + _fc + _fl : _fc + _f4 + _fl)+
-      '</div>'+
-      '<div style="text-align:center;margin-top:8px">'+
-        '<button type="button" onclick="MC.gcSave(\''+n+'\')" style="padding:7px 22px;background:var(--green);color:#fff;border:none;border-radius:5px;font-family:Oswald;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer">💾 SAVE PASS → TANK LOG</button>'+
-      '</div>';
     resEl.classList.add('on');
+    let _ar = null;
+    try{ _ar = altCalc(n, true); }catch(e){ console.warn('[MC] altCalc', e); _renderResult(n); }
     if(!_gcSilent){
-      toast('✅ GC TK-'+tk+' → Filled LPG: '+_fmt(fLPG)+' ton','ok');
+      const q = _ar && _ar.coq;
+      if(q && !q.error) toast('✅ COQ TK-'+tk+' → Filled LPG: '+_fmt(q.fLPG)+' ton  (GC '+_fmt(fLPG)+')','ok');
+      else toast('⚠ TK-'+tk+' — COQ not computed'+(q && q.error ? ': '+q.error.replace(/^Missing:\s*/,'missing ') : '')+' · GC '+_fmt(fLPG)+' ton','warn');
       _renderStatus(n);
     }
   }
 
+  /* ---------- v4.214 — khối KẾT QUẢ CUỐI (mc-gcres): COQ chính + GC đối chiếu ---------- */
+  function _renderResult(n){
+    const resEl = _gid('mc-gcres'+n);
+    if(!resEl || !GCR[n]) return;
+    const gc = GCR[n], res = ALTR[n], q = res && res.coq ? res.coq : null;
+    const ok = !!(q && !q.error);
+    const ord = ORD[n] || 'C4';
+    const pc = (a, b) => (b ? (a / b * 100).toFixed(2) + '%' : '');
+    const card = (cls, lbl, v, sub) =>
+      '<div class="mc-rc '+cls+'"><div class="k">'+lbl+' <i>ton</i></div>'+
+      '<div class="v">'+(v == null ? '—' : _fmt(v))+'</div><div class="s">'+(sub||'&nbsp;')+'</div></div>';
+    const c3 = card('c3', 'FILLED C3', ok ? q.fC3 : null, ok ? pc(q.fC3, q.fLPG) + ' of filled' : '');
+    const c4 = card('c4', 'FILLED C4', ok ? q.fC4 : null, ok ? pc(q.fC4, q.fLPG) + ' of filled' : '');
+    const lp = card('lpg', 'FILLED LPG', ok ? q.fLPG : null, ok ? 'ρ ' + q.fDen : '');
+    let dv = '';
+    if(ok && gc.fLPG){
+      const p = (q.fLPG - gc.fLPG) / gc.fLPG * 100;
+      dv = '<span class="d'+(Math.abs(p) >= 3 ? ' hi' : '')+'" title="(COQ − GC) ÷ GC — same Δ as the Tank Log">Δ '+(p >= 0 ? '+' : '')+p.toFixed(2)+'%</span>';
+    }
+    const cross = '<div class="mc-rx" title="Calculated from the GC composition — for cross-checking only, not sent anywhere">'+
+      '<span class="t">GC check</span>'+
+      '<span>C3 <b class="c3">'+_fmt(gc.fC3)+'</b></span><span>C4 <b class="c4">'+_fmt(gc.fC4)+'</b></span>'+
+      '<span>LPG <b>'+_fmt(gc.fLPG)+'</b></span>'+dv+'</div>';
+    const foot = ok
+      ? '<div class="mc-rf">Mass balance: '+_fmt(q.iv)+' m³ × '+q.iDen+' = '+_fmt(q.mIni)+' t ('+(q.w3Ini*100).toFixed(2)+' %wt C3) → '+
+        _fmt(q.fv)+' m³ × '+q.fDen+' = '+_fmt(q.mFin)+' t ('+(q.w3Fin*100).toFixed(2)+' %wt C3)</div>'
+      : '<div class="mc-rerr">⚠ COQ not computed — '+_escHtml(q && q.error ? q.error : 'press 🧮 CALC COQ')+'</div>';
+    try{ _renderWarnbar(n); }catch(_){}
+    resEl.innerHTML =
+      '<div class="mc-rh"><span class="t">RESULT</span><span class="src">COQ</span></div>'+
+      '<div class="mc-rcs">'+(ord === 'C4' ? c4 + c3 + lp : c3 + c4 + lp)+'</div>'+
+      foot + cross +
+      '<div class="mc-rsave"><button type="button" onclick="MC.gcSave(\''+n+'\')" class="mc-savebtn">💾 SAVE PASS → TANK LOG</button></div>';
+  }
+
   /* ---------- SAVE to Tank Log (Pass / Pending) — pushes ONE row via ENG.upsertRow ---------- */
-  function _saveToTankLog(n, quality, silent){
+  async function _saveToTankLog(n, quality, silent){
     const tk = n==='1' ? '3501' : '3502';
     const tkName = 'TK-'+tk;
     const lotNum = parseInt(_gv('mc-l'+n)) || 0;
@@ -1846,13 +1957,13 @@ const MC = (function(){
       let g = null;
       try{ g = _coqGate(n); }catch(_){}
       if(g && !g.ok){
-        if(!confirm('⚠ LOT NÀY CHƯA TÍNH ĐƯỢC C3/C4 THEO COQ\n\n'
+        if(!await UIDLG.ask('⚠ LOT NÀY CHƯA TÍNH ĐƯỢC C3/C4 THEO COQ\n\n'
           + 'Thiếu / sai dữ liệu:\n' + g.problems.join('\n') + '\n\n'
           + 'COQ sắp là số liệu CHÍNH THỨC đưa lên hệ thống công ty, nên mọi lot đều phải có kết quả.\n\n'
           + 'OK = vẫn lưu (nhớ bổ sung sau bằng ◈ COQ audit ở Tank Log)\n'
           + 'Cancel = quay lại nhập cho đủ')) return false;
       } else if(g && g.warns.length){
-        if(!confirm('⚠ SỐ LIỆU COQ CÓ ĐIỂM BẤT THƯỜNG\n\n' + g.warns.join('\n')
+        if(!await UIDLG.ask('⚠ SỐ LIỆU COQ CÓ ĐIỂM BẤT THƯỜNG\n\n' + g.warns.join('\n')
           + '\n\nOK = vẫn lưu\nCancel = quay lại kiểm tra chứng thư')) return false;
       }
     }
@@ -1998,15 +2109,15 @@ const MC = (function(){
   }
 
   /* Called by the SAVE button inside the GC result block (Quality = Pass) */
-  function gcSave(n){
+  async function gcSave(n){
     if(!GCR[n]){ toast('⚠ Press 🧮 CALC in the GC section first','er'); return; }
     /* v4.55 — verdict vs spec table decides Pass/Fail (C3 deviation = warning only) */
     const ev = evalQuality(n);
     const quality = ev.fails.length ? 'Fail' : 'Pass';
     const failTxt = ev.fails.length ? '\n\n⚠ FAIL:\n'+ev.fails.map(f=>'  • '+f).join('\n') : '';
     const warnTxt = ev.warns.length ? '\n\n⚠ '+ev.warns.join('\n⚠ ') : '';
-    if(!confirm('Save GC '+quality.toUpperCase()+' result to Tank Log?\n\n• Lot: '+_lotName(GCR[n].lot)+'\n• Tank: TK-'+GCR[n].tk+'\n• Filled LPG: '+_fmt(GCR[n].fLPG)+' ton'+failTxt+warnTxt+'\n\nOne child write to Firebase (incremental sync).')) return;
-    if(!_saveToTankLog(n, quality, /*silent*/ false)) return;
+    if(!await UIDLG.ask('Save '+quality.toUpperCase()+' result to Tank Log?\n\n• Lot: '+_lotName(GCR[n].lot)+'\n• Tank: TK-'+GCR[n].tk+'\n• Filled LPG (COQ): '+((ALTR[n] && ALTR[n].coq && !ALTR[n].coq.error) ? _fmt(ALTR[n].coq.fLPG)+' ton' : 'NOT COMPUTED')+'  ·  GC '+_fmt(GCR[n].fLPG)+' ton'+failTxt+warnTxt+'\n\nOne child write to Firebase (incremental sync).')) return;
+    if(!(await _saveToTankLog(n, quality, /*silent*/ false))) return;
     /* Exit mixing if applicable; mixing-state node will be cleared */
     if(ST[n] === 'mixing'){
       ST[n] = 'calc';
@@ -2016,8 +2127,8 @@ const MC = (function(){
   }
 
   /* Called by the inline 💾 DRAFT button (Quality = Pending) */
-  function gcSaveDraftInline(n){
-    if(!_saveToTankLog(n, 'Pending', /*silent*/ false)) return;
+  async function gcSaveDraftInline(n){
+    if(!(await _saveToTankLog(n, 'Pending', /*silent*/ false))) return;
     if(ST[n] === 'mixing'){
       ST[n] = 'calc';
       _clearMixingFb(n);
@@ -2025,7 +2136,7 @@ const MC = (function(){
     _renderStatus(n);
   }
 
-  function finishMix(n){
+  async function finishMix(n){
     const tk = n==='1' ? '3501' : '3502';
     const lotNum = parseInt(_gv('mc-l'+n)) || 0;
     const stVal = (_gv('mc-s'+n)||'').trim();
@@ -2046,17 +2157,17 @@ const MC = (function(){
     if(!fvol) warns.push('• Final Volume not entered');
     if(!hasGc) warns.push('• 🧮 CALC not pressed on the GC section');
     if(warns.length){
-      if(!confirm('TK-'+tk+' — Finish without complete GC?\n\n'+warns.join('\n')+'\n\nRow will be saved as Quality = Pending.\n\nOK = save Pending  ·  Cancel = go back')) return;
+      if(!await UIDLG.ask('TK-'+tk+' — Finish without complete GC?\n\n'+warns.join('\n')+'\n\nRow will be saved as Quality = Pending.\n\nOK = save Pending  ·  Cancel = go back')) return;
     }
     /* v4.55 — verdict vs spec table decides Pass/Fail when GC is complete */
     let quality = 'Pending';
     if(hasGc){
       const ev = evalQuality(n);
       quality = ev.fails.length ? 'Fail' : 'Pass';
-      if(ev.fails.length && !confirm('⚠ QUALITY FAIL so với tiêu chuẩn:\n\n'+ev.fails.map(f=>'• '+f).join('\n')+'\n\nLưu với Quality = Fail?')) return;
+      if(ev.fails.length && !await UIDLG.ask('⚠ QUALITY FAIL so với tiêu chuẩn:\n\n'+ev.fails.map(f=>'• '+f).join('\n')+'\n\nLưu với Quality = Fail?')) return;
       if(ev.warns.length) toast('⚠ '+ev.warns[0],'warn');
     }
-    if(!_saveToTankLog(n, quality, /*silent*/ false)) return;
+    if(!(await _saveToTankLog(n, quality, /*silent*/ false))) return;
     /* v4.79 (R8) — nhật ký kết thúc mẻ */
     _mlog('FINISH', n, 'lot='+lotNum+' quality='+quality+' FVOL='+_gv('gc'+n+'-fvol')
                       +' C3='+_gv('gc'+n+'-c3h8')+(warns.length?' ⚠'+warns.length+' cảnh báo':''));
@@ -2158,8 +2269,8 @@ const MC = (function(){
     toast('📋 Spec table saved (synced to all devices)','ok');
     ['1','2'].forEach(n=>{ if(ST[n] !== 'idle') _renderQc(n); });
   }
-  function resetSpec(){
-    if(!confirm('Reset spec table to lab defaults?\n\nBD<0.5 · Olefin≤10 · C5+<2 · VP≤1430 · S≤140 · Cu No.1 · Residue<0.05 · C3 ±3')) return;
+  async function resetSpec(){
+    if(!await UIDLG.ask('Reset spec table to lab defaults?\n\nBD<0.5 · Olefin≤10 · C5+<2 · VP≤1430 · S≤140 · Cu No.1 · Residue<0.05 · C3 ±3')) return;
     SPEC = Object.assign({}, SPEC_DEF);
     _saveSpecLocal();
     if(_specFbRef) _specFbRef.set(SPEC_DEF).catch(()=>{});
@@ -2393,6 +2504,7 @@ const MC = (function(){
         A.missing.push(ent); return null;
       }
       ent.label = hit.label;
+      ent.i     = hit.i;                           /* v4.217 — dòng Excel, để đọc thêm cột %Mol */
       ent.addr  = _a1(hit.i, resCol);
       const raw = hit.row.length > resCol ? hit.row[resCol] : '';
       ent.raw   = (raw === '' || raw == null) ? '' : String(raw);
@@ -2478,6 +2590,23 @@ const MC = (function(){
     c.nc6   = read('nc6',   'n-Hexane',             /\(n-C6H14\)|n-Hexane/i);
     c.olef  = read('olef',  'Total Olefin',         /Total\s*-?\s*Olefin/i);
     c.c5    = read('c5',    'C5 & C5+',             /C5\s*&\s*C5\+/i);
+    coq.tbu = tbu;
+    /* v4.217 — cột %Mol (ngay phải cột %Vol, tiêu đề "% Mol") — CHỈ để đối chiếu, không import */
+    coq.mol = null; A.molCol = -1;
+    for(let i = 0; i < aoa.length && A.molCol < 0; i++){
+      const row = aoa[i] || [];
+      if(/%\s*Vol/i.test(String(row[resCol] || '')) && /%\s*Mol/i.test(String(row[resCol + 1] || ''))) A.molCol = resCol + 1;
+    }
+    if(A.molCol >= 0){
+      coq.mol = {};
+      A.fields.forEach(e => { if(e.i != null && c.hasOwnProperty(e.key)) coq.mol[e.key] = _coqNum((aoa[e.i] || [])[A.molCol]); });
+      if(tbu != null){ const e = A.fields.find(x => x.key === 'tbu'); if(e && e.i != null) coq.mol.tbu = _coqNum((aoa[e.i] || [])[A.molCol]); }
+    }
+    /* v4.217 — ngày ký cuối phiếu ("HCM City, 28/09/2026") — đối chiếu với Analysis Date */
+    coq.signDate = '';
+    for(let i = aoa.length - 1; i >= 0 && !coq.signDate; i--){
+      (aoa[i] || []).some(v => { const m = String(v || '').match(/City\s*,?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i); if(m){ coq.signDate = m[1]; return true; } return false; });
+    }
 
     /* ═══ 3. Pro/Bu fraction — %Vol trên dòng nhãn, %Wt dòng ngay dưới ═══ */
     coq.frv = ''; coq.frw = '';
@@ -2629,6 +2758,206 @@ const MC = (function(){
     return _p2(parseInt(m[1]))+'/'+_p2(parseInt(m[2]))+'/'+yy;
   }
 
+  /* ══════════════════════════════════════════════════════════════════════
+     ⭐⭐⭐ v4.217 — COQ CROSS-CHECK TRƯỚC KHI IMPORT (plausibility)
+     ----------------------------------------------------------------------
+     v4.171 chỉ chặn file THIẾU / LỆCH CỘT / tổng sai. File "đủ ô, đúng dạng"
+     nhưng SỐ SAI (lab gõ nhầm, sửa tay phiếu cũ, dùng lại phiếu lot khác…)
+     vẫn lọt. Nay app TỰ TÍNH LẠI theo đúng công thức sheet "dữ liệu thô" của
+     lab (ASTM D2598 + bảng %Wt) từ các cấu tử %Vol, rồi đối chiếu:
+       ⛔ CRITICAL — làm sai Filled C3/C4: %Wt, Density, Quantity, phiếu trùng
+       🟠 MAJOR    — làm đổi Quality / dữ liệu mâu thuẫn: VP, MW, %Mol, %Vol, spec
+       🟡 MINOR    — hơi lệch TARGET / ngày tháng / số phiếu
+     Có mục nào ⇒ HIỆN BẢNG TRƯỚC KHI IMPORT. CRITICAL/MAJOR phải tick xác nhận
+     TỪNG DÒNG mới bấm được "Import anyway". App KHÔNG sửa số của chứng thư.
+     Hệ số lấy từ file lab (PPT-2026-433): density = ROUND(Σ v·ρrel,3) + 0.0025;
+     VP = MROUND(Σ v·F,5); %Wt C3 = v3·0.5074 / (v3·0.5074 + iC4·0.5629 + nC4·0.5841).
+     ══════════════════════════════════════════════════════════════════════ */
+  const _CQ_REL = { c2h6:0.35628, c3h8:0.50719, c3h6:0.5226, ic4:0.56283, nc4:0.5842, t2b:0.6103, b1:0.60044,
+                    ib:0.60064, neoc5:0.5953, ic5:0.6251, nc5:0.6307, bd13:0.6272, nc6:0.6641 };
+  const _CQ_VPF = { c2h6:4213, c3h8:1200, c3h6:1466, ic4:400, nc4:255, t2b:242, b1:328, ib:340,
+                    neoc5:152, ic5:40, nc5:6.4, bd13:0, nc6:-67 };
+  const _CQ_MW  = { c2h6:30.069, c3h8:44.0956, c3h6:42.0797, ic4:58.12, nc4:58.12, t2b:56.11, b1:56.11, ib:56.11,
+                    neoc5:72.15, ic5:72.15, nc5:72.15, bd13:54.09, nc6:86.178 };
+  const _CQ_DADD = 0.0025;            /* "giá trị CỘNG" của lab trên density tính */
+  const _CQ_TOL = { w3:0.05, v3:0.05, den:0.0015, denCrit:0.003, vp:10, mw:0.1, molSum:0.1, mol:0.3 };
+  function _cqCalc(c, over){
+    c = Object.assign({}, c || {}, over || {});
+    if(c.c3h8 == null || c.ic4 == null || c.nc4 == null) return null;
+    let d = 0, vp = 0, nm = {}, nsum = 0;
+    Object.keys(_CQ_REL).forEach(k => { const v = +c[k] || 0; d += v * _CQ_REL[k]; vp += v * _CQ_VPF[k];
+      nm[k] = v * _CQ_REL[k] / _CQ_MW[k]; nsum += nm[k]; });
+    const molFromVol = {}; Object.keys(nm).forEach(k => { molFromVol[k] = nsum ? nm[k] / nsum * 100 : 0; });
+    let mwV = 0; Object.keys(molFromVol).forEach(k => { mwV += molFromVol[k] * _CQ_MW[k] / 100; });
+    const a = c.c3h8 * 0.5074, b = c.ic4 * 0.5629 + c.nc4 * 0.5841;
+    return { den:Math.round(d / 100 * 1000) / 1000 + _CQ_DADD, vp:Math.round(vp / 100 / 5) * 5,
+             v3:c.c3h8 / (c.c3h8 + c.ic4 + c.nc4) * 100, w3:a / (a + b) * 100, molFromVol, mwFromVol:mwV };
+  }
+  function _cqDate(s){
+    const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if(!m) return null;
+    const y = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+    return new Date(y, +m[2] - 1, +m[1]);
+  }
+  function _cqMin(t){ const m = String(t || '').match(/(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; }
+  function _cqFirst(s){ const m = String(s || '').match(/(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : null; }
+  const _cqF = (v, d) => v == null || isNaN(v) ? '—' : (+v).toFixed(d);
+  const _cqSg = (v, d) => (v > 0 ? '+' : '') + (+v).toFixed(d);
+
+  /* ctx = { lotNum, tank:'3501'|'3502', tgtVol, tgtC3, start:'dd/mm/yy', finD, finT, hardCap, rows } */
+  function _coqPlaus(coq, ctx){
+    ctx = ctx || {};
+    const out = [], c = coq.comp || {}, K = _cqCalc(c);
+    const add = (lv, name, got, exp, dev, eff) => out.push({ lv, name, got:String(got), exp:String(exp), dev:String(dev || ''), eff:String(eff || '') });
+    const qty = coq.qty, den = coq.den, mass = (qty > 0 && den > 0) ? qty * den : null;
+    const w3 = _cqFirst(coq.frw), v3 = _cqFirst(coq.frv);
+    const tonnes = t => t == null ? '' : '≈ ' + Math.abs(t).toFixed(1) + ' t';
+
+    /* ── ⛔ CRITICAL: số đi thẳng vào Filled C3/C4 ── */
+    if(K && w3 != null){
+      const d = w3 - K.w3;
+      if(Math.abs(d) > _CQ_TOL.w3)
+        add('crit', 'Pro/Bu %Wt (C3) vs composition', _cqF(w3, 2) + ' %wt', _cqF(K.w3, 2) + ' %wt (lab formula from C₃H₈ / i-C₄ / n-C₄ %Vol)', _cqSg(d, 2) + ' pt',
+            'Filled C3 ⇄ C4 shifted ' + (mass ? tonnes(mass * d / 100) : '') + ' — %Wt is the official split');
+    }
+    if(K && den != null){
+      const d = den - K.den;
+      if(Math.abs(d) > _CQ_TOL.denCrit)
+        add('crit', 'Density @15°C vs composition', _cqF(den, 4) + ' kg/l', _cqF(K.den, 4) + ' kg/l (Σ %Vol × rel. density + 0.0025, ASTM D2598)', _cqSg(d, 4),
+            'Lot mass (Filled C3 + C4) off ' + (qty ? tonnes(qty * d) : ''));
+      else if(Math.abs(d) > _CQ_TOL.den)
+        add('minor', 'Density @15°C slightly off composition', _cqF(den, 4) + ' kg/l', _cqF(K.den, 4) + ' kg/l', _cqSg(d, 4), 'Lot mass ' + (qty ? tonnes(qty * d) : ''));
+    }
+    if(qty != null){
+      if(ctx.hardCap && qty > ctx.hardCap)
+        add('crit', 'Quantity above the 90% tank limit', _cqF(qty, 3) + ' m³', '≤ ' + _cqF(ctx.hardCap, 1) + ' m³', _cqSg(qty - ctx.hardCap, 1) + ' m³', 'Final volume = COQ Quantity → lot mass');
+      if(ctx.tgtVol > 0){
+        const d = qty - ctx.tgtVol, p = d / ctx.tgtVol * 100;
+        if(Math.abs(p) > 5) add('crit', 'Quantity vs TARGET VOL', _cqF(qty, 3) + ' m³', _cqF(ctx.tgtVol, 1) + ' m³ ± 1.5 %', _cqSg(d, 1) + ' m³ (' + _cqSg(p, 1) + ' %)', 'Lot mass ' + (den ? tonnes(d * den) : '') + ' — check the gauged final volume');
+        else if(Math.abs(p) > 1.5) add('minor', 'Quantity slightly off TARGET VOL', _cqF(qty, 3) + ' m³', _cqF(ctx.tgtVol, 1) + ' m³ ± 1.5 %', _cqSg(d, 1) + ' m³ (' + _cqSg(p, 1) + ' %)', 'Lot mass ' + (den ? tonnes(d * den) : ''));
+      }
+    }
+    /* phiếu dùng lại: trùng số COQ / trùng nguyên thành phần với lot khác */
+    const rows = (ctx.rows || []).filter(r => r && String(r[1] || '').trim());
+    const yr = ctx.lotYear || new Date().getFullYear();
+    const others = rows.filter(r => { const p = _parseLotNum(r[1]); return !(p && p.num === ctx.lotNum && p.year === yr); });
+    const normNo = s => String(s || '').toUpperCase().replace(/\s+/g, '');
+    if(coq.no){
+      const dup = others.find(r => normNo(r[34]) && normNo(r[34]) === normNo(coq.no));
+      if(dup) add('crit', 'COQ No. already used by another lot', coq.no, 'a new number for ' + _lotName(ctx.lotNum), 'on ' + dup[1] + ' (TK-' + String(dup[2] || '').replace(/\D/g, '') + ')', 'Wrong certificate — every figure of another lot would be imported');
+    }
+    if(c.c3h8 != null && c.ic4 != null && c.nc4 != null){
+      const eq = (a, b) => a != null && String(a).trim() !== '' && Math.abs(parseFloat(a) - b) < 0.0005;
+      const twin = others.slice().reverse().find(r => eq(r[18], c.c3h8) && eq(r[19], c.ic4) && eq(r[20], c.nc4) && (c.c2h6 == null || eq(r[17], c.c2h6)));
+      if(twin) add('crit', 'Composition identical to another lot', 'C₃H₈ ' + _cqF(c.c3h8, 2) + ' · i-C₄ ' + _cqF(c.ic4, 2) + ' · n-C₄ ' + _cqF(c.nc4, 2), 'different analysis for ' + _lotName(ctx.lotNum),
+                   'same as ' + twin[1] + ' (TK-' + String(twin[2] || '').replace(/\D/g, '') + ')', 'Certificate of an earlier lot may have been re-used / edited');
+    }
+
+    /* ── 🟠 MAJOR: mâu thuẫn trong phiếu / làm đổi Quality ── */
+    if(K && v3 != null){
+      const d = v3 - K.v3;
+      if(Math.abs(d) > _CQ_TOL.v3) add('major', 'Pro/Bu %Vol (C3) vs composition', _cqF(v3, 2) + ' %vol', _cqF(K.v3, 2) + ' %vol (C₃H₈ / (C₃H₈ + Total Butane))', _cqSg(d, 2) + ' pt', 'Certificate is not self-consistent');
+    }
+    if(K && coq.vp != null){
+      const d = coq.vp - K.vp;
+      if(Math.abs(d) > _CQ_TOL.vp) add('major', 'Vapor Pressure vs composition', _cqF(coq.vp, 0) + ' kPa', _cqF(K.vp, 0) + ' kPa (ASTM D2598 from %Vol)', _cqSg(d, 0) + ' kPa',
+        coq.vp > SPEC.vp && K.vp <= SPEC.vp ? 'Lot would be saved as Quality FAIL (spec ≤ ' + SPEC.vp + ') although the composition passes' : 'Quality verdict');
+    }
+    if(coq.mw != null && K){
+      const mol = coq.mol, hasMol = mol && ['c3h8','ic4','nc4'].every(k => mol[k] != null);
+      let mwE = K.mwFromVol, src = 'from %Vol';
+      if(hasMol){ mwE = 0; Object.keys(_CQ_MW).forEach(k => { mwE += (+mol[k] || 0) * _CQ_MW[k] / 100; }); src = 'Σ %Mol × molar mass'; }
+      const d = coq.mw - mwE;
+      if(Math.abs(d) > (hasMol ? _CQ_TOL.mw : 0.5)) add('major', 'Molecular weight vs composition', _cqF(coq.mw, 2), _cqF(mwE, 2) + ' (' + src + ')', _cqSg(d, 2), 'Stored figure wrong (propane 44.1 – butane 58.1)');
+    }
+    if(coq.mol && K){
+      const ks = Object.keys(_CQ_MW).filter(k => coq.mol[k] != null);
+      const sum = ks.reduce((a, k) => a + coq.mol[k], 0);
+      if(ks.length >= 3 && Math.abs(sum - 100) > _CQ_TOL.molSum) add('major', 'Σ components %Mol = 100', _cqF(sum, 2) + ' %', '100 %', _cqSg(sum - 100, 2), 'Mol column of the certificate is wrong');
+      const bad = ['c3h8','ic4','nc4'].filter(k => coq.mol[k] != null && Math.abs(coq.mol[k] - K.molFromVol[k]) > _CQ_TOL.mol);
+      if(bad.length) add('major', '%Mol vs %Vol (' + bad.map(k => ({ c3h8:'C₃H₈', ic4:'i-C₄', nc4:'n-C₄' })[k]).join(', ') + ')',
+        bad.map(k => _cqF(coq.mol[k], 2)).join(' / ') + ' %mol', bad.map(k => _cqF(K.molFromVol[k], 2)).join(' / ') + ' %mol (converted from %Vol)',
+        bad.map(k => _cqSg(coq.mol[k] - K.molFromVol[k], 2)).join(' / '), 'Mol and Vol columns disagree — one of them is wrong');
+    }
+    const ev = _evalQualityCore({ bd13:c.bd13, olef:c.olef, c5:c.c5, vp:coq.vp, sul:coq.sul, h2o:coq.h2o, cu:coq.cu, res:coq.res });
+    ev.fails.forEach(f => add('major', 'Out of spec: ' + f.split(' = ')[0], f.split(' = ')[1] || f, 'within spec (📋 SPEC)', '', 'Lot will be saved as Quality FAIL — confirm with the lab the result is real'));
+
+    /* ── 🟡 MINOR: lệch target / hồ sơ ── */
+    if(ctx.tgtC3 > 0 && c.c3h8 != null){
+      const d = c.c3h8 - ctx.tgtC3, tol = SPEC.c3tol;
+      const rng = t => { const r = _cqCalc(c, { c3h8:t, ic4:(100 - t) * (c.ic4 / ((c.ic4 + c.nc4) || 1)), nc4:(100 - t) * (c.nc4 / ((c.ic4 + c.nc4) || 1)), c2h6:0, c3h6:0, t2b:0, b1:0, ib:0, neoc5:0, ic5:0, nc5:0, bd13:0, nc6:0 }); return r; };
+      const lo = rng(ctx.tgtC3 - 1), hi = rng(ctx.tgtC3 + 1);
+      const eRange = lo && hi ? ' → %Wt ' + _cqF(lo.w3, 1) + '–' + _cqF(hi.w3, 1) + ', density ' + _cqF(hi.den, 4) + '–' + _cqF(lo.den, 4) : '';
+      if(Math.abs(d) > tol) add('major', 'C₃H₈ %Vol far from TARGET C3', _cqF(c.c3h8, 2) + ' %vol', _cqF(ctx.tgtC3, 1) + ' ± 1 %vol' + eRange, _cqSg(d, 2) + ' pt (limit ± ' + tol + ')', 'Mix off plan — check the target / the sample / the tank');
+      else if(Math.abs(d) > 1) add('minor', 'C₃H₈ %Vol slightly off TARGET C3', _cqF(c.c3h8, 2) + ' %vol', _cqF(ctx.tgtC3, 1) + ' ± 1 %vol' + eRange, _cqSg(d, 2) + ' pt', 'Mix result differs from plan');
+    }
+    const lotOfNo = String(coq.no || '').match(/-(\d+)\s*$/), lotOfLot = _parseLotNum(coq.lot);
+    if(lotOfNo && lotOfLot && +lotOfNo[1] !== lotOfLot.num)
+      add('minor', 'COQ No. and Lot No. numbers differ', coq.no + ' / ' + coq.lot, 'same running number', '', 'Check the certificate belongs to this lot');
+    const dA = _cqDate(coq.anaDate), dS = _cqDate(coq.signDate), dSt = _cqDate(ctx.start), dF = _cqDate(ctx.finD) || dSt;
+    if(dA && dS && dA.getTime() !== dS.getTime())
+      add('minor', 'Analysis Date ≠ date signed on the certificate', coq.anaDate, coq.signDate + ' (signature line)', '', 'Certificate edited? Check with the lab');
+    if(dA && dSt && dA < dSt)
+      add('major', 'Analysis Date before the lot started', coq.anaDate, '≥ start ' + ctx.start, '', 'Analysis cannot be older than the mix — wrong certificate?');
+    else if(dA && dF && (dA - dF) / 864e5 > 3)
+      add('minor', 'Analysis Date long after the mix', coq.anaDate, '≤ 3 days after ' + (ctx.finD || ctx.start), '', 'Check the certificate date');
+    const mS = _cqMin(coq.sampTime), mF = _cqMin(ctx.finT);
+    if(mS != null && mF != null){ let d = Math.abs(mS - mF); d = Math.min(d, 1440 - d);
+      if(d > 60) add('minor', 'Sampling Time vs FINISH time', coq.sampTime, ctx.finT + ' ± 60 min', d + ' min', 'FINISH time will be replaced by the sampling time'); }
+    const ord = { crit:0, major:1, minor:2 };
+    return out.sort((a, b) => ord[a.lv] - ord[b.lv]);
+  }
+
+  /* ---- bảng rà soát TRƯỚC KHI IMPORT ---- */
+  let _CQV = null;
+  function _coqReview(items, coq, fname, ctxLabel, onGo){
+    let bd = _gid('cqv-backdrop');
+    if(!bd){ bd = document.createElement('div'); bd.id = 'cqv-backdrop'; bd.className = 'cqr-backdrop cqv'; document.body.appendChild(bd); }
+    const need = items.filter(x => x.lv !== 'minor').length;
+    _CQV = { onGo, need, ok:{} };
+    const top = items[0] ? items[0].lv : 'minor';
+    const LV = { crit:['⛔ CRITICAL','cqv-crit','Changes Filled C3 / C4'], major:['🟠 MAJOR','cqv-major','Changes Quality / data'], minor:['🟡 MINOR','cqv-minor','Off target / records'] };
+    const cnt = k => items.filter(x => x.lv === k).length;
+    const e = _escHtml;
+    let txt = 'COQ CROSS-CHECK — ' + (coq.no || '') + ' · ' + (coq.lot || '') + ' · ' + (fname || '') + '\n';
+    items.filter(x => x.lv !== 'minor').forEach(x => { txt += '• ' + x.name + ': ' + x.got + ' — expected ' + x.exp + (x.dev ? ' (' + x.dev + ')' : '') + '\n'; });
+    bd.innerHTML =
+      '<div class="cqr-box">' +
+        '<div class="cqr-hd cqv-hd-' + top + '"><div class="cqr-t1">' +
+          (top === 'crit' ? '⛔ COQ CROSS-CHECK FAILED — REVIEW BEFORE IMPORT' : top === 'major' ? '🟠 COQ HAS ABNORMAL VALUES — REVIEW BEFORE IMPORT' : '🟡 COQ SLIGHTLY OFF TARGET — REVIEW BEFORE IMPORT') + '</div>' +
+          '<div class="cqr-t2">' + e(fname || '') + ' · COQ <b>' + e(coq.no || '—') + '</b> · into <b>' + e(ctxLabel || '') + '</b> · ' +
+            ['crit','major','minor'].filter(k => cnt(k)).map(k => LV[k][0] + ' ' + cnt(k)).join(' · ') + '</div></div>' +
+        '<div class="cqv-note"><b>Nothing has been imported yet.</b> The app re-calculated the certificate from its own %Vol composition (lab formulas) and compared it with the mixing target. ' +
+          (need ? 'Tick <b>each</b> ⛔ / 🟠 line after checking it with the lab to enable <b>Import anyway</b>. ' : '') + 'The app never changes a figure of the certificate.</div>' +
+        '<table class="cqr-tb cqv-tb"><thead><tr><th>✓</th><th>Level</th><th>Check</th><th>In COQ</th><th>Expected / range</th><th>Deviation</th><th>Effect</th></tr></thead><tbody>' +
+        items.map((x, i) => '<tr class="' + LV[x.lv][1] + '">' +
+          '<td class="cqv-ck">' + (x.lv === 'minor' ? '—' : '<input type="checkbox" onchange="MC._cqvTick(' + i + ',this.checked)">') + '</td>' +
+          '<td class="cqv-lv" title="' + LV[x.lv][2] + '">' + LV[x.lv][0] + '</td><td class="cqr-nm">' + e(x.name) + '</td>' +
+          '<td class="cqv-got">' + e(x.got) + '</td><td>' + e(x.exp) + '</td><td class="cqv-dev">' + e(x.dev) + '</td><td class="cqr-wh">' + e(x.eff) + '</td></tr>').join('') +
+        '</tbody></table>' +
+        (need ? '<div class="cqr-sec">TEXT FOR THE LAB (click to select, then copy)</div><textarea class="cqr-txt cqv-txt" readonly onclick="this.select()">' + e(txt) + '</textarea>' : '') +
+        '<div class="cqr-ft"><button type="button" class="btn btn-blue" onclick="MC._cqvClose()">✕ Cancel — do not import</button>' +
+          '<button type="button" id="cqv-go" class="btn ' + (need ? 'btn-red' : 'btn-green') + '" onclick="MC._cqvGo()"' + (need ? ' disabled' : '') + '>' +
+          (need ? 'Import anyway (0/' + need + ' confirmed)' : '✓ Import') + '</button></div>' +
+      '</div>';
+    bd.classList.add('on');
+    try{ toast((top === 'crit' ? '⛔ ' : '⚠ ') + items.length + ' COQ check(s) to review — not imported yet', top === 'minor' ? 'warn' : 'er'); }catch(_){}
+  }
+  function _cqvTick(i, on){
+    if(!_CQV) return; if(on) _CQV.ok[i] = 1; else delete _CQV.ok[i];
+    const n = Object.keys(_CQV.ok).length, b = _gid('cqv-go'); if(!b) return;
+    b.disabled = n < _CQV.need; b.textContent = 'Import anyway (' + n + '/' + _CQV.need + ' confirmed)';
+  }
+  function _cqvClose(){ _gid('cqv-backdrop')?.classList.remove('on'); if(_CQV) toast('COQ not imported', 'warn'); _CQV = null; }
+  function _cqvGo(){
+    const V = _CQV; if(!V || Object.keys(V.ok).length < V.need) return;
+    _CQV = null; _gid('cqv-backdrop')?.classList.remove('on');
+    try{ V.onGo(); }catch(e){ console.warn('[MC] cqv go', e); }
+  }
+  function _cqCtxPanel(n, lotNum, tk){
+    return { lotNum, tank:tk, tgtVol:_gnum('mc-tv'+n), tgtC3:_gnum('mc-tr'+n), start:_gv('mc-sd'+n), finD:_gv('mc-fd'+n), finT:_gv('mc-f'+n),
+             hardCap:_mcHardCap(), rows:(typeof ENG !== 'undefined' && ENG.ROWS) ? ENG.ROWS : [] };
+  }
+
   function coqFileChosen(n, inputEl){
     const f = inputEl && inputEl.files && inputEl.files[0];
     if(!f) return;
@@ -2660,7 +2989,16 @@ const MC = (function(){
     const coqLot = _parseLotNum(coq.lot);
     const curNum = parseInt(_gv('mc-l'+n)) || 0;
     if(!curNum){
-      alert('⚠ TK-'+tk+' HAS NO MIXING LOT\n\nCOQ: '+coq.lot+'\n\nEnter the Lot number / press ▶START first, then import again.');
+      /* v4.217 — ▶START tự cấp số lot (lot lớn nhất + 1) — không bắt người dùng gõ lot */
+      const yr0 = new Date().getFullYear();
+      let mx = 0; ((typeof ENG !== 'undefined' && ENG.ROWS) || []).forEach(r => { const p = _parseLotNum(r[1]); if(p && p.year === yr0 && p.num > mx) mx = p.num; });
+      const oth = MIXING_LOT[n === '1' ? '2' : '1'] || 0; if(oth > mx) mx = oth;
+      const nxt = mx + 1, cl = _parseLotNum(coq.lot);
+      alert('⚠ TK-'+tk+' IS NOT MIXING YET\n\n'+
+            'COQ lot: '+coq.lot+'\n'+
+            'Next lot ▶START will assign: '+_lotName(nxt)+(cl && cl.num === nxt ? '  ✓ matches' : '  ✗ does not match the COQ')+'\n\n'+
+            'COQ can only be imported into a running lot. Press ▶START on TK-'+tk+' — the app assigns the lot number automatically — then import the COQ again.'+
+            (cl && cl.num !== nxt ? '\n\nThe COQ is for another lot: open that lot in 📒 Tank Log ▸ ✏ edit ▸ IMPORT COQ instead.' : ''));
       return;
     }
     const curYear = new Date().getFullYear();
@@ -2686,6 +3024,20 @@ const MC = (function(){
     /* ── 2b. v4.171 — RÀ SOÁT FORMAT & ĐỘ ĐẦY ĐỦ CỦA FILE COQ ──
        Thiếu/sai bất kỳ ô nào ⇒ KHÔNG ghi một số nào vào panel. */
     if(_coqBlocked(coq)){ _coqReport(coq, fname, _lotName(curNum) + ' · TK-' + tk); return; }
+    /* ── 2c. v4.217 — ĐỐI CHIẾU SỐ (tự tính lại từ thành phần + target) ──
+       Có bất thường ⇒ bảng rà soát; ⛔/🟠 phải tick từng dòng mới import được. */
+    if(!coq._plausOk){
+      const items = _coqPlaus(coq, _cqCtxPanel(n, curNum, tk));
+      if(items.length){
+        _coqReview(items, coq, fname, _lotName(curNum) + ' · TK-' + tk, () => {
+          coq._plausOk = true;
+          const hard = items.filter(x => x.lv !== 'minor');
+          if(hard.length) _mlog('COQ-OVR', n, (coq.no || '') + ' ' + hard.map(x => x.name + ' ' + x.got).join(' | '));
+          _applyCoq(n, coq, fname);
+        });
+        return;
+      }
+    }
     /* ── 3. Fill GC composition (calc cells) ── */
     const setV = (id, v, dec)=>{
       const el = _gid(id);
@@ -2787,8 +3139,8 @@ const MC = (function(){
       }
     });
   }
-  function resetSettings(){
-    if(!confirm('Reset all Mix Calculator constants to defaults?\n\n(C3/C4 densities, tank radius, max volume, odorant constants)\n\n⚠ Thay đổi này áp dụng cho TẤT CẢ máy.')) return;
+  async function resetSettings(){
+    if(!await UIDLG.ask('Reset all Mix Calculator constants to defaults?\n\n(C3/C4 densities, tank radius, max volume, odorant constants)\n\n⚠ Thay đổi này áp dụng cho TẤT CẢ máy.')) return;
     _applyCfg(DEF);
     _saveCfg(DEF);
     if(_cfgFbRef){ _cfgSelfPush++; _cfgFbRef.set(DEF).catch(()=>{ _cfgSelfPush = Math.max(0,_cfgSelfPush-1); }); }
@@ -2809,7 +3161,14 @@ const MC = (function(){
   }
 
   /* ---------- init: connect Firebase listener for mixing-state ---------- */
+  let _wbT = null;
+  function _wbHook(){
+    const pg = document.getElementById('eng-pg-mixcal');
+    if(!pg || pg._wbHooked) return; pg._wbHooked = true;
+    pg.addEventListener('input', () => { clearTimeout(_wbT); _wbT = setTimeout(() => { _renderWarnbar('1'); _renderWarnbar('2'); }, 300); });
+  }
   function init(){
+    try{ _wbHook(); }catch(_){}
     /* No localStorage state cache for in-progress calc — spec says calc on RAM,
        only mixing-state goes to Firebase. */
     try{
@@ -2869,7 +3228,7 @@ const MC = (function(){
     return isNaN(x) ? '' : String(x);
   }
 
-  function openGc(rowSnap){
+  async function openGc(rowSnap){
     if(!rowSnap || !rowSnap[2]){ toast('⚠ Invalid row — missing tank','er'); return; }
     const tkStr = String(rowSnap[2]||'');
     const n = tkStr.includes('3501') ? '1' : (tkStr.includes('3502') ? '2' : null);
@@ -2882,7 +3241,7 @@ const MC = (function(){
 
     /* If the SAME tank is mixing a different lot, ask before clobbering */
     if(ST[n] === 'mixing' && MIXING_LOT[n] && rowLotNum && MIXING_LOT[n] !== rowLotNum){
-      if(!confirm('⚠ TK-'+(n==='1'?'3501':'3502')+' is currently MIXING Lot '+MIXING_LOT[n]+
+      if(!await UIDLG.ask('⚠ TK-'+(n==='1'?'3501':'3502')+' is currently MIXING Lot '+MIXING_LOT[n]+
                   '\n\nLoading Lot '+rowLotNum+' for GC will overwrite the live mix state.\n\nProceed?')){
         return;
       }
@@ -3494,63 +3853,27 @@ const MC = (function(){
         chk.innerHTML = q.msgs.map(m=>_escHtml(m)).join('<br>');
       } else { chk.style.display = 'none'; }
     }
-    const host = _gid('mc-cmp' + n);
-    if(!host) return;
-    const gc = GCR[n];
-    const rows = [];
-    const cell = (v, cls) => '<td class="' + cls + '">' + _fmt(v) + '</td>';
-    const na = txt => '<td colspan="3" class="m-na">' + _escHtml(txt) + '</td>';
-    const base = gc ? { c3: gc.fC3, c4: gc.fC4 } : null;
-    const dev = v => {
-      if(!base) return '<td class="m-dev m-na">—</td>';
-      const b = (base.c3 || 0) + (base.c4 || 0);
-      if(!b) return '<td class="m-dev m-na">—</td>';
-      const p = (v - b) / b * 100;
-      return '<td class="m-dev' + (Math.abs(p) >= 3 ? ' hi' : '') + '">' +
-             (p >= 0 ? '+' : '') + p.toFixed(2) + '%</td>';
-    };
-    const okOf = { gc: !!gc, coq: !res.coq.error };
-    /* Chưa tự chọn → mặc định COQ khi COQ có số (COQ là con số chính thức
-       đưa lên hệ thống công ty), không thì lùi về GC. */
+    /* v4.214 — COQ là số chính thức: bỏ bảng so sánh ① GC / ② COQ và nút chọn
+       phương pháp. Mặc định gửi COQ khi COQ có số (lùi về GC chỉ khi COQ không
+       tính được — giữ nguyên logic cũ). Kết quả đầy đủ nằm ở khối RESULT. */
+    const okOf = { gc: !!GCR[n], coq: !res.coq.error };
     if(!NM_USER[n]) NMTH[n] = okOf.coq ? 'coq' : 'gc';
     else if(!okOf[NMTH[n]]) NMTH[n] = okOf.coq ? 'coq' : 'gc';
-
-    const pick = k => okOf[k]
-      ? '<td class="m-pick"><label class="m-radio' + (NMTH[n] === k ? ' on' : '') + '" ' +
-        'title="Send these figures to Scale for the Check Booth">' +
-        '<input type="radio" name="mcnm' + n + '"' + (NMTH[n] === k ? ' checked' : '') +
-        ' onchange="MC.pickNotifyMethod(\'' + n + '\',\'' + k + '\')">' +
-        '<span>' + (NMTH[n] === k ? '⇒ SEND' : 'pick') + '</span></label></td>'
-      : '<td class="m-pick m-na">—</td>';
-
-    rows.push('<tr class="m-gc' + (NMTH[n] === 'gc' ? ' m-sel' : '') + '"><td class="m-name">① GC (current)</td>' +
-      (gc ? cell(gc.fC3, 'm-c3') + cell(gc.fC4, 'm-c4') + cell(gc.fLPG, '') + dev(gc.fLPG)
-          : na('Press 🧮 CALC in the GC block') + '<td class="m-dev m-na">—</td>') + pick('gc') + '</tr>');
-    rows.push('<tr class="m-coq' + (NMTH[n] === 'coq' ? ' m-sel' : '') + '"><td class="m-name">② COQ (official)</td>' +
-      (!res.coq.error
-        ? cell(res.coq.fC3, 'm-c3') + cell(res.coq.fC4, 'm-c4') + cell(res.coq.fLPG, '') + dev(res.coq.fLPG)
-        : na(res.coq.error) + '<td class="m-dev m-na">—</td>') + pick('coq') + '</tr>');
-
-    let foot = '';
-    if(!res.coq.error){
-      const q = res.coq;
-      foot = 'COQ mass balance · initial ' + _fmt(q.iv) + ' m³ × ' + q.iDen + ' = ' + _fmt(q.mIni) +
-             ' t (C3 ' + (q.w3Ini * 100).toFixed(2) + ' %wt) → final ' + _fmt(q.fv) + ' m³ × ' + q.fDen +
-             ' = ' + _fmt(q.mFin) + ' t (C3 ' + (q.w3Fin * 100).toFixed(2) + ' %wt)';
-      if(q.msgs && q.msgs.length) foot += '<br>' + _escHtml(q.msgs.join(' '));
-    } else if(res.coq.need && res.coq.need.length){
-      foot = '③ COQ still needs: <b>' + _escHtml(res.coq.need.join('</b> · <b>')) + '</b>';
+    const host = _gid('mc-cmp' + n);
+    if(host){
+      if(GCR[n]){ host.style.display = 'none'; host.innerHTML = ''; }
+      else {
+        const q = res.coq;
+        host.style.display = '';
+        host.innerHTML = !q.error
+          ? '<div class="mc-cmp-one">COQ · C3 <b class="c3">'+_fmt(q.fC3)+'</b> · C4 <b class="c4">'+_fmt(q.fC4)+'</b> · LPG <b>'+_fmt(q.fLPG)+'</b> ton'+
+            '<span class="h">press 🧮 CALC to see the result and save</span></div>'
+          : (q.need && q.need.length ? '<div class="mc-cmp-one miss">Still needs: <b>'+q.need.map(_escHtml).join('</b> · <b>')+'</b></div>' : '');
+        if(!host.innerHTML) host.style.display = 'none';
+      }
     }
-    const selTxt = '<b>' + _escHtml(NM_LBL[NMTH[n]] || NM_LBL.gc) + '</b>';
-    host.style.display = '';
-    host.innerHTML =
-      '<table><thead><tr><th style="text-align:left">METHOD</th><th>FILLED C3</th>' +
-      '<th>FILLED C4</th><th>TOTAL LPG</th><th>Δ vs GC</th>' +
-      '<th title="Figures pushed to the weighbridge for the Check Booth">⇒ SCALE</th></tr></thead><tbody>' +
-      rows.join('') + '</tbody></table>' +
-      '<div class="mc-cmp-sel">⇒ On 💾 SAVE PASS the Check Booth receives ' + selTxt +
-      '. You can change it later in the <b>⇒Scale</b> column of the Tank Log.</div>' +
-      (foot ? '<div class="mc-cmp-foot">' + foot + '</div>' : '');
+    _renderResult(n);
+    try{ _renderWarnbar(n); }catch(_){}
   }
 
   function _escHtml(s){
@@ -3612,6 +3935,7 @@ const MC = (function(){
     ALT_COLS: { A_MID, A_T3, A_P3, A_T4, A_P4, A_DC3, A_DC4,
                 A_IDEN, A_IW3, A_ISRC, A_QC3, A_QC4, A_MTH },
     activate, calcOne, autoCalc, resetCalc,
+    warnGo, warnAll, renderWarnbar: _renderWarnbar,   /* v4.215 */
     chkInp,           /* v4.79 (R2/R3) — kiểm tra & kẹp giá trị tại ô nhập */
     parseNum: _pnum,  /* v4.79 (R3) — parser chuẩn Excel US, dùng lại nơi khác */
     toggleOrder, toggleLP, toggleSP, togglePC, toggleCrMode,
@@ -3629,6 +3953,7 @@ const MC = (function(){
     parseCoqWorkbook: _parseCoqWorkbook,   /* v4.61 — reused by ENG edit-modal COQ import */
     coqBlocked: _coqBlocked,               /* v4.171 — COQ audit gate */
     coqReport: _coqReport, closeCoqReport: _closeCoqReport,
+    coqPlaus: _coqPlaus, coqReview: _coqReview, _cqvTick, _cqvClose, _cqvGo, cqCalc: _cqCalc,   /* v4.217 — rà soát COQ trước import */
     fmtCoqDate: _fmtCoqDate,
     openSpec, closeSpec, saveSpec, resetSpec,
     evalQuality, evalRowQuality, qcRecalc

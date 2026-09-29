@@ -33,6 +33,8 @@
    THÁNG của ngày báo cáo (Raw Data cột C/E) mà danh sách chưa có ⇒ hỏi, OK thì TỰ CHÈN dòng
    mới cuối danh sách (chép công thức SUMIFS của dòng cuối, đổi tên/số dòng, mở rộng SUM của
    dòng tháng) và ghi log; Cancel thì cảnh báo đỏ để người dùng tự thêm.
+   v4.216 (29/09/2026) — Cancel List chỉ ghi xe NGƯỜI DÙNG tick ở REPORT MAIL ▸ P2 ▸ 🚫 Cancel list;
+   chưa ✓ Confirm ⇒ hỏi trước khi ghi (chỉ 🚫 Cancelled được tick sẵn).
    v4.184 (25/09/2026) — xuất file Daily Stock tự điền sheet "Cancel List" cho ngày GI:
    Daily plan (= kế hoạch ĐẦU NGÀY, PLANDAY) · Daily actual · số xe huỷ · từng xe huỷ
    (🚫 Cancelled + xe có trong kế hoạch đầu ngày mà cuối ngày không còn). Dữ liệu lấy từ
@@ -1819,6 +1821,14 @@ const RPT = (function(){
     try{ if(typeof PLANCX !== 'undefined') await PLANCX.load(giDate, true); }catch(_){}      /* v4.187 — xe biến mất đã xác nhận lúc dán */
     const cx = MAIL.p2Cancel(giDate);
     if(!cx.hasPlan && !cx.first){ log('⚠ Cancel List: no Today Plan and no first plan for '+giDate+' — sheet left untouched','warn'); return; }
+    /* v4.216 — xe huỷ do NGƯỜI DÙNG chọn ở ✉ REPORT MAIL ▸ P2 ▸ 🚫 Cancel list (không còn tự suy "sáng có – chiều không") */
+    if(cx.cands && cx.cands.length && !cx.reviewed){
+      const msg = 'Cancel List '+giDate+':\nThe cancel list has not been confirmed.\n'+cx.cands.length+' candidate truck(s), '+cx.rows.length+' ticked (only 🚫 Cancelled in Today Plan are ticked by default).\n\n'+
+        'Open ✉ REPORT MAIL ▸ P2 ▸ 🚫 Cancel list to tick the trucks that are really cancelled.\n\nOK = write the '+cx.rows.length+' ticked truck(s) now · Cancel = skip the Cancel List sheet';
+      const ok = (typeof UIDLG !== 'undefined' && UIDLG.ask) ? await UIDLG.ask(msg) : confirm(msg);
+      if(!ok){ log('⚠ Cancel List: skipped — cancel list not confirmed (REPORT MAIL ▸ P2 ▸ 🚫 Cancel list)','warn'); return; }
+      log('⚠ Cancel List: written without confirmation — '+cx.rows.length+' of '+cx.cands.length+' candidates ticked','warn');
+    }
     if(!cx.first && !confirm('Cancel List '+giDate+':\nThe first plan of the day was not recorded.\n"Daily plan" would be the CURRENT plan ('+cx.dailyPlan.toFixed(3)+' MT).\n\nOK = write it · Cancel = skip the Cancel List sheet')){ log('⚠ Cancel List: skipped by user (no first plan)','warn'); return; }
     const short = c => { try{ return (typeof CT !== 'undefined' && CT.lookup) ? (CT.lookup(c) || c) : c; }catch(_){ return c; } };
     const data = { plan:cx.dailyPlan, actual:cx.dailyActual, rows:cx.rows.map(r => Object.assign({}, r, { customer:short(r.customer) })) };
@@ -1828,6 +1838,7 @@ const RPT = (function(){
     if(!res.ok){ log('⚠ '+res.msg,'warn'); return; }
     state.zip.file(sh.path, res.xml);
     log('✅ Cancel List: '+giDate+' rows '+res.start+'–'+res.end+(res.replaced ? ' (replaced)' : '')+' · plan '+data.plan.toFixed(3)+' MT'+(cx.first ? ' (first plan)' : ' (current plan)')+' · actual '+data.actual.toFixed(3)+' MT · '+res.rows+' cancelled','ok');
+    (cx.cands || []).filter(c => !c.sel).forEach(c => log('   ○ not cancelled (unticked): '+c.customer+' · '+(c.plate||'—'), 'info'));
     data.rows.forEach(r => log('   🚫 '+r.customer+' · '+(r.plate||'—')+' · '+(r.qty ? r.qty.toFixed(3)+' MT' : '')+' · '+r.note, 'info'));
     try{ if(typeof PLANCX !== 'undefined') PLANCX.markUsed(giDate, 'rpt'); }catch(_){}      /* v4.187 — đủ email P2 + file ⇒ xoá plan_cx ngày đó */
   }

@@ -18,8 +18,8 @@ const PAGES=[
   {id:'fly',label:'FLY BOARD',ico:'🖥️'}
 ];
 document.getElementById('navTabs').innerHTML=PAGES.map(p=>
-  `<button class="nb ${p.id==='sales'?'on':''}" onclick="navGo('${p.id}')">
-   <span class="ico">${p.ico}</span>${p.label}</button>`).join('');
+  `<button class="nb ${p.id==='sales'?'on':''}" onclick="navGo('${p.id}')" title="${p.label}">
+   <span class="ico">${p.ico}</span><span class="nb-l">${p.label}</span></button>`).join('');   /* v4.212 — nb-l: màn hẹp ẩn nhãn tab không chọn, rê chuột xem tên */
 /* Real navigation: fleet + sales + print + engineer + report + staff are wired, others are stubs */
 function navGo(id){
   if(id==='fleet' || id==='sales' || id==='print' || id==='engineer' || id==='report' || id==='staff'){

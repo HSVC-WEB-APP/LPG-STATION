@@ -1,5 +1,5 @@
 /* ============================================================
- * LABX — labx.js  (v4.196 · v4.197 — 🔥 Heater gộp một màn hình · v4.198 — bảng tàu itinerary, tàu C3/C4, unloading theo tàu · v4.199 — 📋 dán dòng itinerary · v4.200 — 📂 PMS nhiều ngày, START/FINISH, Unloaded tự lưu, xoá tàu · v4.201 — bảng dữ liệu file để bấm chọn START/FINISH)
+ * LABX — labx.js  (v4.209 — 🔥 Heater: nạp PMS lẻ từng ngày / nhiều ngày, START–FINISH gõ tay không cần file, giữ FINISH, dải tàu + thẻ chuyến + MỘT biểu đồ + nút mở mục + cửa sổ nhập · GC: một biểu đồ, bảng mở bằng nút · v4.196 · v4.197 — 🔥 Heater gộp một màn hình · v4.198 — bảng tàu itinerary, tàu C3/C4, unloading theo tàu · v4.199 — 📋 dán dòng itinerary · v4.200 — 📂 PMS nhiều ngày, START/FINISH, Unloaded tự lưu, xoá tàu · v4.201 — bảng dữ liệu file để bấm chọn START/FINISH)
  * ------------------------------------------------------------
  * Ba mảnh cho trang ENGINEER, dùng chung tiện ích ENGX_U (engx.js — nạp TRƯỚC):
  *   📥 LABX  — nạp FILE TỔNG HỢP "V4_Import_Lab_Heater_<ngày>.xlsx" (Claude dựng từ
@@ -88,10 +88,12 @@ const LX_U = (function(){
     const xs = Math.max(1, Math.round(n / 8));
     const lbl = n > 200 ? (iso => iso.slice(5, 7)+'/'+iso.slice(2, 4)) : dmy;
     for(let d = d0; d <= d1; d += xs) g += '<text x="'+(Lm + (d - d0 + 0.5) * bw).toFixed(1)+'" y="'+(H-9)+'" class="dp-ax" text-anchor="middle">'+lbl(isoOfDay(d))+'</text>';
-    const w = Math.max(1.2, bw * 0.8);
+    const w = Math.max(1.2, Math.min(bw * 0.8, o.maxBar || 1e9));
     rows.forEach(r => { let acc = 0; const x = Lm + (dayNo(r.d) - d0 + 0.5) * bw - w / 2;
       r.parts.forEach((v, i) => { if(!v) return;
-        g += '<rect x="'+x.toFixed(1)+'" y="'+Y(acc + v).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+(Y(acc) - Y(acc + v)).toFixed(1)+'" fill="'+keys[i].col+'"><title>'+esc(r.tip || '')+'</title></rect>'; acc += v; }); });
+        g += '<rect x="'+x.toFixed(1)+'" y="'+Y(acc + v).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+(Y(acc) - Y(acc + v)).toFixed(1)+'" fill="'+keys[i].col+'"><title>'+esc(r.tip || '')+'</title></rect>'; acc += v; });
+      /* v4.209 — o.labels: tổng ghi trên đầu cột (khi ít cột) */
+      if(o.labels && n <= 40 && acc > 0) g += '<text x="'+(x + w / 2).toFixed(1)+'" y="'+(Y(acc) - 4).toFixed(1)+'" class="dp-ax lx-blbl" text-anchor="middle">'+fmt(acc, acc >= 100 ? 0 : 1)+'</text>'; });
     return g + '</svg>';
   }
   function LX_U_median(a){ if(!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
@@ -366,7 +368,7 @@ const GCX = (function(){
     C4:{ tC4:{ min:97 }, C3:{ max:2 }, tOl:{ max:0.1 }, C5p:{ max:1 } }
   };
   const MAIN = { C3:['C3','C2','tC4','tOl','C5p'], C4:['tC4','C3','nC4','tOl','C5p'] };
-  const S = { rows:{}, loaded:false, loading:false, all:false, from:'', prod:'C3', loc:'', comp:'', range:'730', hide:{} };
+  const S = { rows:{}, loaded:false, loading:false, all:false, from:'', prod:'C3', loc:'', comp:'', range:'730', hide:{}, panel:ENGX_U.pref('gc_panel', '') };
   const $ = id => (typeof document === 'undefined' ? null : document.getElementById(id));
   const locName = l => LOC[l] || l;
 
@@ -478,7 +480,10 @@ const GCX = (function(){
     const LS = L.filter(r => series(r) === S.loc), last = LS[LS.length-1];
     h += '<div class="dp-kpis lx-kpis">'+MAIN[S.prod].map(k => kpi(last, k)).join('')+'</div>'+
       (last && last.u !== 'vol' ? '<div class="dp-hint">%mol sample — Aramco limits (for %vol liquid) shown for reference only.</div>' : '')+'</div>';
-    h += '<div class="dp-card"><div class="dp-h">🔎 Findings — '+S.prod+'</div><ul class="dp-al">'+findings(L, locs).map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul></div>';
+    /* v4.209 — MỘT biểu đồ; nhận định / thành phần mới nhất / tháng / lịch sử mở bằng nút. Cảnh báo nặng nhất vẫn hiện một dòng. */
+    const FD = findings(L, locs), FW = FD.filter(a => a.lvl === 'bad' || a.lvl === 'warn'), worst = FW.find(a => a.lvl === 'bad') || FW[0];
+    if(worst) h += '<div class="dp-status '+worst.lvl+'">'+(worst.lvl === 'bad' ? '⛔' : '⚠')+' '+esc(worst.t)+(FW.length > 1 ? ' <small>· '+(FW.length - 1)+' more</small>' : '')+
+      (S.panel !== 'find' ? '<button class="eng-btn" onclick="GCX.panel(\'find\')">🔎 All findings</button>' : '')+'</div>';
     /* trend */
     const sp = specOf(S.prod, S.comp);
     const ser = locs.filter(g => !S.hide[g.k]).map((g, i) => ({ name:sName(g.k), col:LX_U.PAL[locs.indexOf(g) % LX_U.PAL.length], dash:g.u === 'mol' ? '5 3' : '',
@@ -490,23 +495,25 @@ const GCX = (function(){
       '<span class="dp-lg">'+locs.map(g => '<label><input type="checkbox"'+(S.hide[g.k] ? '' : ' checked')+' onchange="GCX.toggle(\''+g.k+'\')"><i style="background:'+LX_U.PAL[locs.indexOf(g) % LX_U.PAL.length]+'"></i>'+esc(sName(g.k))+'</label>').join('')+'</span></div>'+
       LX_U.lineChart(ser, { lims:sp && (sp.min != null || sp.max != null) ? lims : [], dp:3, robust:true, aria:'GC trend' })+
       '<div class="dp-hint">Dashed line = %mol GC sample · solid = %vol liquid. ★ = component with an Aramco limit. Hollow red dot = %vol result outside the limit. ▲▼ = value far outside the usual range, drawn at the chart edge (hover for the number).</div></div>';
+    h += ENGX_U.tabs('GCX.panel', [['find','🔎 Findings', FD.filter(a => a.lvl !== 'ok').length || '', worst ? worst.lvl : ''], ['comp','🧾 Latest composition'], ['month','🗓 Monthly'], ['hist','📋 History', LS.length]], S.panel);
+    if(S.panel === 'find') h += '<div class="dp-card xp-panel"><div class="dp-h">🔎 Findings — '+S.prod+'</div><ul class="dp-al">'+FD.map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul></div>';
     /* bảng thành phần mới nhất theo vị trí + tháng */
     const lastBy = locs.map(g => ({ g, r:L.filter(r => series(r) === g.k).pop() }));
     const rowsK = presentK.filter(k => lastBy.some(x => x.r && x.r.c[k] != null));
-    h += '<div class="dp-grid2"><div class="dp-card"><div class="dp-h">🧾 Latest composition by sampling point</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Component</th><th>Limit</th>'+
+    if(S.panel === 'comp') h += '<div class="dp-card xp-panel"><div class="dp-h">🧾 Latest composition by sampling point</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Component</th><th>Limit</th>'+
       lastBy.map(x => '<th>'+esc(sName(x.g.k))+'<br><small>'+dmy(x.r.d)+'</small></th>').join('')+'</tr></thead><tbody>'+
       rowsK.map(k => '<tr><td>'+esc(CN[k])+'</td><td class="td-c">'+specTxt(specOf(S.prod, k))+'</td>'+lastBy.map(x => { const v = x.r.c[k], s2 = status(S.prod, k, v, x.r.u);
         return '<td class="td-r'+(s2 === 'off' ? (x.r.u === 'vol' ? ' dp-off' : ' dp-near') : s2 === 'near' ? ' dp-near' : '')+'">'+(v == null ? '<span class="dp-na">–</span>' : fmt(v, v >= 10 ? 3 : 4)+(x.r.calc[k] ? '<sup title="computed">c</sup>' : ''))+'</td>'; }).join('')+'</tr>').join('')+
       '</tbody></table></div></div>';
-    const M = monthly(LS, MAIN[S.prod]);
-    h += '<div class="dp-card"><div class="dp-h">🗓 Monthly average — '+esc(sName(S.loc))+'</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Month</th><th>n</th>'+MAIN[S.prod].map(k => '<th>'+esc(CN[k])+'</th>').join('')+'</tr></thead><tbody>'+
+    const M = S.panel === 'month' ? monthly(LS, MAIN[S.prod]) : [];
+    if(S.panel === 'month') h += '<div class="dp-card xp-panel"><div class="dp-h">🗓 Monthly average — '+esc(sName(S.loc))+'</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Month</th><th>n</th>'+MAIN[S.prod].map(k => '<th>'+esc(CN[k])+'</th>').join('')+'</tr></thead><tbody>'+
       M.map(m => '<tr><td class="td-c">'+m.ym+'</td><td class="td-c">'+m.n+'</td>'+MAIN[S.prod].map(k => { const x = m.s[k]; if(!x) return '<td class="td-c dp-na">–</td>';
         const a = x.sum / x.n, s2 = status(S.prod, k, a, S.loc.split('|')[1]);
         return '<td class="td-r'+(s2 === 'off' && S.loc.endsWith('vol') ? ' dp-off' : s2 === 'near' || s2 === 'off' ? ' dp-near' : '')+'" title="min '+fmt(x.min,4)+' · max '+fmt(x.max,4)+'">'+fmt(a, a >= 10 ? 3 : 4)+'</td>'; }).join('')+'</tr>').join('')+
-      '</tbody></table></div></div></div>';
+      '</tbody></table></div></div>';
     /* lịch sử */
     const hk = presentK.filter(k => LS.some(r => r.c[k] != null));
-    h += '<div class="dp-card"><div class="dp-h">📋 History — '+esc(sName(S.loc))+' ('+LS.length+')</div><div class="dp-scroll lx-hist"><table class="eng-tbl dp-tbl"><thead><tr><th>Date</th><th>Time</th><th>Train</th><th>Sample</th>'+
+    if(S.panel === 'hist') h += '<div class="dp-card xp-panel"><div class="dp-h">📋 History — '+esc(sName(S.loc))+' ('+LS.length+')</div><div class="dp-scroll lx-hist"><table class="eng-tbl dp-tbl"><thead><tr><th>Date</th><th>Time</th><th>Train</th><th>Sample</th>'+
       hk.map(k => '<th>'+esc(CN[k])+'</th>').join('')+'<th>By</th><th></th></tr></thead><tbody>'+
       LS.slice().reverse().map(r => '<tr><td class="td-c">'+dmy(r.d)+'</td><td class="td-c">'+esc(r.t)+'</td><td class="td-c">'+esc(r.tr)+'</td><td>'+esc(r.lr)+'</td>'+
         hk.map(k => { const v = r.c[k], s2 = status(S.prod, k, v, r.u); return '<td class="td-r'+(s2 === 'off' ? (r.u === 'vol' ? ' dp-off' : ' dp-near') : '')+'">'+(v == null ? '' : fmt(v, v >= 10 ? 3 : 4)+(r.calc[k] ? '<sup>c</sup>' : ''))+'</td>'; }).join('')+
@@ -535,11 +542,13 @@ const GCX = (function(){
   function setComp(k){ S.comp = k; render(); }
   function range(k){ S.range = k; if(k === 'all' && !S.all){ loadAll(); return; } render(); }
   function toggle(k){ S.hide[k] = !S.hide[k]; render(); }
+  /* v4.209 — mở / đóng một mục (nhớ theo máy) */
+  function panel(k){ S.panel = S.panel === k ? '' : k; ENGX_U.prefSet('gc_panel', S.panel); render(); }
   function loadAll(){ load(true, true); }
   function refresh(){ if(!S.loaded) load(); else render(); }
   function reload(){ load(true); }
   function afterImport(){ if(S.loaded) load(true); }
-  return { refresh, reload, render, loadAll, setProd, setLoc, setComp, range, toggle, del, exportXlsx, afterImport, locName, COMP, SPEC,
+  return { refresh, reload, render, loadAll, setProd, setLoc, setComp, range, toggle, panel, del, exportXlsx, afterImport, locName, COMP, SPEC,
            _test:{ derive, status, list, findings, locsOf, S } };
 })();
 
@@ -717,7 +726,7 @@ const HTRH = (function(){
     }).catch(e => toastM('⚠ Delete failed: '+e.message, 'er'));
   }
   function pick(k){ if(k !== S.cur) S.imp = null; S.cur = k; S.vf = null; S.addDate = ''; S.edit = false; loadVoyDays().then(() => { render(); syncMail(); }); }
-  function newVoy(){ S.cur = ''; S.vf = null; S.guess = null; S.pvNote = null; vform(); S.edit = true; render(); }
+  function newVoy(){ S.prevCur = S.cur || S.prevCur; S.cur = ''; S.vf = null; S.guess = null; S.pvNote = null; vform(); S.edit = true; render(); }
   function editVoy(){ S.edit = !S.edit; if(!S.edit){ S.vf = null; S.guess = null; S.pvNote = null; S.vdirty = false; } render(); }
   function vset(k, v){ vform()[k] = v; S.vdirty = true; if(S.guess) delete S.guess[k]; render(); }
 
@@ -781,7 +790,7 @@ const HTRH = (function(){
     rows.forEach(r => { const m = r.f.ref && voyArr().find(v => v.ref && v.ref.toUpperCase() === r.f.ref.toUpperCase()); r.match = m ? m.key : ''; });
     return rows;
   }
-  function pasteOpen(){ S.pv = { txt:'', rows:[] }; render(); setTimeout(() => { const t = $('htrPasteTxt'); if(t) t.focus(); }, 30); }
+  function pasteOpen(){ S.prevCur = S.cur || S.prevCur; S.pv = { txt:'', rows:[] }; render(); setTimeout(() => { const t = $('htrPasteTxt'); if(t) t.focus(); }, 30); }
   function pasteClose(){ S.pv = null; render(); }
   function pasteIn(txt){
     const rows = parseItin(txt);
@@ -880,20 +889,106 @@ const HTRH = (function(){
     }).catch(e => { toastM('⚠ Save failed: '+e.message, 'er'); return false; });
   }
 
-  /* ── v4.200 — 📂 NẠP FILE PMS CHO CẢ TÀU (một file thường chứa nhiều ngày) ──────────────
-     Lần nạp ĐẦU: người dùng CHỐT điểm START (app đề xuất đợt bộ đếm bắt đầu tăng) — lưu
-     heater_voy/<vk>/rs. Lần sau: dữ liệu nối tiếp; tick "Heater finished" + giờ ⇒ lưu rf, sau rf
-     không tính. Không tick: ngày có dữ liệu 00:00 → 24:00 là ngày ĐỦ; ngày cuối đang dở được lần
-     nạp sau bù tiếp (số đọc giờ đã lưu + mới GỘP theo mốc giờ, mới thắng). ✔ Apply ⇒ tự tạo dòng
-     ngày + ghi heater_day + Cavern Daily; sau đó người dùng chỉ gõ Unloaded (t) (tự lưu). */
+  /* ══ v4.209 — 📂 PMS DATA & HEATER RUN — MỘT cửa sổ, nạp file KHÔNG bắt buộc ═══════════════════════════
+     Nguồn tính = số đọc GIỜ đã lưu của tàu (heater_day/<ngày>.h, vk = tàu) GỘP với số đọc PHÚT của file vừa nạp
+     (trùng thời điểm ⇒ file thắng). Mỗi lần xem trước, app TÍNH LẠI mọi ngày của tàu trong [START, FINISH]:
+       • nạp LẺ từng ngày (cách dùng hằng ngày): ngày trước thiếu mốc 24:00 được nối bằng số 00:00 của file
+         ngày sau (và ngược lại) ⇒ không rơi phút nào ở nửa đêm; hai phần dữ liệu hở nhau ≤ 6 h ⇒ số ở mốc
+         nửa đêm NỘI SUY tuyến tính (ghi rõ trong Checks); hở > 6 h ⇒ mốc đó bỏ trống + cảnh báo.
+       • nạp file NHIỀU ngày: chia tại 00:00 như cũ.
+       • START / FINISH gõ tay hoặc bấm trên bảng dữ liệu; KHÔNG có file thì app cắt lại các ngày đã lưu theo
+         mốc mới (nội suy giữa hai số đọc giờ) — ngày nằm hẳn ngoài [START, FINISH] thì xoá số heater.
+       • FINISH đã lưu (rf) được GIỮ ở các lần nạp sau (trước v4.209 nạp lại mà không tick là mất rf).
+     Chỉ ghi ngày MỚI / THAY ĐỔI / cần xoá — ngày không đổi thì không tốn lượt ghi Firebase. */
   const tsStr = t => PMSHEAT.fmtTs(t).slice(0, 16);
   function parseDT(v){ const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/); return m ? new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]).getTime() : 0; }
   const dtLocal = t => t ? tsStr(t).replace(' ', 'T') : '';
-  function impOpen(){ S.imp = { A:null, B:null, pending:[], files:[], start:0, stop:0, fin:false, busy:false }; render(); }
+  const STEP_MAX = 5 * 60e3, LIN_MAX = 6 * 3600e3, GAP_WARN = 90 * 60e3;
+  const r1 = v => v == null ? null : Math.round(v * 10) / 10;
+  /* số đọc tại t: dữ liệu phút ⇒ số cuối ≤ t (như PMSHEAT.valueAt); hai điểm cách nhau > 5 phút (số đọc giờ, hoặc
+     hở giữa hai file) ⇒ nội suy tuyến tính nếu ≤ 6 h; ngoài phạm vi dữ liệu (±1 phút) ⇒ null */
+  function vAt(P, t){
+    if(!P || !P.length) return null;
+    let lo = 0, hi = P.length - 1, i = -1;
+    while(lo <= hi){ const m = (lo + hi) >> 1; if(P[m][0] <= t){ i = m; lo = m + 1; } else hi = m - 1; }
+    if(i < 0) return P[0][0] - t <= 60e3 ? P[0][1] : null;
+    if(P[i][0] === t) return P[i][1];
+    const n = P[i + 1];
+    if(!n) return t - P[i][0] <= 60e3 ? P[i][1] : null;
+    const g = n[0] - P[i][0];
+    if(g <= STEP_MAX) return P[i][1];
+    if(g <= LIN_MAX) return P[i][1] + (n[1] - P[i][1]) * (t - P[i][0]) / g;
+    return null;
+  }
+  /* khoảng hở quanh t (để ghi chú "nội suy") — null nếu t nằm trong dữ liệu phút */
+  function gapAt(P, t){
+    if(!P || P.length < 2) return null;
+    let lo = 0, hi = P.length - 1, i = -1;
+    while(lo <= hi){ const m = (lo + hi) >> 1; if(P[m][0] <= t){ i = m; lo = m + 1; } else hi = m - 1; }
+    if(i < 0 || P[i][0] === t || !P[i + 1]) return null;
+    const g = P[i + 1][0] - P[i][0];
+    return g > STEP_MAX ? [P[i][0], P[i + 1][0], g] : null;
+  }
+  /* số đọc giờ đã lưu của tàu k → chuỗi điểm A / B */
+  function savedPts(k){
+    const A = [], B = [];
+    Object.keys(S.days).forEach(d => { const r = S.days[d]; if(!r || r.vk !== k || !r.h) return;
+      const d0 = d0Of(d);
+      Object.keys(r.h).forEach(hk => { const t = d0 + (+hk.slice(0, 2)) * 3600e3 + (+hk.slice(2)) * 60e3, x = r.h[hk];
+        if(x && x[0] != null && x[0] !== '') A.push([t, +x[0]]); if(x && x[1] != null && x[1] !== '') B.push([t, +x[1]]); }); });
+    return { A:PMSHEAT.mergePts([], A), B:PMSHEAT.mergePts([], B) };
+  }
+  /* nguồn gộp: đã lưu + file (file thắng) */
+  function impSrc(){
+    const I = S.imp, SV = savedPts(S.cur);
+    return { A:PMSHEAT.mergePts(SV.A, I && I.A && I.A.pts), B:PMSHEAT.mergePts(SV.B, I && I.B && I.B.pts), SV };
+  }
+  const hk2t = (d, k) => d0Of(d) + (+k.slice(0, 2)) * 3600e3 + (+k.slice(2)) * 60e3;
+  const hm = k => k.slice(0, 2)+':'+k.slice(2);
+  /* một ngày từ nguồn gộp trong cửa sổ [lo, hi] */
+  function dayCalc(d, A, B, lo, hi){
+    const d0 = d0Of(d), d1 = d0 + 864e5, s0 = Math.max(d0, lo), e0 = Math.min(d1, hi);
+    if(!(e0 > s0)) return null;
+    const T = new Set([s0, e0]);
+    for(let t = Math.ceil(s0 / 3600e3) * 3600e3; t < e0; t += 3600e3) if(t > s0) T.add(t);
+    [A, B].forEach(P => { if(!P || !P.length) return; const f = P[0][0], l = P[P.length-1][0];
+      if(f > s0 && f < e0) T.add(f); if(l > s0 && l < e0) T.add(l); });
+    const h = {};
+    [...T].sort((x, y) => x - y).forEach(t => { const va = vAt(A, t), vb = vAt(B, t); if(va == null && vb == null) return;
+      h[t >= d1 ? '2400' : hhmm(t)] = [r1(va), r1(vb)]; });
+    const ks = Object.keys(h).sort(); if(!ks.length) return null;
+    const r = hCalc(h), chk = [], last = ks[ks.length-1];
+    [['A', A], ['B', B]].forEach(([n, P]) => {
+      if(!P || !P.length){ chk.push({ lvl:'warn', t:'Heater '+n+': no data' }); return; }
+      [d0, d1].forEach(t => { if(t < s0 || t > e0) return; const g = gapAt(P, t);
+        if(g && g[2] <= LIN_MAX && vAt(P, t) != null) chk.push({ lvl:'info', t:'Heater '+n+' '+(t === d0 ? '00:00' : '24:00')+' value estimated between '+tsStr(g[0]).slice(5)+' and '+tsStr(g[1]).slice(5)+' (no reading at midnight)' });
+        else if(g && g[2] > LIN_MAX) chk.push({ lvl:'warn', t:'Heater '+n+': no data from '+tsStr(g[0]).slice(5)+' to '+tsStr(g[1]).slice(5)+' — the consumption across midnight is not split' }); });
+      let prev = null, gap = 0, gapAt0 = 0;
+      for(const p of P){ if(p[0] < s0){ prev = p; continue; } if(p[0] > e0) break;
+        if(prev){ if(p[1] - prev[1] < -1) chk.push({ lvl:'bad', t:'Heater '+n+' counter dropped at '+tsStr(p[0]).slice(11)+' ('+fmt(prev[1], 0)+' → '+fmt(p[1], 0)+') — meter reset? Check the day total' });
+          if(p[0] - prev[0] > gap && p[0] - prev[0] <= LIN_MAX){ gap = p[0] - prev[0]; gapAt0 = prev[0]; } }
+        prev = p; }
+      if(gap > GAP_WARN) chk.push({ lvl:'warn', t:'Heater '+n+': no data for '+Math.round(gap / 60e3)+' min after '+tsStr(gapAt0).slice(11) });
+    });
+    const complete = last === '2400' || (hi < d1 && hk2t(d, last) >= hi - 60e3);
+    if(!complete) chk.push({ lvl:'info', t:'Data until '+hm(last)+' — the next PMS import completes this day' });
+    return { a:r.a, b:r.b, h, chk, complete, from:ks[0], to:last };
+  }
+  function sameH(x, y){
+    const kx = Object.keys(x || {}).sort(), ky = Object.keys(y || {}).sort();
+    if(kx.join() !== ky.join()) return false;
+    return kx.every(k => [0, 1].every(i => { const a = x[k] && x[k][i], b = y[k] && y[k][i];
+      return (a == null || a === '') ? (b == null || b === '') : (b != null && b !== '' && Math.abs(a - b) < 0.05); }));
+  }
+  function impOpen(){
+    const V = S.voys[S.cur] || {};
+    S.imp = { A:null, B:null, pending:[], files:[], start:0, stop:V.rf ? parseDT(V.rf) : 0, fin:!!V.rf, stopSet:!!V.rf, busy:false, table:false };
+    impSuggest(); render();
+  }
   function impClose(){ S.imp = null; render(); }
   async function impFiles(inp){
     const fl = Array.from(inp.files || []); inp.value = ''; if(!fl.length) return;
-    const I = S.imp || (S.imp = { A:null, B:null, pending:[], files:[], start:0, stop:0, fin:false });
+    const I = S.imp || (impOpen(), S.imp);
     I.busy = true; render(); const msg = [];
     for(const f of fl){
       try{ const r = await PMSHEAT.parseFile(f);
@@ -903,99 +998,97 @@ const HTRH = (function(){
         I.files.push(f.name);
       }catch(e){ msg.push('⚠ '+f.name+': '+e.message); }
     }
-    I.busy = false; impSuggest(); I.jump = 'S'; render();
+    I.busy = false; impSuggest(); I.jump = 'S';
+    if(!I.startSet && !(S.voys[S.cur] || {}).rs) I.table = true;          /* lần nạp đầu: mở sẵn bảng để bấm START */
+    render();
     if(msg.length) toastM(msg.join(' · '), msg.some(m => /^⚠|^❓/.test(m)) ? 'warn' : 'ok');
   }
   function impAssign(i, k){ const I = S.imp, p = I && I.pending[i]; if(!p) return; I[k] = { pts:PMSHEAT.mergePts(I[k] && I[k].pts, p.pts) }; I.pending.splice(i, 1); impSuggest(); render(); }
   function impSwap(){ const I = S.imp; if(!I) return; const a = I.A; I.A = I.B; I.B = a; impSuggest(); render(); }
-  function impRuns(){ const I = S.imp; return I && (I.A || I.B) ? PMSHEAT.runs(I.A && I.A.pts, I.B && I.B.pts) : []; }
+  function impRuns(){ const X = impSrc(); return X.A.length || X.B.length ? PMSHEAT.runs(X.A.length ? X.A : null, X.B.length ? X.B : null) : []; }
   function impSuggest(){
-    const I = S.imp, V = S.voys[S.cur] || {}; if(!I || !(I.A || I.B)) return;
+    const I = S.imp, V = S.voys[S.cur] || {}; if(!I) return;
     const R_ = impRuns(), st0 = d0Of(String(V.st || isoToday()).slice(0, 10)) - 864e5;
-    if(V.rs && !I.startSet){ I.start = parseDT(V.rs); I.fixed = true; }
-    else if(!I.startSet){ const r = R_.find(x => x.stop >= st0) || R_[0]; I.start = r ? r.start : 0; }
+    if(!I.startSet){
+      if(V.rs){ I.start = parseDT(V.rs); I.fixed = true; }
+      else { const r = R_.find(x => x.stop >= st0) || R_[0]; I.start = r ? r.start : 0; I.fixed = false; }
+    }
     if(!I.stopSet){ const r = R_.filter(x => x.stop >= (I.start || 0)).pop(); I.stop = r ? r.stop : 0; }
   }
   function impSet(k, v){ const I = S.imp; if(!I) return;
-    if(k === 'start'){ I.start = parseDT(v); I.startSet = true; I.fixed = false; }
-    else if(k === 'stop'){ I.stop = parseDT(v); I.stopSet = true; }
-    else if(k === 'fin') I.fin = !!v;
+    if(k === 'start'){ const t = parseDT(v); if(!t){ toastM('Type START as date + time', 'er'); render(); return; } I.start = t; I.startSet = true; I.fixed = false; I.jump = 'S'; }
+    else if(k === 'stop'){ const t = parseDT(v);
+      if(!t){ I.fin = false; I.stopSet = false; I.stop = 0; }
+      else { if(I.start && t <= I.start){ toastM('FINISH must be after START', 'er'); render(); return; } I.stop = t; I.stopSet = true; I.fin = true; I.jump = 'F'; } }
+    else if(k === 'fin'){ I.fin = !!v; if(I.fin && !I.stop){ impSuggest(); } }
     else if(k === 'run'){ const r = impRuns()[+v]; if(r){ I.start = r.start; I.startSet = true; I.fixed = false; if(!I.stopSet) I.stop = r.stop; } }
     else if(k === 'unfix'){ I.fixed = false; I.startSet = true; }
-    /* v4.201 — chọn từ bảng dữ liệu vừa nạp: bấm dòng = START, nút ⏹ = FINISH */
+    /* v4.201 — chọn từ bảng dữ liệu: bấm dòng = START, nút ⏹ = FINISH */
     else if(k === 'pickStart'){ I.start = +v; I.startSet = true; I.fixed = false; if(I.stop && I.stop <= I.start){ I.stop = 0; I.stopSet = false; I.fin = false; } I.jump = 'S'; }
     else if(k === 'pickStop'){ if(I.start && +v <= I.start){ toastM('FINISH must be after START', 'er'); return; } I.stop = +v; I.stopSet = true; I.fin = true; I.jump = 'F'; }
     else if(k === 'mode') I.mode = v;
+    else if(k === 'table') I.table = !I.table;
     render(); }
-  /* số đọc theo giờ của một ngày trong cửa sổ [lo, hi] — gộp với số giờ đã lưu (mới thắng) */
-  function dayWin(d, A, B, lo, hi, oldH){
-    const d0 = d0Of(d), d1 = d0 + 864e5, Ps = [A, B].filter(P => P && P.length);
-    if(!Ps.length) return null;
-    const s = Math.max(d0, lo, Math.min(...Ps.map(P => P[0][0]))), e = Math.min(d1, hi, Math.max(...Ps.map(P => P[P.length-1][0])));
-    if(!(e > s)) return null;
-    const T = [s]; for(let t = Math.ceil(s / 3600e3) * 3600e3; t < e; t += 3600e3) if(t > s) T.push(t); T.push(e);
-    const h = Object.assign({}, oldH || {});
-    T.forEach(t => { const k = t >= d1 ? '2400' : hhmm(t);
-      const va = inWin(A, t) ? PMSHEAT.valueAt(A, t) : null, vb = inWin(B, t) ? PMSHEAT.valueAt(B, t) : null;
-      if(va != null || vb != null){ const o = h[k] || [null, null]; h[k] = [va != null ? va : o[0], vb != null ? vb : o[1]]; } });
-    /* bỏ mốc đã lưu nằm trước START / sau FINISH */
-    if(lo > d0){ const loK = hhmm(lo); Object.keys(h).forEach(k => { if(k < loK) delete h[k]; }); }
-    if(hi < d1){ const hiK = hhmm(hi); Object.keys(h).forEach(k => { if(k > hiK) delete h[k]; }); }
-    const r = hCalc(h), ks = Object.keys(h).sort(), last = ks[ks.length-1];
-    const chk = [];
-    [['A', A], ['B', B]].forEach(([n, P]) => { if(!P){ chk.push({ lvl:'warn', t:'Heater '+n+' file not loaded' }); return; }
-      let prev = null; P.forEach(p => { if(p[0] < s || p[0] > e){ prev = p; return; } if(prev && p[1] - prev[1] < -1) chk.push({ lvl:'bad', t:'Heater '+n+' counter dropped at '+PMSHEAT.fmtTs(p[0]).slice(11,16) }); prev = p; }); });
-    const complete = last === '2400' || (hi < d1 && e >= hi - 60e3);
-    if(!complete) chk.push({ lvl:'info', t:'Data until '+last.slice(0,2)+':'+last.slice(2)+' — the next PMS import completes this day' });
-    return { a:r.a, b:r.b, h, chk, complete, from:ks[0], to:last };
-  }
+  /* xem trước theo ngày: ngày có dữ liệu file + ngày đã lưu mà số THAY ĐỔI + ngày đã lưu nằm ngoài [START, FINISH] */
   function impPreview(){
-    const I = S.imp; if(!I || !(I.A || I.B) || !I.start) return [];
-    const A = I.A && I.A.pts, B = I.B && I.B.pts, hi = I.fin && I.stop ? I.stop : Infinity;
-    const all = [A, B].filter(Boolean), t1 = Math.min(hi, Math.max(...all.map(P => P[P.length-1][0])));
-    const out = [];
-    for(let d = isoOf(new Date(I.start)); d0Of(d) < t1; d = isoAdd(d, 1)){
-      const old = S.days[d] && S.days[d].vk === S.cur ? S.days[d].h : null;
-      const r = dayWin(d, A, B, I.start, hi, old);
-      if(r) out.push(Object.assign({ date:d, had:!!old, other:S.days[d] && S.days[d].vk && S.days[d].vk !== S.cur ? (S.days[d].ves || S.days[d].vk) : '' }, r));
+    const I = S.imp; if(!I || !S.voys[S.cur] || !I.start) return [];
+    const X = impSrc(), A = X.A, B = X.B, Ps = [A, B].filter(P => P.length);
+    if(!Ps.length) return [];
+    const hi = I.fin && I.stop ? I.stop : Infinity;
+    const first = Math.min(...Ps.map(P => P[0][0])), last = Math.max(...Ps.map(P => P[P.length-1][0]));
+    const fdays = new Set(); [I.A, I.B].forEach(F => (F && F.pts || []).forEach(p => { if(p[0] >= I.start - 60e3 && p[0] <= hi) fdays.add(isoOf(new Date(p[0]))); }));
+    const out = [], lim = Math.min(hi, last);
+    for(let d = isoOf(new Date(Math.max(I.start, first))); d0Of(d) < lim; d = isoAdd(d, 1)){
+      const r = dayCalc(d, A.length ? A : null, B.length ? B : null, I.start, hi); if(!r) continue;
+      const sv = S.days[d], mine = sv && sv.vk === S.cur ? sv : null;
+      const same = !!(mine && mine.h && sameH(mine.h, r.h));
+      if(same && !fdays.has(d)) continue;
+      out.push(Object.assign(r, { date:d, had:!!mine, same, file:fdays.has(d),
+        other:sv && sv.vk && sv.vk !== S.cur && (sv.h || +sv.a || +sv.b) ? (sv.ves || sv.vk) : '' }));
     }
-    return out;
+    /* ngày đã lưu của tàu nằm hẳn ngoài run mới ⇒ xoá số heater */
+    Object.keys(S.days).forEach(d => { const r = S.days[d]; if(!r || r.vk !== S.cur || !r.h || out.some(x => x.date === d)) return;
+      const d0 = d0Of(d);
+      if(d0 + 864e5 <= I.start || d0 >= hi) out.push({ date:d, a:0, b:0, h:null, clear:true, had:true, same:false, file:false, other:'', complete:true, from:'', to:'',
+        chk:[{ lvl:'warn', t:'Outside the heater run ('+(d0 >= hi ? 'after FINISH' : 'before START')+') — the saved heater figures of this day ('+fmt((+r.a || 0) + (+r.b || 0), 0)+' kg) will be deleted' }] }); });
+    return out.sort((x, y) => x.date < y.date ? -1 : 1);
   }
   async function impApply(){
     const I = S.imp, V = S.voys[S.cur]; if(!I || !V) return false;
     if(!mayWrite('eng_heat')){ toastM('⛔ Your account has no write permission', 'er'); return false; }
     if(I.pending.length){ toastM('Assign the unrecognised PMS file(s) to Heater A or B first', 'er'); return false; }
-    if(!I.start){ toastM('Pick the START point of the heater run first', 'er'); return false; }
+    if(!I.start){ toastM('Set the START of the heater run first', 'er'); return false; }
     if(I.fin && !(I.stop > I.start)){ toastM('FINISH must be after START', 'er'); return false; }
-    const D = impPreview(); if(!D.length){ toastM('No data after START in these files', 'er'); return false; }
-    const oth = D.filter(x => x.other);
+    const P = impPreview(), D = P.filter(x => !x.same);
+    const rs = tsStr(I.start), rf = I.fin ? tsStr(I.stop) : null, runChg = rs !== (V.rs || '') || (rf || '') !== (V.rf || '');
+    if(!D.length && !runChg){ toastM(P.length ? 'Nothing changed — the saved figures are already the same' : 'No PMS data inside the heater run', P.length ? 'ok' : 'er'); if(P.length){ S.imp = null; render(); } return !!P.length; }
+    const oth = D.filter(x => x.other), clr = D.filter(x => x.clear);
     if(oth.length && !confirm(oth.map(x => dmy(x.date)+' has heater data of '+x.other).join('\n')+'\n\nReplace it with this vessel\'s figures?')) return false;
+    if(clr.length && !confirm(clr.map(x => dmy(x.date)).join(', ')+' — outside the new heater run.\n\nDelete the heater figures of '+(clr.length > 1 ? 'these days' : 'this day')+'?')) return false;
     const now = Date.now(), by = userName(), up = {};
-    D.forEach(x => { up['heater_day/'+x.date] = { a:x.a, b:x.b, vk:S.cur, voy:V.no || '', ves:V.ves || '', h:x.h, src:'PMS', by, _ts:now }; });
-    up['heater_voy/'+S.cur+'/rs'] = tsStr(I.start);
-    up['heater_voy/'+S.cur+'/rf'] = I.fin ? tsStr(I.stop) : null;
+    D.forEach(x => { up['heater_day/'+x.date] = x.clear ? null : { a:x.a, b:x.b, vk:S.cur, voy:V.no || '', ves:V.ves || '', h:x.h, src:'PMS', by, _ts:now }; });
+    up['heater_voy/'+S.cur+'/rs'] = rs; up['heater_voy/'+S.cur+'/rf'] = rf;
     try{
       await firebase.database().ref().update(up);
-      D.forEach(x => { S.days[x.date] = up['heater_day/'+x.date]; delete S.work[x.date]; });
-      V.rs = tsStr(I.start); if(I.fin) V.rf = tsStr(I.stop); else delete V.rf;
+      D.forEach(x => { if(x.clear) delete S.days[x.date]; else S.days[x.date] = up['heater_day/'+x.date]; delete S.work[x.date]; });
+      V.rs = rs; if(rf) V.rf = rf; else delete V.rf;
       /* Cavern Daily (Heater C3) — nguồn SAP WMS: thay dòng PMS cũ, dòng gõ tay thì hỏi */
       if(typeof CAV !== 'undefined' && CAV.pushEntry){
         D.forEach(x => { const cur = (CAV.ROWS || []).filter(r => r && r.kind === 'heater' && r.prod === 'c3' && r.date === x.date);
           const foreign = cur.filter(r => !/^PMS/.test(String(r.note || '')));
           if(foreign.length && !confirm('Cavern Daily already has Heater C3 typed by hand on '+dmy(x.date)+'.\nOK = replace with the PMS figure · Cancel = keep it')) return;
           cur.forEach(r => { try{ CAV.removeSilent(r._rid); }catch(_){} });
-          if(x.a + x.b > 0) CAV.pushEntry(x.date, 'heater', 'c3', 'D', x.a + x.b, 'PMS FQT32331+FQT32341 · '+(V.ves || '')+' · '+x.date); });
+          if(!x.clear && x.a + x.b > 0) CAV.pushEntry(x.date, 'heater', 'c3', 'D', x.a + x.b, 'PMS FQT32331+FQT32341 · '+(V.ves || '')+' · '+x.date); });
         try{ CAV.render(); }catch(_){}
       }
-      toastM('📂 '+D.length+' day(s) saved · '+fmt(D.reduce((s, x) => s + x.a + x.b, 0), 0)+' kg — now type the Unloaded (t) of each day', 'ok');
+      const kg = D.filter(x => !x.clear).reduce((s, x) => s + x.a + x.b, 0);
+      toastM('💾 '+(D.length ? D.length+' day(s) saved · '+fmt(kg, 0)+' kg' : 'Heater run saved')+(clr.length ? ' · '+clr.length+' day(s) cleared' : '')+' — type the Unloaded (t) of each day', 'ok');
       S.imp = null; render(); syncMail(); return true;
     }catch(e){ toastM('⚠ Save failed: '+e.message, 'er'); return false; }
   }
-  /* v4.201 — BẢNG DỮ LIỆU vừa nạp từ file PMS (A + B ghép theo thời điểm) để người dùng BẤM CHỌN
-     START / FINISH thay vì nhớ và gõ giờ. Mặc định chỉ hiện dòng có bộ đếm TĂNG (+ dòng ngay trước
-     lúc bắt đầu tăng, + mốc mỗi giờ); nút "All rows" hiện mọi dòng. Tối đa 6 000 dòng / lần vẽ. */
+  /* v4.201 — BẢNG DỮ LIỆU (file + số giờ đã lưu, ghép theo thời điểm) để BẤM CHỌN START / FINISH */
   function impRows(){
-    const I = S.imp, A = I.A && I.A.pts, B = I.B && I.B.pts;
+    const X = impSrc(), A = X.A.length ? X.A : null, B = X.B.length ? X.B : null;
     const ts = new Set(); (A || []).forEach(p => ts.add(p[0])); (B || []).forEach(p => ts.add(p[0]));
     const T = [...ts].sort((a, b) => a - b), out = [];
     let pa = null, pb = null;
@@ -1009,9 +1102,9 @@ const HTRH = (function(){
     let rows = mode === 'all' ? all : all.filter((r, i) => mv(r) || (all[i+1] && mv(all[i+1])) || new Date(r.t).getMinutes() === 0 || r.t === I.start || r.t === I.stop);
     const cut = rows.length > MAX; if(cut) rows = rows.slice(0, MAX);
     const nMove = all.filter(mv).length;
-    let h = '<div class="ht-tbar"><b>📄 Data loaded from the file</b> <small>'+all.length.toLocaleString('en-US')+' readings · '+(all.length ? tsStr(all[0].t)+' → '+tsStr(all[all.length-1].t) : '')+' · counters rising in '+nMove.toLocaleString('en-US')+' of them</small>'+
-      '<span class="lx-seg" style="margin-left:auto"><button class="'+(mode === 'active' ? 'on' : '')+'" onclick="HTRH.impSet(\'mode\',\'active\')" title="Rows where a counter rises, the row just before it starts rising, and every full hour">Rising + hourly</button><button class="'+(mode === 'all' ? 'on' : '')+'" onclick="HTRH.impSet(\'mode\',\'all\')">All rows</button></span></div>'+
-      '<div class="dp-hint">👉 <b>Click a row</b> = START of the heater run · <b>⏹</b> on a row = FINISH (ticks "Heater finished"). Green = START, red = FINISH.</div>'+
+    let h = '<div class="ht-tbar"><b>📄 Data loaded from the file</b> <small>'+all.length.toLocaleString('en-US')+' readings · '+(all.length ? tsStr(all[0].t)+' → '+tsStr(all[all.length-1].t) : '')+' · counters rising in '+nMove.toLocaleString('en-US')+'</small>'+
+      '<span class="lx-seg" style="margin-left:auto"><button class="'+(mode === 'active' ? 'on' : '')+'" onclick="HTRH.impSet(\'mode\',\'active\')" title="Rows where a counter rises, the row just before, and every full hour">Rising + hourly</button><button class="'+(mode === 'all' ? 'on' : '')+'" onclick="HTRH.impSet(\'mode\',\'all\')">All rows</button></span></div>'+
+      '<div class="dp-hint">👉 <b>Click a row</b> = START · <b>⏹</b> on a row = FINISH. Green = START, red = FINISH.</div>'+
       '<div class="ht-tscroll" id="htImpScroll"><table class="eng-tbl dp-tbl ht-itbl"><thead><tr><th>Time</th><th>Counter A (kg)</th><th>+ A</th><th>Counter B (kg)</th><th>+ B</th><th></th></tr></thead><tbody>';
     h += rows.map(r => { const cls = r.t === I.start ? 'ht-rs' : I.fin && r.t === I.stop ? 'ht-rf' : (I.start && r.t > I.start && (!I.fin || !I.stop || r.t < I.stop)) ? 'ht-rin' : '';
       const d0 = new Date(r.t).getHours() === 0 && new Date(r.t).getMinutes() === 0;
@@ -1029,32 +1122,57 @@ const HTRH = (function(){
     if(el && box) box.scrollTop = el.offsetTop - box.clientHeight / 2;
     I.jump = '';
   }
-  function impHtml(){
-    const I = S.imp, V = S.voys[S.cur] || {};
-    let h = '<div class="ht-imp"><div class="dp-h">📂 PMS import — '+esc(V.ves || '')+' <small>TagMonitoringReport per-minute files, Heater A (FQT32331) + B (FQT32341) — one file may cover several days</small><button class="dp-x" onclick="HTRH.impClose()" title="Close without saving">✕</button></div>';
-    h += '<div class="dp-row"><label class="eng-btn green ht-filebtn">📂 '+(I.A || I.B ? 'Add more files' : 'Choose PMS files (A + B together)')+'<input type="file" multiple accept=".xlsx,.xlsm,.xls" onchange="HTRH.impFiles(this)"></label>'+
-      (I.busy ? ' ⏳ reading…' : '')+(I.A || I.B ? ' <span class="ht-chip A'+(I.A ? '' : ' miss')+'">A</span><span class="ht-chip B'+(I.B ? '' : ' miss')+'">B</span><button class="dp-x" onclick="HTRH.impSwap()" title="Files assigned the wrong way round? Swap A / B">⇄</button> <small class="dp-by">'+esc(I.files.join(' · '))+'</small>' : '')+'</div>';
-    I.pending.forEach((p, i) => { h += '<div class="ht-pi">❓ '+esc(p.file)+' — this file does not say which heater it is: <button class="eng-btn blue" onclick="HTRH.impAssign('+i+',\'A\')">Heater A</button><button class="eng-btn red" onclick="HTRH.impAssign('+i+',\'B\')">Heater B</button></div>'; });
-    if(!(I.A || I.B)) return h + '</div>';
-    const R_ = impRuns();
-    h += '<div class="dp-row ht-ss">';
-    if(I.fixed) h += '<div class="ht-fix">START <b>'+esc(V.rs)+'</b> <small>(set at the first import of this vessel)</small> <button class="dp-x" onclick="HTRH.impSet(\'unfix\')" title="Change the START point">✎</button></div>';
-    else h += '<label class="ht-need">START of the heater run'+(V.rs ? '' : ' <small>— first import: confirm where this vessel starts</small>')+'<input type="datetime-local" step="60" value="'+dtLocal(I.start)+'" onchange="HTRH.impSet(\'start\',this.value)"></label>'+
-      (R_.length ? '<span class="ht-runs"><small>runs found:</small> '+R_.map((r, i) => '<button class="lx-mini" onclick="HTRH.impSet(\'run\','+i+')" title="Counters rising '+tsStr(r.start)+' → '+tsStr(r.stop)+'">'+tsStr(r.start).slice(5)+' · '+fmt(r.a + r.b, 0)+' kg</button>').join('')+'</span>' : '');
-    h += '<label class="ht-fin"><input type="checkbox"'+(I.fin ? ' checked' : '')+' onchange="HTRH.impSet(\'fin\',this.checked)"> Heater finished at</label><input class="ht-dt" type="datetime-local" step="60" value="'+dtLocal(I.stop)+'" '+(I.fin ? '' : 'disabled ')+'onchange="HTRH.impSet(\'stop\',this.value)">'+
-      '<small class="dp-by">'+(I.fin ? 'nothing after FINISH is counted' : 'not ticked: days with data 00:00 → 24:00 are complete, the last day is completed by the next import')+'</small></div>';
-    h += impTable();
-    if(!I.start) return h + '<div class="dp-hint dp-offt">Pick the START point — click a row in the table above.</div></div>';
-    const D = impPreview();
-    h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Date</th><th>Hours</th><th>Heater A (kg)</th><th>Heater B (kg)</th><th>Total (kg)</th><th>Day</th><th>Checks</th></tr></thead><tbody>'+
-      (D.length ? D.map(x => '<tr><td class="td-c"><b>'+dmy(x.date)+'</b> '+(x.had ? '<small class="dp-by">update</small>' : '<small class="dp-okt">new</small>')+(x.other ? '<br><small class="dp-offt">was '+esc(x.other)+'</small>' : '')+'</td><td class="td-c">'+x.from.slice(0,2)+':'+x.from.slice(2)+' → '+x.to.slice(0,2)+':'+x.to.slice(2)+'</td>'+
-        '<td class="td-r">'+fmt(x.a,0)+'</td><td class="td-r">'+fmt(x.b,0)+'</td><td class="td-r"><b>'+fmt(x.a + x.b,0)+'</b></td><td class="td-c">'+(x.complete ? '<span class="dp-okt">✓ complete</span>' : '<span class="dp-offt">partial</span>')+'</td>'+
-        '<td>'+x.chk.map(c => '<div class="ht-c'+c.lvl+'">'+(c.lvl === 'bad' ? '⛔ ' : c.lvl === 'warn' ? '⚠ ' : 'ℹ ')+esc(c.t)+'</div>').join('')+'</td></tr>').join('')
-        : '<tr><td colspan="7" class="td-c dp-na">No data after START.</td></tr>')+
-      '</tbody></table></div><div class="dp-row"><button class="eng-btn green"'+(D.length ? '' : ' disabled')+' onclick="HTRH.impApply()">✔ Apply — create / update '+D.length+' day row(s) and save</button><button class="eng-btn" onclick="HTRH.impClose()">Cancel</button></div>';
-    return h + '</div>';
+  const chkIcon = L => L.some(c => c.lvl === 'bad') ? 'bad' : L.some(c => c.lvl === 'warn') ? 'warn' : L.length ? 'info' : '';
+  function chkCell(L){
+    if(!L || !L.length) return '<span class="dp-okt">✓</span>';
+    const w = chkIcon(L);
+    return '<details class="ht-chk '+w+'"><summary>'+(w === 'bad' ? '⛔' : w === 'warn' ? '⚠' : 'ℹ')+' '+L.length+'</summary><ul class="dp-al">'+L.map(c => '<li class="dp-'+c.lvl+'">'+esc(c.t)+'</li>').join('')+'</ul></details>';
   }
-
+  /* cửa sổ (modal) PMS data & heater run — 3 bước */
+  function impHtml(){
+    const I = S.imp, V = S.voys[S.cur] || {}, hasF = !!(I.A || I.B), X = impSrc(), hasSaved = !!(X.SV.A.length || X.SV.B.length);
+    let foot = '<div class="xp-mf xp-mfx"><button class="eng-btn" onclick="HTRH.impClose()">Cancel</button></div>';
+    let h = '<div class="xp-mh"><div><div class="xp-mt">📂 PMS data &amp; heater run</div><div class="xp-ms">'+esc(V.ves || '')+(V.no ? ' · voyage '+esc(V.no) : '')+' · Heater A = FQT32331 · Heater B = FQT32341</div></div><button class="xp-close" onclick="HTRH.impClose()" title="Close without saving">✕</button></div><div class="xp-mb">';
+    /* 1 — file */
+    h += '<div class="xp-step"><div class="xp-sn">1</div><div class="xp-sc"><div class="xp-st">PMS files <small>'+(hasSaved ? 'optional — without a file the saved hourly readings are re-cut to the heater run below' : 'TagMonitoringReport per-minute export · one day or several days · A and B together or one at a time')+'</small></div>'+
+      '<div class="dp-row"><label class="eng-btn green ht-filebtn">📂 '+(hasF ? 'Add more files' : 'Choose PMS files')+'<input type="file" multiple accept=".xlsx,.xlsm,.xls" onchange="HTRH.impFiles(this)"></label>'+
+      (I.busy ? ' ⏳ reading…' : '')+
+      (hasF ? '<span class="ht-chip A'+(I.A ? '' : ' miss')+'" title="'+(I.A ? I.A.pts.length.toLocaleString('en-US')+' readings · '+tsStr(I.A.pts[0][0])+' → '+tsStr(I.A.pts[I.A.pts.length-1][0]) : 'not loaded')+'">A</span><span class="ht-chip B'+(I.B ? '' : ' miss')+'" title="'+(I.B ? I.B.pts.length.toLocaleString('en-US')+' readings · '+tsStr(I.B.pts[0][0])+' → '+tsStr(I.B.pts[I.B.pts.length-1][0]) : 'not loaded')+'">B</span>'+
+        '<button class="dp-x" onclick="HTRH.impSwap()" title="Files assigned the wrong way round? Swap A / B">⇄ swap</button> <small class="dp-by">'+esc(I.files.join(' · '))+'</small>' : '')+'</div>';
+    I.pending.forEach((p, i) => { h += '<div class="ht-pi">❓ '+esc(p.file)+' — which heater is this file? <button class="eng-btn blue" onclick="HTRH.impAssign('+i+',\'A\')">Heater A</button><button class="eng-btn red" onclick="HTRH.impAssign('+i+',\'B\')">Heater B</button></div>'; });
+    if(hasF){ const cov = [I.A, I.B].filter(Boolean).map(F => F.pts); const f0 = Math.min(...cov.map(P => P[0][0])), f1 = Math.max(...cov.map(P => P[P.length-1][0]));
+      h += '<div class="dp-hint">File data: <b>'+tsStr(f0)+'</b> → <b>'+tsStr(f1)+'</b>'+(I.A && I.B ? '' : ' · <span class="dp-offt">'+(I.A ? 'Heater B' : 'Heater A')+' not loaded</span> — you can add it now or in a later import')+'</div>'; }
+    h += '</div></div>';
+    /* 2 — run */
+    const R_ = impRuns();
+    h += '<div class="xp-step"><div class="xp-sn">2</div><div class="xp-sc"><div class="xp-st">Heater run <small>type the date &amp; time, pick a detected run, or click in the data table</small></div>'+
+      '<div class="dp-row ht-ss"><label class="'+(I.start ? '' : 'ht-need')+'">START of the heater run<input class="ht-dt" type="datetime-local" step="60" value="'+dtLocal(I.start)+'" onchange="HTRH.impSet(\'start\',this.value)"></label>'+
+      (I.fixed ? '<span class="xp-tag" title="Saved at the first import of this vessel — change it only if it was wrong">from the first import</span>' : '')+
+      '<label class="ht-fin"><input type="checkbox"'+(I.fin ? ' checked' : '')+' onchange="HTRH.impSet(\'fin\',this.checked)"> Heater finished at</label>'+
+      '<label>FINISH<input class="ht-dt" type="datetime-local" step="60" value="'+(I.fin ? dtLocal(I.stop) : '')+'" placeholder="still running" onchange="HTRH.impSet(\'stop\',this.value)"></label>'+
+      '<small class="dp-by" style="align-self:center">'+(I.fin ? 'nothing after FINISH is counted' : 'still running — the last day is completed by the next import')+'</small></div>';
+    if(R_.length) h += '<div class="ht-runs"><small>Runs found in the data:</small> '+R_.map((r, i) => '<button class="lx-mini" onclick="HTRH.impSet(\'run\','+i+')" title="Counters rising '+tsStr(r.start)+' → '+tsStr(r.stop)+'">'+tsStr(r.start).slice(5)+' → '+tsStr(r.stop).slice(5)+' · '+fmt(r.a + r.b, 0)+' kg</button>').join('')+'</div>';
+    if(hasF || hasSaved) h += '<button class="xp-link" onclick="HTRH.impSet(\'table\')">'+(I.table ? '▾ Hide the data table' : '▸ Pick START / FINISH in the data table')+'</button>'+(I.table ? impTable() : '');
+    h += '</div></div>';
+    /* 3 — kết quả */
+    h += '<div class="xp-step"><div class="xp-sn">3</div><div class="xp-sc"><div class="xp-st">Result by day</div>';
+    if(!hasF && !hasSaved) h += '<div class="dp-hint">Choose the PMS files in step 1.</div>';
+    else if(!I.start) h += '<div class="dp-hint dp-offt">Set the START of the heater run in step 2.</div>';
+    else {
+      const D = impPreview(), W = D.filter(x => !x.same);
+      const nNew = D.filter(x => !x.had && !x.clear).length, nUpd = D.filter(x => x.had && !x.same && !x.clear).length, nSame = D.filter(x => x.same).length, nClr = D.filter(x => x.clear).length;
+      h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl ht-prev"><thead><tr><th>Date</th><th>Data</th><th>Heater A (kg)</th><th>Heater B (kg)</th><th>Total (kg)</th><th>Day</th><th>Checks</th></tr></thead><tbody>'+
+        (D.length ? D.map(x => '<tr class="'+(x.clear ? 'ht-pclr' : x.same ? 'ht-psame' : '')+'"><td class="td-c"><b>'+dmy(x.date)+'</b> '+(x.clear ? '<small class="dp-offt">delete</small>' : x.same ? '<small class="dp-by">no change</small>' : x.had ? '<small class="xp-upd">update</small>' : '<small class="dp-okt">new</small>')+(x.other ? '<br><small class="dp-offt">was '+esc(x.other)+'</small>' : '')+'</td>'+
+          '<td class="td-c">'+(x.clear ? '–' : hm(x.from)+' → '+hm(x.to))+'</td><td class="td-r">'+fmt(x.a,0)+'</td><td class="td-r">'+fmt(x.b,0)+'</td><td class="td-r"><b>'+fmt(x.a + x.b,0)+'</b></td>'+
+          '<td class="td-c">'+(x.clear ? '' : x.complete ? '<span class="dp-okt">✓ complete</span>' : '<span class="dp-offt">partial</span>')+'</td><td>'+chkCell(x.chk)+'</td></tr>').join('')
+          : '<tr><td colspan="7" class="td-c dp-na">No data inside the heater run'+(hasF ? ' — does the file cover a time after START?' : '')+'.</td></tr>')+'</tbody></table></div>'+
+        (D.length ? '<div class="dp-hint">'+[nNew ? nNew+' new' : '', nUpd ? nUpd+' updated' : '', nSame ? nSame+' unchanged (not written)' : '', nClr ? nClr+' to delete' : ''].filter(Boolean).join(' · ')+'</div>' : '');
+      const runChg = I.start && (tsStr(I.start) !== ((S.voys[S.cur] || {}).rs || '') || (I.fin ? tsStr(I.stop) : '') !== ((S.voys[S.cur] || {}).rf || ''));
+      foot = '<div class="xp-mf xp-mfx"><span class="dp-by">'+(W.length ? 'Heater A/B per day → heater_day · Cavern Daily (Heater C3)' : '')+'</span><button class="eng-btn" onclick="HTRH.impClose()">Cancel</button><button class="eng-btn green xp-pri"'+(W.length || runChg ? '' : ' disabled')+' onclick="HTRH.impApply()">✔ Apply — save '+W.length+' day(s)'+(runChg ? ' + heater run' : '')+'</button></div>';
+    }
+    h += '</div></div>';
+    return h + '</div>' + foot;
+  }
   function dropWork(d){ delete S.work[d]; render(); }
   async function saveDay(d){
     if(!mayWrite('eng_heat')){ toastM('⛔ Your account has no write permission', 'er'); return false; }
@@ -1162,50 +1280,57 @@ const HTRH = (function(){
     if(!out.some(a => a.lvl !== 'info')) out.unshift({ lvl:'ok', t:'No abnormal heater consumption in this range.' });
     return out;
   }
+  /* ══ v4.209 — GIAO DIỆN HEATER ════════════════════════════════════════════════════════════════════
+     Trên xuống: 🚢 dải tàu (chip bấm chọn) → thẻ CHUYẾN đang chọn (tên · trạng thái · 4 ô số: Heater run, Heater C3,
+     Propane unloaded, kg/t · việc cần làm tiếp) → MỘT biểu đồ (kg heater theo ngày của chuyến) → hàng NÚT mở từng
+     mục: 📅 Days · ⏱ Hourly · 🚢 Vessel details · 📜 All vessels · 📊 History (bấm lại để đóng; nhớ theo máy).
+     Nạp PMS / khai tàu / dán itinerary mở trong CỬA SỔ (modal) — màn hình chính không bị kéo dài. */
+  const PANELS = [['days','📅 Days'],['hourly','⏱ Hourly'],['details','🚢 Vessel details'],['vessels','📜 All vessels'],['history','📊 History']];
+  S.panel = ENGX_U.pref('htr_panel', 'days'); S.hpan = ENGX_U.pref('htr_hpan', '');
+  function panel(k){ S.panel = S.panel === k ? '' : k; ENGX_U.prefSet('htr_panel', S.panel); render(); }
+  function hpanel(k){ S.hpan = S.hpan === k ? '' : k; ENGX_U.prefSet('htr_hpan', S.hpan); render(); }
+  const dmyT = t => { const s = tsStr(t); return s.slice(8, 10)+'/'+s.slice(5, 7)+' '+s.slice(11); };
+
+  /* ── 📊 lịch sử: KPI + MỘT biểu đồ ngày; bảng/nhận định mở bằng nút ── */
   function histHtml(){
     const st = $('htrStats');
-    const bar = '<div class="lx-bar"><span class="lx-span">'+(S.loading ? '⏳ loading…' : S.loaded ? (S.all ? 'All heater history loaded' : 'Loaded from <b>'+dmy(S.from)+'</b> (last 3 months)') : '')+'</span>'+
-      (S.loaded && !S.all && !S.loading ? '<button class="eng-btn" onclick="HTRH.loadAll()" title="Download the whole heater history (daily + voyages)">⤓ Load all history</button>' : '')+
-      (S.all ? '<span class="dp-rg">'+[['92','3 m'],['182','6 m'],['365','1 y'],['730','2 y'],['all','All']].map(([k, t]) => '<button class="'+(S.range === k ? 'on' : '')+'" onclick="HTRH.range(\''+k+'\')">'+t+'</button>').join('')+'</span>' : '')+'</div>';
     const Dall = days(), D = inRange(Dall), Vall = voys(Dall), V = Vall.filter(v => S.range === 'win' || S.range === 'all' || v.st.slice(0,10) >= isoAdd(isoToday(), -(+S.range)));
     const ta = D.reduce((s, x) => s + x.a, 0), tb = D.reduce((s, x) => s + x.b, 0), run = D.filter(x => x.t > 0);
-    if(st) st.innerHTML = '<b>'+fmt((ta + tb) / 1000, 1)+'</b> t C3 · '+run.length+' running day(s)';
-    let h = '<div class="lx-sec">📊 History</div>'+bar;
-    if(!Dall.length && !Vall.length) return h+'<div class="dp-empty">No heater history loaded.<br><small>Use 📥 Import file (sheets HEATER_DAY / HEATER_VOY) or save days of an unloading vessel above.</small></div>';
+    if(st && !S.cur) st.innerHTML = '<b>'+fmt((ta + tb) / 1000, 1)+'</b> t C3 · '+run.length+' running day(s)';
+    let h = '<div class="lx-bar"><span class="lx-span">'+(S.loading ? '⏳ loading…' : S.all ? 'All heater history loaded' : 'Loaded from <b>'+dmy(S.from)+'</b> (last 3 months)')+'</span>'+
+      (S.loaded && !S.all && !S.loading ? '<button class="eng-btn" onclick="HTRH.loadAll()" title="Download the whole heater history (daily + voyages)">⤓ Load all history</button>' : '')+
+      (S.all ? '<span class="dp-rg">'+[['92','3 m'],['182','6 m'],['365','1 y'],['730','2 y'],['all','All']].map(([k, t]) => '<button class="'+(S.range === k ? 'on' : '')+'" onclick="HTRH.range(\''+k+'\')">'+t+'</button>').join('')+'</span>' : '')+'</div>';
+    if(!Dall.length && !Vall.length) return h+'<div class="dp-empty">No heater history loaded.<br><small>Use 📥 Import file (sheets HEATER_DAY / HEATER_VOY) or load PMS files for a vessel.</small></div>';
     const KV = V.filter(v => v.kgt != null && v.t > 0), avgKgt = KV.length ? KV.reduce((s, v) => s + v.t, 0) / KV.reduce((s, v) => s + v.amt, 0) : null;
     const box = (n, v, s) => '<div class="dp-kpi"><div class="dp-kn" style="border-color:#e76f00">'+n+'</div><div class="dp-kv">'+v+'</div><div class="dp-ks">'+s+'</div></div>';
     h += '<div class="dp-kpis">'+box('Heater A', fmt(ta / 1000, 1)+'<small> t</small>', (ta + tb ? Math.round(ta / (ta + tb) * 100) : 0)+' % of total')+
       box('Heater B', fmt(tb / 1000, 1)+'<small> t</small>', (ta + tb ? Math.round(tb / (ta + tb) * 100) : 0)+' % of total')+
       box('Total C3 fuel', fmt((ta + tb) / 1000, 1)+'<small> t</small>', run.length+' running day(s) · '+(run.length ? fmt((ta + tb) / run.length, 0) : '–')+' kg / running day')+
       box('Per ton of cargo', avgKgt == null ? '–' : fmt(avgKgt, 2)+'<small> kg/t</small>', KV.length+' voyage(s) with cargo tonnage')+'</div>';
-    h += '<div class="dp-card"><div class="dp-h">🔎 Findings</div><ul class="dp-al">'+findings(D, V).map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul></div>';
     const from = S.range === 'win' ? S.from : S.range === 'all' ? '' : isoAdd(isoToday(), -(+S.range));
-    h += '<div class="dp-card"><div class="dp-h">📊 Daily consumption (kg) <span class="dp-lg"><span><i style="background:'+CA+'"></i>Heater A</span><span><i style="background:'+CB+'"></i>Heater B</span></span></div>'+
-      LX_U.barChart(run.map(x => ({ d:x.d, parts:[x.a, x.b], tip:dmy(x.d)+' · A '+fmt(x.a,0)+' · B '+fmt(x.b,0)+' · total '+fmt(x.t,0)+' kg'+(x.ves ? ' · '+x.ves : '') })), [{ col:CA }, { col:CB }], { from:from || null, to:isoToday(), aria:'Daily heater consumption' })+'</div>';
-    /* kg/t theo chuyến */
-    if(KV.length) h += '<div class="dp-card"><div class="dp-h">🚢 Specific consumption per voyage (kg C3 per ton of cargo)</div>'+
-      LX_U.lineChart([{ name:'kg/t', col:'#e76f00', pts:KV.map(v => ({ d:v.st.slice(0,10), v:+v.kgt.toFixed(3), tip:(v.no ? v.no+' ' : '')+v.ves+' · '+fmt(v.amt,0)+' t · '+fmt(v.t,0)+' kg · '+fmt(v.kgt,2)+' kg/t' })) }],
-        { lims:avgKgt ? [{ v:+avgKgt.toFixed(3), t:'avg '+fmt(avgKgt,2), show:true }] : [], dp:2, h:220, aria:'kg per ton per voyage' })+'</div>';
-    /* bảng chuyến */
-    h += '<div class="dp-card"><div class="dp-h">🚢 Voyages ('+V.length+')</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>No.</th><th>Vessel</th><th>Start</th><th>Finish</th><th>Cargo (t)</th><th>Heater A</th><th>Heater B</th><th>Total (kg)</th><th>kg/t</th><th>A share</th><th title="Sum of the daily records for this voyage">Σ daily</th><th>Note</th></tr></thead><tbody>'+
+    h += '<div class="dp-h">📊 Daily consumption (kg) <span class="dp-lg"><span><i style="background:'+CA+'"></i>Heater A</span><span><i style="background:'+CB+'"></i>Heater B</span></span></div>'+
+      LX_U.barChart(run.map(x => ({ d:x.d, parts:[x.a, x.b], tip:dmy(x.d)+' · A '+fmt(x.a,0)+' · B '+fmt(x.b,0)+' · total '+fmt(x.t,0)+' kg'+(x.ves ? ' · '+x.ves : '') })), [{ col:CA }, { col:CB }], { from:from || null, to:isoToday(), aria:'Daily heater consumption', h:210 });
+    const F = findings(D, V), fw = F.some(a => a.lvl === 'bad') ? 'bad' : F.some(a => a.lvl === 'warn') ? 'warn' : '';
+    h += ENGX_U.tabs('HTRH.hpanel', [['find','🔎 Findings', F.filter(a => a.lvl !== 'ok').length || '', fw], ['kgt','📈 kg per ton'], ['voy','🚢 Voyages', V.length], ['month','🗓 Monthly'], ['rec','📋 Daily records', run.length]], S.hpan, 'xp-sub');
+    if(S.hpan === 'find') h += '<ul class="dp-al">'+F.map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul>';
+    else if(S.hpan === 'kgt') h += KV.length ? LX_U.lineChart([{ name:'kg/t', col:'#e76f00', pts:KV.map(v => ({ d:v.st.slice(0,10), v:+v.kgt.toFixed(3), tip:(v.no ? v.no+' ' : '')+v.ves+' · '+fmt(v.amt,0)+' t · '+fmt(v.t,0)+' kg · '+fmt(v.kgt,2)+' kg/t' })) }],
+        { lims:avgKgt ? [{ v:+avgKgt.toFixed(3), t:'avg '+fmt(avgKgt,2), show:true }] : [], dp:2, h:220, aria:'kg per ton per voyage' }) : '<div class="dp-empty">No finished voyage with cargo tonnage in this range.</div>';
+    else if(S.hpan === 'voy') h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>No.</th><th>Vessel</th><th>Start</th><th>Finish</th><th>Cargo (t)</th><th>Heater A</th><th>Heater B</th><th>Total (kg)</th><th>kg/t</th><th>A share</th><th title="Sum of the daily records for this voyage">Σ daily</th><th>Note</th></tr></thead><tbody>'+
       (V.length ? V.slice().reverse().map(v => { const dd = v.nd && (S.all || v.st.slice(0, 10) >= S.from) ? v.sa + v.sb - v.t : null;
         return '<tr><td class="td-c">'+esc(v.no)+'</td><td>'+esc(v.ves)+(v.org ? ' <small class="dp-by">'+esc(v.org)+'</small>' : '')+'</td><td class="td-c">'+esc(v.st)+'</td><td class="td-c">'+esc(v.fi)+'</td>'+
           '<td class="td-r">'+(v.amt == null ? '' : fmt(v.amt,0))+'</td><td class="td-r">'+(v.a == null ? '' : fmt(v.a,0))+'</td><td class="td-r">'+(v.b == null ? '' : fmt(v.b,0))+'</td><td class="td-r"><b>'+fmt(v.t,0)+'</b></td>'+
           '<td class="td-r">'+(v.kgt == null ? '' : fmt(v.kgt,2))+'</td><td class="td-c'+(v.share != null && v.t > 5000 && (v.share < 0.3 || v.share > 0.7) ? ' dp-near' : '')+'">'+(v.share == null ? '' : Math.round(v.share*100)+' %')+'</td>'+
           '<td class="td-r'+(dd != null && Math.abs(dd) > Math.max(500, 0.02 * v.t) ? ' dp-near' : '')+'" title="'+(dd == null ? 'no daily record' : 'Δ '+fmt(dd,0)+' kg')+'">'+(v.nd ? fmt(v.sa + v.sb,0) : '')+'</td><td class="dp-by">'+esc(v.note || v.src)+'</td></tr>'; }).join('')
-        : '<tr><td colspan="12" class="td-c dp-na">No voyage in this range.</td></tr>')+'</tbody></table></div></div>';
-    /* tháng + ngày */
-    const M = {}; D.forEach(x => { const m = M[x.d.slice(0,7)] || (M[x.d.slice(0,7)] = { a:0, b:0, n:0 }); m.a += x.a; m.b += x.b; if(x.t > 0) m.n++; });
-    h += '<div class="dp-grid2"><div class="dp-card"><div class="dp-h">🗓 Monthly</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Month</th><th>Days</th><th>Heater A</th><th>Heater B</th><th>Total (kg)</th></tr></thead><tbody>'+
-      Object.keys(M).sort().reverse().map(k => '<tr><td class="td-c">'+k+'</td><td class="td-c">'+M[k].n+'</td><td class="td-r">'+fmt(M[k].a,0)+'</td><td class="td-r">'+fmt(M[k].b,0)+'</td><td class="td-r"><b>'+fmt(M[k].a + M[k].b,0)+'</b></td></tr>').join('')+
-      '</tbody></table></div></div>';
-    h += '<div class="dp-card"><div class="dp-h">📋 Daily records ('+run.length+')</div><div class="dp-scroll lx-hist"><table class="eng-tbl dp-tbl"><thead><tr><th>Date</th><th>Heater A</th><th>Heater B</th><th>Total</th><th>Voyage</th><th>By</th><th></th></tr></thead><tbody>'+
+        : '<tr><td colspan="12" class="td-c dp-na">No voyage in this range.</td></tr>')+'</tbody></table></div>';
+    else if(S.hpan === 'month'){ const M = {}; D.forEach(x => { const m = M[x.d.slice(0,7)] || (M[x.d.slice(0,7)] = { a:0, b:0, n:0 }); m.a += x.a; m.b += x.b; if(x.t > 0) m.n++; });
+      h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Month</th><th>Running days</th><th>Heater A</th><th>Heater B</th><th>Total (kg)</th></tr></thead><tbody>'+
+        Object.keys(M).sort().reverse().map(k => '<tr><td class="td-c">'+k+'</td><td class="td-c">'+M[k].n+'</td><td class="td-r">'+fmt(M[k].a,0)+'</td><td class="td-r">'+fmt(M[k].b,0)+'</td><td class="td-r"><b>'+fmt(M[k].a + M[k].b,0)+'</b></td></tr>').join('')+'</tbody></table></div>'; }
+    else if(S.hpan === 'rec') h += '<div class="dp-scroll lx-hist"><table class="eng-tbl dp-tbl"><thead><tr><th>Date</th><th>Heater A</th><th>Heater B</th><th>Total</th><th>Voyage</th><th>By</th><th></th></tr></thead><tbody>'+
       run.slice().reverse().map(x => '<tr><td class="td-c">'+dmy(x.d)+'</td><td class="td-r">'+fmt(x.a,0)+'</td><td class="td-r">'+fmt(x.b,0)+'</td><td class="td-r"><b>'+fmt(x.t,0)+'</b></td><td>'+esc([x.voy, x.ves].filter(Boolean).join(' '))+'</td><td class="dp-by">'+esc(x.by || x.src)+'</td>'+
-        '<td class="td-c"><button class="dp-x" title="Delete this daily record" onclick="HTRH.delDay(\''+x.d+'\')">✕</button></td></tr>').join('')+'</tbody></table></div></div></div>';
+        '<td class="td-c"><button class="dp-x" title="Delete this daily record" onclick="HTRH.delDay(\''+x.d+'\')">✕</button></td></tr>').join('')+'</tbody></table></div>';
     return h;
   }
 
-  /* ── vẽ: bảng tàu (như vessel itinerary) + chi tiết tàu ── */
   function voySums(k){
     const v = S.voys[k] || {}, ds = voyDates(k), P = ds.map(d => view(d, k)).filter(Boolean);
     return { ds, ta:P.reduce((s, x) => s + (x.a || 0), 0), tb:P.reduce((s, x) => s + (x.b || 0), 0),
@@ -1213,13 +1338,118 @@ const HTRH = (function(){
   }
   const comName = c => (COMS.find(x => x[0] === c) || [0, c || 'Propane'])[1];
   function pctTxt(u, bl){ return bl ? fmt(u, 0)+' / '+fmt(bl, 0)+' t <small>('+fmt(u / bl * 100, 0)+' %)</small>' : (u ? fmt(u, 0)+' t' : ''); }
-  function voyHtml(){
-    const recent = voyArr().filter(x => !x.fi || String(x.fi).slice(0, 10) >= isoAdd(isoToday(), -45)).reverse();
-    let h = '<div class="dp-card ht-voy"><div class="dp-h">🚢 Vessels — import itinerary <small>click a row to work on that vessel</small>'+
-      '<button class="eng-btn blue" style="margin-left:auto" onclick="HTRH.pasteOpen()" title="Copy one or more rows of the vessel itinerary table from the e-mail and paste them — the app fills the form, you correct what is wrong">📋 Paste itinerary row</button>'+
-      '<button class="eng-btn green" onclick="HTRH.newVoy()" title="Declare a vessel from the itinerary — missing information can stay empty">➕ New vessel</button></div>';
-    h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl ht-itin"><thead><tr><th>No.</th><th>Ref</th><th>Supplier</th><th>Vessel</th><th>Commodity</th><th>Lay-time</th><th>DEM ($/day)</th><th>Delivery range</th><th>Contract Q\'ty</th><th>Loadport</th><th>BL Q\'ty (MT)</th><th>Customs</th><th>ETA load port</th><th>ETA Cai Mep</th><th>Unloaded</th><th>Status</th><th></th></tr></thead><tbody>'+
-      (recent.length ? recent.map(v => { const u = voySums(v.key), c3 = hasC3(v), c4 = hasC4(v);
+
+  /* ── 🚢 dải tàu: tàu đang unloading + tàu xong trong 45 ngày (tối đa 8 chip) ── */
+  function stripHtml(){
+    const all = voyArr(), lim = isoAdd(isoToday(), -45);
+    let L = all.filter(v => !v.fi).reverse().concat(all.filter(v => v.fi && String(v.fi).slice(0, 10) >= lim).reverse()).slice(0, 8);
+    if(S.cur && S.voys[S.cur] && !L.some(v => v.key === S.cur)) L.unshift(Object.assign({ key:S.cur }, S.voys[S.cur]));
+    const chip = v => { const u = voySums(v.key), c3 = hasC3(v), p = c3 ? (u.bl3 ? u.u3 / u.bl3 : null) : (u.bl4 ? u.u4 / u.bl4 : null);
+      return '<button class="ht-vc'+(v.key === S.cur ? ' on' : '')+(v.fi ? ' done' : '')+'" onclick="HTRH.pick(\''+esc(v.key)+'\')" title="'+esc([v.ref, v.sel, comName(v.com), v.fi ? 'finished '+String(v.fi).slice(0, 10) : 'unloading'].filter(Boolean).join(' · '))+'">'+
+        '<span class="ht-vcn">'+(v.fi ? '<span class="ht-ok">✔</span>' : '<i class="ht-live"></i>')+esc(v.ves || '?')+'</span>'+
+        '<span class="ht-vcm">'+esc([v.no, c3 && hasC4(v) ? 'C3+C4' : c3 ? 'C3' : 'C4'].filter(Boolean).join(' · '))+(p != null ? ' · '+Math.round(p * 100)+' %' : '')+'</span>'+
+        (p != null ? '<span class="ht-vcb"><i style="width:'+Math.min(100, p * 100).toFixed(0)+'%"></i></span>' : '')+'</button>'; };
+    return '<div class="ht-strip"><div class="ht-sl">🚢 Vessels</div><div class="ht-chips">'+(L.length ? L.map(chip).join('') : '<span class="dp-na">No vessel yet — add one →</span>')+'</div>'+
+      '<div class="ht-sa"><button class="eng-btn" onclick="HTRH.pasteOpen()" title="Copy one or more rows of the vessel itinerary table from the e-mail and paste them — the app fills the form, you correct what is wrong">📋 Paste itinerary</button>'+
+      '<button class="eng-btn green" onclick="HTRH.newVoy()" title="Declare a vessel — missing information can stay empty">➕ New vessel</button></div></div>';
+  }
+  /* việc cần làm tiếp của chuyến đang chọn */
+  function nextStep(v){
+    if(v.fi) return '';
+    const ds = voyDates(S.cur), c3 = hasC3(v), c4 = hasC4(v), out = [];
+    const hd = ds.filter(d => S.days[d] && S.days[d].vk === S.cur && S.days[d].h);
+    if(c3 && !hd.length) return '👉 Next: <b>📂 Load PMS file</b> of the first unloading day — then set the START of the heater run.';
+    if(c3){ const la = hd[hd.length-1], ks = Object.keys(S.days[la].h).sort(), lk = ks[ks.length-1];
+      if(lk !== '2400' && !(v.rf && la === String(v.rf).slice(0, 10))) out.push('<b>'+dmy(la)+'</b> has PMS data until '+hm(lk)+' — load the next PMS file to complete it'); }
+    const miss = ds.filter(d => { const x = view(d) || {}; return (c3 && S.days[d] && S.days[d].vk === S.cur && num(x.u3) == null) || (c4 && !c3 && num(x.u4) == null); });
+    if(miss.length) out.push('type the <b>Unloaded (t)</b> of '+miss.slice(-4).map(dmy).join(', ')+(miss.length > 4 ? ' …' : '')+' in 📅 Days');
+    return out.length ? '👉 Next: '+out.join(' · ') : '✓ Up to date — load the next PMS file tomorrow';
+  }
+  /* ── thẻ chuyến đang chọn ── */
+  function heroHtml(){
+    const v = S.voys[S.cur], u = voySums(S.cur), c3 = hasC3(v), c4 = hasC4(v);
+    const meta = [v.no ? 'Voyage '+esc(v.no) : '', esc(v.ref || ''), esc(v.sel || ''), comName(v.com), esc(v.org || ''), v.st ? 'start '+dmy(String(v.st).slice(0, 10)) : ''].filter(Boolean).join(' · ');
+    const stt = v.fi ? '<span class="ht-st done">✔ Finished '+dmy(String(v.fi).slice(0, 10))+'</span>' : '<span class="ht-st live"><i class="ht-live"></i>Unloading</span>';
+    let h = '<div class="ht-hero"><div class="ht-hh"><div class="ht-hid"><div class="ht-vn">'+esc(v.ves || '?')+stt+'</div><div class="ht-vm">'+meta+'</div></div>'+
+      '<div class="ht-ha">'+(c3 ? '<button class="eng-btn green xp-pri" onclick="HTRH.impOpen()" title="Load the PMS TagMonitoringReport files (one day or several days) — or set the heater START / FINISH">📂 Load PMS file</button>'+
+        '<label class="eng-btn blue ht-filebtn" title="Pick the Heater 연료 사용량 master file — the app writes this voyage\'s hourly sheet + Sumary row (re-exporting updates the same sheet) and downloads it">⬇ Heater report<input type="file" accept=".xlsx" onchange="HTRH.report(this)"></label>' : '')+
+      '<button class="eng-btn" onclick="HTRH.editVoy()">✎ Edit vessel</button>'+(v.fi ? '' : '<button class="eng-btn" onclick="HTRH.saveVoy(true)" title="Unloading finished — Finish = last day">✔ Finish voyage</button>')+'</div></div>';
+    const tile = (lbl, val, sub, extra, cls, on) => '<div class="ht-tile'+(cls ? ' '+cls : '')+'"'+(on ? ' onclick="'+on+'" role="button" tabindex="0" title="Click to change"' : '')+'><div class="ht-tl">'+lbl+'</div><div class="ht-tv">'+val+'</div>'+(sub ? '<div class="ht-ts">'+sub+'</div>' : '')+(extra || '')+'</div>';
+    const pbar = p => '<div class="ht-pb"><i style="width:'+Math.min(100, p * 100).toFixed(1)+'%"></i></div>';
+    let t = '';
+    if(c3){
+      const rs = v.rs ? parseDT(v.rs) : 0, rf = v.rf ? parseDT(v.rf) : 0, SV = savedPts(S.cur);
+      const lastT = Math.max(SV.A.length ? SV.A[SV.A.length-1][0] : 0, SV.B.length ? SV.B[SV.B.length-1][0] : 0), tot = u.ta + u.tb;
+      t += tile('⏱ Heater run', rs ? dmyT(rs)+' <small>→</small> '+(rf ? dmyT(rf) : '<small class="ht-run">running</small>') : '<small>not set</small>',
+        (lastT ? 'PMS data until <b>'+dmyT(lastT)+'</b>' : 'no PMS data yet')+' · <span class="xp-lnk">✎ edit</span>', '', rs ? 'ht-click' : 'ht-click todo', 'HTRH.impOpen()');
+      t += tile('🔥 Heater C3', fmt(tot, 0)+'<small> kg</small>', tot ? '<span style="color:'+CA+'">A</span> '+fmt(u.ta, 0)+' ('+Math.round(u.ta / tot * 100)+' %) · <span style="color:'+CB+'">B</span> '+fmt(u.tb, 0)+' ('+Math.round(u.tb / tot * 100)+' %)' : 'no heater data yet',
+        tot ? '<div class="ht-ab"><i style="width:'+(u.ta / tot * 100).toFixed(1)+'%;background:'+CA+'"></i><i style="width:'+(u.tb / tot * 100).toFixed(1)+'%;background:'+CB+'"></i></div>' : '');
+      t += tile('⛽ Propane unloaded', fmt(u.u3, 0)+'<small> t</small>', u.bl3 ? 'of BL '+fmt(u.bl3, 0)+' t · <b>'+fmt(u.u3 / u.bl3 * 100, 1)+' %</b>' : 'BL Q\'ty not known yet', u.bl3 ? pbar(u.u3 / u.bl3) : '');
+      t += tile('📐 Specific consumption', u.u3 && tot ? fmt(tot / u.u3, 2)+'<small> kg/t</small>' : '–', 'heater C3 per ton of propane unloaded');
+    }
+    if(c4) t += tile('⛽ Butane unloaded', fmt(u.u4, 0)+'<small> t</small>', u.bl4 ? 'of BL '+fmt(u.bl4, 0)+' t · <b>'+fmt(u.u4 / u.bl4 * 100, 1)+' %</b>' : 'BL Q\'ty not known yet', u.bl4 ? pbar(u.u4 / u.bl4) : '');
+    if(!c3) t += tile('🔥 Heater', '–', 'butane only — no heater');
+    h += '<div class="ht-tiles">'+t+'</div>';
+    const nx = nextStep(v); if(nx) h += '<div class="ht-next">'+nx+'</div>';
+    return h + '</div>';
+  }
+  /* ── MỘT biểu đồ: kg heater theo ngày của chuyến (butane: tấn unloading theo ngày) ── */
+  function chartHtml(){
+    const v = S.voys[S.cur], ds = voyDates(S.cur), c3 = hasC3(v);
+    if(!ds.length) return '<div class="dp-card ht-chart"><div class="dp-empty">No day yet — '+(c3 ? '📂 Load PMS file creates the days.' : '➕ Add a day in 📅 Days.')+'</div></div>';
+    const R = ds.map(d => ({ d, x:view(d) || {} }));
+    const rows = c3 ? R.filter(r => (r.x.a || 0) + (r.x.b || 0) > 0).map(r => ({ d:r.d, parts:[r.x.a || 0, r.x.b || 0], tip:dmy(r.d)+' · A '+fmt(r.x.a || 0, 0)+' · B '+fmt(r.x.b || 0, 0)+' · total '+fmt((r.x.a || 0) + (r.x.b || 0), 0)+' kg'+(num(r.x.u3) != null ? ' · unloaded '+fmt(num(r.x.u3), 0)+' t' : '') }))
+                    : R.filter(r => num(r.x.u4)).map(r => ({ d:r.d, parts:[num(r.x.u4)], tip:dmy(r.d)+' · butane unloaded '+fmt(num(r.x.u4), 3)+' t' }));
+    const lg = c3 ? '<span class="dp-lg"><span><i style="background:'+CA+'"></i>Heater A</span><span><i style="background:'+CB+'"></i>Heater B</span></span>' : '';
+    return '<div class="dp-card ht-chart"><div class="dp-h">📊 '+(c3 ? 'Heater C3 per day — this voyage (kg)' : 'Butane unloaded per day (t)')+lg+'</div>'+
+      LX_U.barChart(rows, c3 ? [{ col:CA }, { col:CB }] : [{ col:'#e76f00' }], { from:ds[0], to:ds[ds.length-1], h:190, labels:true, maxBar:70, aria:'Heater consumption per day of this voyage' })+'</div>';
+  }
+  /* ── 📅 các ngày của chuyến ── */
+  function daysPanel(){
+    const v = S.voys[S.cur], C3 = hasC3(v), C4 = hasC4(v);
+    const ds = voyDates(S.cur), unsaved = ds.filter(d => { const w = S.work[d]; return w && (w.res || w.u3 !== undefined || w.u4 !== undefined); }).length;
+    let h = '<div class="dp-h">📅 Unloading days — '+esc(v.ves)+(v.no ? ' <small>voyage '+esc(v.no)+'</small>' : '')+' <small>'+comName(v.com)+' · Unloaded (t): Enter or click elsewhere = saved</small>'+
+      '<span class="ht-add"><input type="date" value="'+esc(S.addDate || suggestDay())+'" onchange="HTRH.setAddDate(this.value)"><button class="eng-btn" onclick="HTRH.addDay()" title="Add a day by hand (e.g. butane unloading, or a day without heater)">➕ Add day</button></span>'+
+      (unsaved ? '<button class="eng-btn amber" onclick="HTRH.saveAll()">💾 Save all ('+unsaved+')</button>' : '')+'</div>';
+    h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl ht-days"><thead><tr><th>Date</th>'+
+      (C3 ? '<th>Heater data</th><th>Heater A (kg)</th><th>Heater B (kg)</th><th>Heater total (kg)</th><th title="Propane unloaded on this day">Unloaded C3 (t)</th>' : '')+
+      (C4 ? '<th title="Butane unloaded on this day">Unloaded C4 (t)</th>' : '')+'<th></th></tr></thead><tbody>';
+    if(!ds.length) h += '<tr><td colspan="8" class="td-c dp-na">No day yet'+(C3 ? ' — 📂 Load PMS file creates them' : ' — ➕ Add day')+'.</td></tr>';
+    let s3 = 0, s4 = 0, sa = 0, sb = 0;
+    ds.slice().reverse().forEach(d => {
+      const w = S.work[d], r = S.days[d], mine = r && (r.vk === S.cur || !r.vk) ? r : null, x = view(d) || {}, ks = Object.keys(x.h || {}).sort();
+      s3 += num(x.u3) || 0; s4 += num(x.u4) || 0; sa += x.a || 0; sb += x.b || 0;
+      const lastK = ks[ks.length-1] || '', full = lastK === '2400' || (v.rf && d === String(v.rf).slice(0, 10));
+      const cov = ks.length ? hm(ks[0])+' → '+hm(lastK) : '';
+      const fcell = mine && mine.h ? (full ? '<span class="dp-okt">✓ complete</span>' : '<span class="dp-offt" title="The next PMS import completes this day">partial — until '+hm(lastK)+'</span>')+' <small class="dp-by">'+cov+'</small>'
+        : mine ? '<small class="dp-by">'+esc(mine.src || 'manual')+'</small>' : '<small class="dp-na">no heater data</small>';
+      const other = C3 && r && r.vk && r.vk !== S.cur && (r.h || +r.a || +r.b);
+      const dirty = w && w.res;
+      const uIn = (prod, val) => '<td class="td-c"><input class="ht-unl'+(val == null || val === '' ? ' ht-todo' : '')+'" inputmode="decimal" value="'+esc(val == null ? '' : val)+'" placeholder="type t" title="Enter or click elsewhere = saved" onkeydown="if(event.key===\'Enter\')this.blur()" onchange="HTRH.setUnl(\''+d+'\',\''+prod+'\',this.value)"></td>';
+      h += '<tr class="'+(dirty ? 'ht-dirty' : '')+'"><td class="td-c"><b>'+dmy(d)+'</b>'+(other ? '<br><small class="dp-offt" title="Heater data of this day belongs to that vessel">heater: '+esc(r.ves || r.vk)+'</small>' : '')+'</td>'+
+        (C3 ? '<td>'+fcell+'</td><td class="td-r">'+(x.a == null ? '' : fmt(x.a,0))+'</td><td class="td-r">'+(x.b == null ? '' : fmt(x.b,0))+'</td><td class="td-r"><b>'+(x.a == null && x.b == null ? '' : fmt((x.a||0)+(x.b||0),0))+'</b></td>' : '')+
+        (C3 ? uIn('c3', x.u3) : '')+(C4 ? uIn('c4', x.u4) : '')+
+        '<td class="td-c ht-act">'+(dirty ? '<button class="eng-btn green" onclick="HTRH.saveDay(\''+d+'\')">💾 Save</button><button class="dp-x" title="Discard what is not saved" onclick="HTRH.dropWork(\''+d+'\')">↺</button>' : '')+
+        (mine && mine.vk === S.cur && !dirty ? '<button class="dp-x" title="Delete the heater data of this day" onclick="HTRH.delDay(\''+d+'\')">✕</button>' : '')+'</td></tr>';
+    });
+    if(ds.length > 1) h += '<tr class="ht-tot"><td class="td-c">TOTAL</td>'+(C3 ? '<td></td><td class="td-r">'+fmt(sa,0)+'</td><td class="td-r">'+fmt(sb,0)+'</td><td class="td-r">'+fmt(sa+sb,0)+'</td><td class="td-r">'+fmt(s3,3)+'</td>' : '')+(C4 ? '<td class="td-r">'+fmt(s4,3)+'</td>' : '')+'<td></td></tr>';
+    return h + '</tbody></table></div>';
+  }
+  /* ── 🚢 thông tin tàu (theo cột vessel itinerary) ── */
+  function detailsPanel(){
+    const v = S.voys[S.cur], u = voySums(S.cur);
+    const F = [['Voyage No.', v.no], ['Ref', v.ref], ['Supplier', v.sel], ['Vessel', v.ves], ['Commodity', comName(v.com)], ['Lay-time (h)', v.lay], ['DEM ($/day)', v.dem], ['Delivery range', v.drng],
+      ['Contract Q\'ty', v.cq], ['Loadport', v.org], ['BL Q\'ty C3 (MT)', u.bl3 != null && hasC3(v) ? fmt(u.bl3, 3) : ''], ['BL Q\'ty C4 (MT)', u.bl4 != null && hasC4(v) ? fmt(u.bl4, 3) : ''], ['Customs', v.cus],
+      ['ETA load port', v.etalp], ['ETA Cai Mep', v.etacm], ['Start', v.st ? dmy(String(v.st).slice(0, 10)) : ''], ['Finish', v.fi ? dmy(String(v.fi).slice(0, 10)) : ''], ['Heater START', v.rs || ''], ['Heater FINISH', v.rf || ''], ['Note', v.note]];
+    return '<div class="dp-h">🚢 Vessel details <small>from the import itinerary</small><button class="eng-btn" style="margin-left:auto" onclick="HTRH.editVoy()">✎ Edit vessel</button></div>'+
+      '<div class="ht-det">'+F.filter(f => f[1] != null && f[1] !== '').map(f => '<div><span>'+f[0]+'</span><b>'+esc(f[1])+'</b></div>').join('')+'</div>';
+  }
+  /* ── 📜 mọi tàu (bảng như email vessel itinerary) ── */
+  function vesselsPanel(){
+    const L = voyArr().reverse();
+    return '<div class="dp-h">📜 All vessels ('+L.length+') <small>click a row to open that vessel</small></div>'+
+      '<div class="dp-scroll"><table class="eng-tbl dp-tbl ht-itin"><thead><tr><th>No.</th><th>Ref</th><th>Supplier</th><th>Vessel</th><th>Commodity</th><th>Lay-time</th><th>DEM ($/day)</th><th>Delivery range</th><th>Contract Q\'ty</th><th>Loadport</th><th>BL Q\'ty (MT)</th><th>Customs</th><th>ETA load port</th><th>ETA Cai Mep</th><th>Unloaded</th><th>Status</th><th></th></tr></thead><tbody>'+
+      (L.length ? L.map(v => { const u = voySums(v.key), c3 = hasC3(v), c4 = hasC4(v);
         const bl = [c3 && u.bl3 != null ? 'C3 '+fmt(u.bl3, 3) : '', c4 && u.bl4 != null ? 'C4 '+fmt(u.bl4, 3) : ''].filter(Boolean).join('<br>');
         const un = [c3 ? (c4 ? 'C3 ' : '')+pctTxt(u.u3, u.bl3) : '', c4 ? 'C4 '+pctTxt(u.u4, u.bl4) : ''].filter(x => x && !/^C[34] $/.test(x)).join('<br>');
         return '<tr class="ht-vrow'+(v.key === S.cur ? ' on' : '')+'" onclick="HTRH.pick(\''+esc(v.key)+'\')"><td class="td-c">'+esc(v.no || '')+'</td><td>'+esc(v.ref || '')+'</td><td>'+esc(v.sel || '')+'</td><td><b>'+esc(v.ves || '')+'</b></td>'+
@@ -1228,13 +1458,10 @@ const HTRH = (function(){
           '<td class="td-c">'+(v.fi ? '<span class="dp-okt">✔ '+dmy(String(v.fi).slice(0, 10))+'</span>' : '<span class="lx-live">● open</span>')+'</td>'+
           '<td class="td-c"><button class="dp-x" title="Delete this vessel" onclick="event.stopPropagation();HTRH.delVoy(\''+esc(v.key)+'\')">✕</button></td></tr>'; }).join('')
         : '<tr><td colspan="17" class="td-c dp-na">No vessel yet — ➕ New vessel.</td></tr>')+'</tbody></table></div>';
-    if(S.pv) h += pasteHtml();
-    h += vesselForm();
-    return h + '</div>';
   }
   function pasteHtml(){
     const P = S.pv;
-    let h = '<div class="ht-form"><div class="dp-h">📋 Paste from the vessel itinerary e-mail <small>Ref · Supplier · Vessel name · Commodity · Lay-time · DEM · Delivery range · Contract Q\'ty · Loadport · BL Q\'ty · Customs · ETA load port · ETA Cai Mep</small><button class="dp-x" onclick="HTRH.pasteClose()" title="Close">✕</button></div>'+
+    let h = '<div class="ht-form"><div class="dp-h">📋 Paste from the vessel itinerary e-mail <small>Ref · Supplier · Vessel name · Commodity · Lay-time · DEM · Delivery range · Contract Q\'ty · Loadport · BL Q\'ty · Customs · ETA load port · ETA Cai Mep</small></div>'+
       '<textarea id="htrPasteTxt" class="ht-paste" rows="3" placeholder="Copy the row(s) in the e-mail table and Ctrl+V here — or paste the row straight into any box of the vessel form" oninput="HTRH.pasteIn(this.value)">'+esc(P.txt)+'</textarea>';
     if(P.rows.length > 1) h += '<div class="dp-hint"><b>'+P.rows.length+'</b> rows read — pick the one to fill the form (one vessel at a time):</div><div class="ht-pvl">'+P.rows.map((r, i) =>
       '<div class="ht-pvr"><button class="eng-btn '+(r.match ? '' : 'green')+'" onclick="HTRH.pasteUse('+i+')">'+(r.match ? '✎ Update' : '➕ Fill')+'</button> <b>'+esc(r.f.ves || '?')+'</b> · '+esc(r.f.ref)+' · '+esc(r.f.sel)+' · '+comName(r.f.com)+
@@ -1243,29 +1470,19 @@ const HTRH = (function(){
     return h + '</div>';
   }
   function vesselForm(){
-    const v = S.voys[S.cur];
-    if(v && !S.edit){
-      const u = voySums(S.cur), c3 = hasC3(v), c4 = hasC4(v);
-      const bar = (lbl, un, bl) => '<div>'+lbl+' <b>'+fmt(un, 3)+'</b> t'+(bl ? ' of '+fmt(bl, 3)+' t · <b>'+fmt(un / bl * 100, 1)+' %</b><div class="ht-bar"><i style="width:'+Math.min(100, un / bl * 100).toFixed(1)+'%"></i></div>' : ' <small>(BL Q\'ty not known yet)</small>')+'</div>';
-      return '<div class="ht-sel"><div class="ht-selh">▶ <b>'+esc(v.ves)+'</b>'+(v.no ? ' · voyage '+esc(v.no) : '')+(v.ref ? ' · '+esc(v.ref) : '')+' · '+comName(v.com)+
-        ' <button class="eng-btn" onclick="HTRH.editVoy()">✎ Edit vessel</button>'+(v.fi ? '' : '<button class="eng-btn" onclick="HTRH.saveVoy(true)" title="Unloading finished — Finish = last day">✔ Finish voyage</button>')+'</div>'+
-        '<div class="ht-prog">'+(c3 ? bar('Propane unloaded', u.u3, u.bl3) : '')+(c4 ? bar('Butane unloaded', u.u4, u.bl4) : '')+
-        (c3 ? '<div>Heater A <b>'+fmt(u.ta, 0)+'</b> · B <b>'+fmt(u.tb, 0)+'</b> · total <b>'+fmt(u.ta + u.tb, 0)+'</b> kg C3'+(u.u3 ? ' · <b>'+fmt((u.ta + u.tb) / u.u3, 2)+'</b> kg per t propane unloaded' : '')+'</div>' : '<div><small>Butane only — no heater.</small></div>')+'</div></div>';
-    }
-    const f = vform();
-    const G = S.guess || {};
+    const v = S.voys[S.cur], f = vform(), G = S.guess || {};
     const inp = (k, lbl, ph, wd, type, tt) => '<label'+(G[k] ? ' class="ht-guess" title="'+esc(G[k])+'"' : tt ? ' title="'+esc(tt)+'"' : '')+'>'+lbl+(G[k] ? ' ⚑' : '')+'<input'+(type ? ' type="'+type+'"' : '')+' value="'+esc(f[k])+'" placeholder="'+esc(ph || '')+'" style="width:'+wd+'px" onpaste="HTRH.onPaste(event)" onchange="HTRH.vset(\''+k+'\',this.value)"></label>';
     const c3 = /C3/.test(f.com), c4 = /C4/.test(f.com);
     const flags = Object.keys(G).filter(k => G[k] !== 'empty in the itinerary').map(k => G[k]).concat(S.pvNote || []);
-    return '<div class="ht-form"><div class="dp-h">'+(v ? '✎ Edit '+esc(v.ves) : '➕ New vessel')+' <small>only the vessel name and the start date are required — fill the rest when known · tip: paste a whole itinerary row into any box</small>'+(S.vdirty ? ' <span class="dp-dirty">● not saved</span>' : '')+'</div>'+
+    return '<div class="ht-form">'+(S.vdirty ? '<div class="dp-h"><small>only the vessel name and the start date are required · tip: paste a whole itinerary row into any box</small><span class="dp-dirty">● not saved</span></div>' : '<div class="dp-hint">Only the vessel name and the start date are required · tip: paste a whole itinerary row into any box.</div>')+
       (flags.length ? '<ul class="dp-al ht-flags">'+flags.map(t => '<li class="dp-warn">⚑ '+esc(t)+'</li>').join('')+'</ul>' : '')+
-      '<div class="dp-row">'+inp('no','Voyage No.','26.15',66,'','Numbering of the Heater report file (sheet `YY.NN항차_Data)')+inp('ref','Ref','26B-PRP-…',150)+inp('sel','Supplier','PTT / Adnoc…',100)+inp('ves','Vessel name','TBA / Gaz Ronin',150)+
-      '<label'+(G.com ? ' class="ht-guess" title="'+esc(G.com)+'"' : '')+'>Commodity'+(G.com ? ' ⚑' : '')+'<select class="lx-sel" onchange="HTRH.vset(\'com\',this.value)">'+COMS.map(([k, n]) => '<option value="'+k+'"'+(f.com === k ? ' selected' : '')+'>'+n+'</option>').join('')+'</select></label>'+
-      inp('lay','Lay-time (h)','36',70)+inp('dem','DEM ($/day)','C/Party rate',100)+inp('drng','Delivery range','16-31 Oct',100)+inp('cq','Contract Q\'ty','46,000 ±10%',100)+inp('org','Loadport','Vadinar, India',130)+'</div>'+
-      '<div class="dp-row">'+(c3 ? inp('blc3','BL Q\'ty C3 (MT)','23,072.116',100,'','Propane bill of lading — used for kg C3 per ton') : '')+(c4 ? inp('blc4','BL Q\'ty C4 (MT)','',100) : '')+
-      inp('cus','Customs','Wait / Cleared',90)+inp('etalp','ETA load port','Loaded / 25-27 Sep',120)+inp('etacm','ETA Cai Mep','22h00 26-Sep',120)+
-      inp('st','Start (1st unloading day)','',140,'date')+inp('fi','Finish','',140,'date','Empty while the vessel is still unloading')+inp('note','Note','',150)+
-      '<button class="eng-btn green" onclick="HTRH.saveVoy()">💾 Save vessel</button>'+(v ? '<button class="eng-btn" onclick="HTRH.editVoy()">Cancel</button>' : '')+'</div></div>';
+      '<div class="xp-fs"><div class="xp-fl">Vessel</div><div class="dp-row">'+inp('ves','Vessel name','TBA / Gaz Ronin',170)+inp('no','Voyage No.','26.15',70,'','Numbering of the Heater report file (sheet `YY.NN항차_Data)')+inp('ref','Ref','26B-PRP-…',160)+inp('sel','Supplier','PTT / Adnoc…',110)+
+      '<label'+(G.com ? ' class="ht-guess" title="'+esc(G.com)+'"' : '')+'>Commodity'+(G.com ? ' ⚑' : '')+'<select class="lx-sel" onchange="HTRH.vset(\'com\',this.value)">'+COMS.map(([k, n]) => '<option value="'+k+'"'+(f.com === k ? ' selected' : '')+'>'+n+'</option>').join('')+'</select></label></div></div>'+
+      '<div class="xp-fs"><div class="xp-fl">Contract &amp; cargo</div><div class="dp-row">'+inp('lay','Lay-time (h)','36',70)+inp('dem','DEM ($/day)','C/Party rate',100)+inp('drng','Delivery range','16-31 Oct',100)+inp('cq','Contract Q\'ty','46,000 ±10%',100)+inp('org','Loadport','Vadinar, India',130)+
+      (c3 ? inp('blc3','BL Q\'ty C3 (MT)','23,072.116',100,'','Propane bill of lading — used for kg C3 per ton') : '')+(c4 ? inp('blc4','BL Q\'ty C4 (MT)','',100) : '')+'</div></div>'+
+      '<div class="xp-fs"><div class="xp-fl">Arrival &amp; unloading</div><div class="dp-row">'+inp('cus','Customs','Wait / Cleared',90)+inp('etalp','ETA load port','Loaded / 25-27 Sep',120)+inp('etacm','ETA Cai Mep','22h00 26-Sep',120)+
+      inp('st','Start (1st unloading day)','',140,'date')+inp('fi','Finish','',140,'date','Empty while the vessel is still unloading')+inp('note','Note','',160)+'</div></div>'+
+      '</div>';
   }
   function hourChart(k){
     const P = voyPts(k); const inc = {};
@@ -1283,56 +1500,49 @@ const HTRH = (function(){
       if(e.b) g += '<rect x="'+(X+0.5).toFixed(1)+'" y="'+Y(e.a+e.b).toFixed(1)+'" width="'+Math.max(1, bw-1).toFixed(1)+'" height="'+(Y(e.a)-Y(e.a+e.b)).toFixed(1)+'" fill="'+CB+'"><title>'+lbl+' · B '+fmt(e.b,0)+' kg</title></rect>'; }
     return g + '</svg>';
   }
-  function daysHtml(){
-    const v = S.voys[S.cur]; if(!v) return '<div class="dp-card"><div class="dp-hint">Pick a vessel in the table above (or ➕ New vessel and 💾 Save it) — its unloading days are entered here, one row per day.</div></div>';
-    const C3 = hasC3(v), C4 = hasC4(v);
-    const ds = voyDates(S.cur), unsaved = ds.filter(d => { const w = S.work[d]; return w && (w.res || w.u3 !== undefined || w.u4 !== undefined); }).length;
-    let h = '<div class="dp-card"><div class="dp-h">📅 Unloading days — '+esc(v.ves)+(v.no ? ' <small>voyage '+esc(v.no)+'</small>' : '')+' <small>'+comName(v.com)+'</small>'+
-      (C3 ? '<button class="eng-btn green ht-bigbtn" style="margin-left:auto" onclick="HTRH.impOpen()" title="Load the Excel files downloaded from PMS — the app splits them into days and creates the rows">📂 Load PMS file</button>' : '')+
-      '<span class="ht-add"'+(C3 ? ' style="margin-left:0"' : '')+'><input type="date" value="'+esc(S.addDate || suggestDay())+'" onchange="HTRH.setAddDate(this.value)"><button class="eng-btn" onclick="HTRH.addDay()" title="Add a day by hand (e.g. butane unloading, or a day without heater)">➕ Add day</button></span>'+
-      (unsaved ? '<button class="eng-btn amber" onclick="HTRH.saveAll()">💾 Save all ('+unsaved+')</button>' : '')+
-      (C3 ? '<label class="eng-btn blue ht-filebtn" title="Pick the Heater 연료 사용량 master file — the app writes this voyage\'s hourly sheet + Sumary row (re-exporting updates the same sheet) and downloads it">⬇ Heater report file<input type="file" accept=".xlsx" onchange="HTRH.report(this)"></label>' : '')+'</div>';
-    if(S.imp) h += impHtml();
-    else if(C3 && !ds.some(d => S.days[d] && S.days[d].vk === S.cur && S.days[d].h))
-      h += '<div class="ht-first">📂 No PMS data yet for this vessel — press <b>Load PMS file</b>. On the first import you pick the <b>START</b> of the heater run; from then on every import just continues, the day rows are created automatically and you only type the <b>Unloaded (t)</b>.</div>';
-    if(C3 && v.rs) h += '<div class="dp-hint">Heater run: START <b>'+esc(v.rs)+'</b>'+(v.rf ? ' · FINISH <b>'+esc(v.rf)+'</b>' : ' · not finished yet')+'</div>';
-    h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl ht-days"><thead><tr><th>Date</th>'+
-      (C3 ? '<th>PMS data</th><th>Hours</th><th>Heater A (kg)</th><th>Heater B (kg)</th><th>Heater total (kg)</th>' : '')+
-      (C3 ? '<th title="Propane unloaded on this day">Unloaded C3 (t)</th>' : '')+(C4 ? '<th title="Butane unloaded on this day">Unloaded C4 (t)</th>' : '')+
-      (C3 ? '<th>Checks</th>' : '')+'<th></th></tr></thead><tbody>';
-    if(!ds.length) h += '<tr><td colspan="11" class="td-c dp-na">No day yet'+(C3 ? ' — 📂 Load PMS file creates them' : ' — ➕ Add day')+'.</td></tr>';
-    let s3 = 0, s4 = 0, sa = 0, sb = 0;
-    ds.slice().reverse().forEach(d => {
-      const w = S.work[d], r = S.days[d], mine = r && (r.vk === S.cur || !r.vk) ? r : null, x = view(d) || {}, ks = Object.keys(x.h || {}).sort();
-      s3 += num(x.u3) || 0; s4 += num(x.u4) || 0; sa += x.a || 0; sb += x.b || 0;
-      const cov = ks.length ? ks[0].slice(0,2)+':'+ks[0].slice(2)+' → '+ks[ks.length-1].slice(0,2)+':'+ks[ks.length-1].slice(2) : '';
-      const chk = w && w.res ? w.res.chk : [];
-      const worst = chk.some(c => c.lvl === 'bad') ? 'bad' : chk.some(c => c.lvl === 'warn') ? 'warn' : chk.length ? 'info' : '';
-      const dirty = w && w.res;
-      const lastK = ks[ks.length-1] || '', full = lastK === '2400' || (v.rf && d === String(v.rf).slice(0, 10));
-      const fcell = mine && mine.h ? (full ? '<span class="dp-okt">✓ complete</span>' : '<span class="dp-offt" title="The next PMS import completes this day">partial — until '+lastK.slice(0,2)+':'+lastK.slice(2)+'</span>')+' <small class="dp-by">'+esc(mine.by || '')+'</small>'
-        : mine ? '<small class="dp-by">'+esc(mine.src || 'manual')+'</small>' : '<small class="dp-na">no heater data</small>';
-      const other = C3 && r && r.vk && r.vk !== S.cur && (r.h || +r.a || +r.b);
-      const uIn = (prod, val) => '<td class="td-c"><input class="ht-unl'+(val == null || val === '' ? ' ht-todo' : '')+'" inputmode="decimal" value="'+esc(val == null ? '' : val)+'" placeholder="type t" title="Enter or click elsewhere = saved" onkeydown="if(event.key===\'Enter\')this.blur()" onchange="HTRH.setUnl(\''+d+'\',\''+prod+'\',this.value)"></td>';
-      h += '<tr class="'+(dirty ? 'ht-dirty' : '')+'"><td class="td-c"><b>'+dmy(d)+'</b>'+(other ? '<br><small class="dp-offt" title="Heater data of this day belongs to that vessel">heater: '+esc(r.ves || r.vk)+'</small>' : '')+'</td>'+
-        (C3 ? '<td>'+fcell+'</td><td class="td-c">'+cov+'</td><td class="td-r">'+(x.a == null ? '' : fmt(x.a,0))+'</td><td class="td-r">'+(x.b == null ? '' : fmt(x.b,0))+'</td><td class="td-r"><b>'+(x.a == null && x.b == null ? '' : fmt((x.a||0)+(x.b||0),0))+'</b></td>' : '')+
-        (C3 ? uIn('c3', x.u3) : '')+(C4 ? uIn('c4', x.u4) : '')+
-        (C3 ? '<td>'+(chk.length ? '<details class="ht-chk '+worst+'"><summary>'+(worst === 'bad' ? '⛔' : worst === 'warn' ? '⚠' : 'ℹ')+' '+chk.length+'</summary><ul class="dp-al">'+chk.map(c => '<li class="dp-'+c.lvl+'">'+esc(c.t)+'</li>').join('')+'</ul></details>' : (w && w.res ? '<span class="dp-okt">✓</span>' : ''))+'</td>' : '')+
-        '<td class="td-c ht-act">'+(dirty ? '<button class="eng-btn green" onclick="HTRH.saveDay(\''+d+'\')">💾 Save</button><button class="dp-x" title="Discard what is not saved" onclick="HTRH.dropWork(\''+d+'\')">↺</button>' : x.saved || mine ? '<span class="dp-okt">✓ saved</span>' : '')+
-        (mine && mine.vk === S.cur && !dirty ? '<button class="dp-x" title="Delete the heater data of this day" onclick="HTRH.delDay(\''+d+'\')">✕</button>' : '')+'</td></tr>';
-    });
-    if(ds.length > 1) h += '<tr class="ht-tot"><td class="td-c">TOTAL</td>'+(C3 ? '<td></td><td></td><td class="td-r">'+fmt(sa,0)+'</td><td class="td-r">'+fmt(sb,0)+'</td><td class="td-r">'+fmt(sa+sb,0)+'</td><td class="td-r">'+fmt(s3,3)+'</td>' : '')+(C4 ? '<td class="td-r">'+fmt(s4,3)+'</td>' : '')+(C3 ? '<td></td>' : '')+'<td></td></tr>';
-    h += '</tbody></table></div>';
-    const hc = C3 ? hourChart(S.cur) : '';
-    if(hc) h += '<div class="dp-h" style="margin-top:10px">📊 Hourly heater consumption of this voyage (kg) <span class="dp-lg"><span><i style="background:'+CA+'"></i>Heater A</span><span><i style="background:'+CB+'"></i>Heater B</span><span>┆ midnight</span></span></div>'+hc;
-    return h + '</div>';
+  function hourlyPanel(){
+    const hc = hasC3(S.voys[S.cur]) ? hourChart(S.cur) : '';
+    return '<div class="dp-h">⏱ Hourly heater consumption of this voyage (kg) <span class="dp-lg"><span><i style="background:'+CA+'"></i>Heater A</span><span><i style="background:'+CB+'"></i>Heater B</span><span>┆ midnight</span></span></div>'+
+      (hc || '<div class="dp-empty">No hourly PMS data for this vessel yet.</div>');
+  }
+  /* ── cửa sổ: nạp PMS · khai / sửa tàu · dán itinerary ── */
+  function modalHtml(){
+    let inner = '', cls = '';
+    if(S.imp){ inner = impHtml(); cls = ' xp-wide'; }
+    else if(S.pv || S.edit){
+      inner = '<div class="xp-mh"><div><div class="xp-mt">'+(S.pv && !S.edit ? '📋 Paste itinerary row' : S.voys[S.cur] ? '✎ Vessel — '+esc(S.voys[S.cur].ves || '') : '➕ New vessel')+'</div><div class="xp-ms">Columns of the vessel itinerary e-mail · missing information can stay empty</div></div><button class="xp-close" onclick="HTRH.modalClose()" title="Close without saving">✕</button></div>'+
+        '<div class="xp-mb">'+(S.pv ? pasteHtml() : '')+(S.edit ? vesselForm() : '')+'</div>'+
+        (S.edit ? '<div class="xp-mf xp-mfx"><button class="eng-btn" onclick="HTRH.modalClose()">Cancel</button><button class="eng-btn green xp-pri" onclick="HTRH.saveVoy()">💾 Save vessel</button></div>' : '');
+      cls = ' xp-mid';
+    }
+    return inner ? '<div class="xp-ov"><div class="xp-m'+cls+'" role="dialog" aria-modal="true">'+inner+'</div></div>' : '';
+  }
+  function modalClose(){
+    if(S.imp){ impClose(); return; }
+    if(S.vdirty && S.edit && !confirm('Close the vessel form without saving?')) return;
+    S.pv = null; S.edit = false; S.vf = null; S.guess = null; S.pvNote = null; S.vdirty = false;
+    if(!S.voys[S.cur] && S.prevCur && S.voys[S.prevCur]) S.cur = S.prevCur;
+    render();
   }
   function render(){
     const w = $('htrHistWrap'); if(!w) return;
     if(!S.loaded){ w.innerHTML = '<div class="dp-empty">'+(S.loading ? '⏳ Loading heater data…' : '')+'</div>'; return; }
-    const keep = w.scrollTop;
-    const sc = document.getElementById('htImpScroll'), keepT = sc ? sc.scrollTop : 0;
-    w.innerHTML = voyHtml() + daysHtml() + histHtml();
+    const keep = w.scrollTop, sc = document.getElementById('htImpScroll'), keepT = sc ? sc.scrollTop : 0;
+    const v = S.voys[S.cur];
+    const items = v ? PANELS : PANELS.filter(p => p[0] === 'vessels' || p[0] === 'history');
+    const cur = items.some(p => p[0] === S.panel) ? S.panel : '';
+    const badge = { days:v ? voyDates(S.cur).length : '', vessels:Object.keys(S.voys).length };
+    let h = stripHtml();
+    h += v ? heroHtml() + chartHtml()
+           : '<div class="dp-card ht-empty"><div class="dp-empty">🚢 Pick a vessel above — or <b>➕ New vessel</b> / <b>📋 Paste itinerary</b> to declare the next one.<br><small>Each vessel keeps its heater run, the daily PMS figures and the unloaded quantity per day.</small></div></div>';
+    h += ENGX_U.tabs('HTRH.panel', items.map(([k, l]) => [k, l, badge[k]]), cur);
+    const body = cur === 'days' ? daysPanel() : cur === 'hourly' ? hourlyPanel() : cur === 'details' ? detailsPanel() : cur === 'vessels' ? vesselsPanel() : cur === 'history' ? histHtml() : '';
+    if(body) h += '<div class="dp-card xp-panel">'+body+'</div>';
+    h += modalHtml();
+    w.innerHTML = h;
+    const st = $('htrStats');
+    if(st && v){ const u = voySums(S.cur); st.innerHTML = '<b>'+esc(v.ves || '')+'</b>'+(hasC3(v) ? ' · heater <b>'+fmt(u.ta + u.tb, 0)+'</b> kg' : '')+' · '+u.ds.length+' day(s)'; }
+    else if(st && cur !== 'history') st.innerHTML = Object.keys(S.voys).length+' vessel(s)';
     w.scrollTop = keep;
     const sc2 = document.getElementById('htImpScroll'); if(sc2) sc2.scrollTop = keepT;
     impJump();
@@ -1367,6 +1577,6 @@ const HTRH = (function(){
     return (S.days[d] || o.vessels.length) ? o : null;
   }
   return { refresh, render, loadAll, range, view:view_, delDay, savePmsRun, afterImport, dayInfo,
-           pick, newVoy, editVoy, vset, saveVoy, pasteOpen, pasteClose, pasteIn, pasteUse, onPaste, delVoy, impOpen, impClose, impFiles, impAssign, impSwap, impSet, impApply, addDay, setAddDate, files, assign, swap, setUnl, dropWork, saveDay, saveAll, report, syncMail,
-           get S(){ return S; }, _test:{ parseItin, firstDate, impPreview, dayWin, impRows, impTable, days, voys, findings, compute, hCalc, voyPts, voyDates, view } };
+           pick, newVoy, editVoy, vset, saveVoy, panel, hpanel, modalClose, pasteOpen, pasteClose, pasteIn, pasteUse, onPaste, delVoy, impOpen, impClose, impFiles, impAssign, impSwap, impSet, impApply, addDay, setAddDate, files, assign, swap, setUnl, dropWork, saveDay, saveAll, report, syncMail,
+           get S(){ return S; }, _test:{ parseItin, firstDate, impPreview, dayCalc, vAt, savedPts, impRows, impTable, days, voys, findings, compute, hCalc, voyPts, voyDates, view } };
 })();

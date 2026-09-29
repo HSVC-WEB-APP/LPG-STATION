@@ -1,5 +1,7 @@
 /* ============================================================
  * ENGX — engx.js  (v4.176)
+ * v4.209: ENGX_U.tabs / pref / prefSet — hàng nút mở từng mục (nhớ theo máy); Dew Point chỉ còn MỘT biểu đồ,
+ *         Findings / Statistics / Monthly / History mở bằng nút, cảnh báo nặng nhất hiện một dòng.
  * v4.208: ENGX_U.dewSign — gõ dew point DƯƠNG ⇒ cảnh báo ngay (OK đổi sang âm), ô tô đỏ; dùng chung với email P3.
  * v4.206: DEWPT.c3Rows()/c3Hist() — email P3 vẽ biểu đồ Dryer A/B từ CÙNG bộ nhớ C3 (chưa mở tab thì đọc
  *         cửa sổ 2 năm một lần rồi để lại cho tab dùng tiếp).
@@ -91,7 +93,16 @@ const ENGX_U = (function(){
     try{ return confirm('⚠ Dew point is always NEGATIVE.\n\n'+label+': you typed '+String(v).trim()+'\n\nOK = change it to '+neg+'\nCancel = keep it and correct it yourself') ? neg : v; }
     catch(_){ return v; }
   }
-  return { esc, num, pad, isoOf, isoToday, isoAdd, dayNo, isoOfDay, dmy, fmt, toastM, anyIso, linreg, sd, mayWrite, userName, download, MON3, dewSign };
+  /* v4.209 — HÀNG NÚT mở từng mục (Dew Point · Heater · GC): bấm = mở, bấm lại = đóng.
+     items: [key, nhãn, badge?, 'bad'|'warn'?] · fn = tên hàm gọi khi bấm (vd. 'DEWPT.panel') */
+  function tabs(fn, items, cur, cls){
+    return '<div class="xp-tabs'+(cls ? ' '+cls : '')+'" role="tablist">'+items.map(([k, l, b, lv]) => '<button role="tab" aria-selected="'+(cur === k)+'" class="xp-tab'+(cur === k ? ' on' : '')+'" onclick="'+fn+'(\''+k+'\')">'+l+
+      (b !== undefined && b !== null && b !== '' ? ' <span class="xp-badge'+(lv ? ' '+lv : '')+'">'+b+'</span>' : '')+'<span class="xp-car">'+(cur === k ? '▴' : '▾')+'</span></button>').join('')+'</div>';
+  }
+  /* mục đang mở — tiện ích THEO MÁY (localStorage), hỏng thì dùng mặc định */
+  function pref(k, d){ try{ const v = localStorage.getItem('lpg_v4_'+k); return v == null ? d : v; }catch(_){ return d; } }
+  function prefSet(k, v){ try{ localStorage.setItem('lpg_v4_'+k, v); }catch(_){} }
+  return { esc, num, pad, isoOf, isoToday, isoAdd, dayNo, isoOfDay, dmy, fmt, toastM, anyIso, linreg, sd, mayWrite, userName, download, MON3, dewSign, tabs, pref, prefSet };
 })();
 
 
@@ -115,7 +126,7 @@ const DEWPT = (function(){
   const PRODS = { c3:{ node:'dew_point', name:'Propane (C3)', short:'C3' }, c4:{ node:'dew_point_c4', name:'Butane (C4)', short:'C4' } };
   const WIN_DAYS = 730;    /* mở tab chỉ tải 2 năm gần nhất — nút ⤓ Load all tải hết */
   const blank = () => ({ rows:{}, loaded:false, loading:false, all:false, from:'' });
-  const S = { prod:'c3', P:{ c3:blank(), c4:blank() }, range:'730', show:{ ca:1, cb:1, da:1, db:1 },
+  const S = { prod:'c3', P:{ c3:blank(), c4:blank() }, range:'730', show:{ ca:1, cb:1, da:1, db:1 }, panel:ENGX_U.pref('dew_panel', ''),
               f:{ date:'', time:'09:00', no:'', ca:'', cb:'', da:'', db:'', note:'' }, dirty:false, pv:null };
   /* S.rows / S.loaded / S.loading = của sản phẩm ĐANG CHỌN (giữ nguyên mọi chỗ gọi cũ) */
   ['rows','loaded','loading'].forEach(k => Object.defineProperty(S, k, { get(){ return S.P[S.prod][k]; }, set(v){ S.P[S.prod][k] = v; } }));
@@ -447,25 +458,29 @@ const DEWPT = (function(){
         '<div class="dp-kv">'+fmt(s.last,1)+'<small> °C</small></div>'+
         '<div class="dp-ks" title="Margin = limit − last reading (positive = drier than the limit)">margin '+(s.margin < 0 ? '−' : '')+fmt(Math.abs(s.margin),1)+' °C · '+dmy(s.lastDate)+'</div>'+
         '<div class="dp-ks" title="Linear trend of the readings in the 60 days before the last one">'+tr+(s.projDate ? ' · <b>limit ~'+dmy(s.projDate)+'</b>' : '')+'</div></div>'; }).join('')+'</div>';
-    /* nhận định */
-    h += '<div class="dp-card"><div class="dp-h">🔎 Findings</div><ul class="dp-al">'+alerts(all).map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul></div>';
+    /* v4.209 — MỘT biểu đồ; nhận định / thống kê / tháng / lịch sử mở bằng nút. Cảnh báo nặng nhất vẫn hiện một dòng. */
+    const AL = alerts(all), AW = AL.filter(a => a.lvl === 'bad' || a.lvl === 'warn'), worst = AW.find(a => a.lvl === 'bad') || AW[0];
+    if(worst) h += '<div class="dp-status '+worst.lvl+'">'+(worst.lvl === 'bad' ? '⛔' : '⚠')+' '+esc(worst.t)+(AW.length > 1 ? ' <small>· '+(AW.length - 1)+' more</small>' : '')+
+      (S.panel !== 'find' ? '<button class="eng-btn" onclick="DEWPT.panel(\'find\')">🔎 All findings</button>' : '')+'</div>';
     /* biểu đồ */
     h += '<div class="dp-card"><div class="dp-h">📈 '+PRODS[S.prod].short+' trend <span class="dp-rg">'+[['30','30 d'],['90','90 d'],['180','6 m'],['365','1 y'],['730','2 y'],['all','All']].map(([k, t]) =>
       '<button class="'+(S.range === k ? 'on' : '')+'" onclick="DEWPT.range(\''+k+'\')">'+t+'</button>').join('')+'</span>'+
       '<span class="dp-lg">'+PTS.map(p => '<label><input type="checkbox"'+(S.show[p.k] ? ' checked' : '')+' onchange="DEWPT.toggle(\''+p.k+'\')"><i style="background:'+p.col+'"></i>'+p.n+'</label>').join('')+'</span></div>'+
       chart(L)+'</div>';
+    h += ENGX_U.tabs('DEWPT.panel', [['find','🔎 Findings', AL.filter(a => a.lvl !== 'ok').length || '', worst ? worst.lvl : ''], ['stats','📊 Statistics'], ['month','🗓 Monthly'], ['hist','📋 History', L.length]], S.panel);
+    if(S.panel === 'find') h += '<div class="dp-card xp-panel"><div class="dp-h">🔎 Findings — '+PRODS[S.prod].short+'</div><ul class="dp-al">'+AL.map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul></div>';
     /* thống kê theo khoảng + theo tháng */
-    h += '<div class="dp-grid2"><div class="dp-card"><div class="dp-h">📊 Statistics — '+(S.range === 'all' ? 'all readings' : 'last '+S.range+' days')+' ('+L.length+')</div>'+
+    if(S.panel === 'stats') h += '<div class="dp-card xp-panel"><div class="dp-h">📊 Statistics — '+(S.range === 'all' ? 'all readings' : 'last '+S.range+' days')+' ('+L.length+')</div>'+
       '<div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Point</th><th>Limit</th><th>Min</th><th>Max</th><th>Avg</th><th title="Standard deviation">σ</th><th>Off-spec</th><th title="Trend over the 60 days before the last reading">Trend /30d</th></tr></thead><tbody>'+
       PTS.map(p => { const s = stats(L, p); return '<tr><td><i class="dp-sw" style="background:'+p.col+'"></i>'+p.n+'</td><td class="td-c">&lt;'+p.lim+'</td><td class="td-r">'+fmt(s.min,1)+'</td><td class="td-r">'+fmt(s.max,1)+'</td><td class="td-r">'+fmt(s.avg,1)+'</td><td class="td-r">'+fmt(s.sd,2)+'</td>'+
         '<td class="td-c'+(s.off ? ' dp-off' : '')+'">'+(s.n ? s.off+' / '+s.n : '')+'</td><td class="td-r">'+(s.slope == null ? '' : (s.slope >= 0 ? '+' : '')+fmt(s.slope*30,2))+'</td></tr>'; }).join('')+'</tbody></table></div></div>';
-    const M = monthly(L);
-    h += '<div class="dp-card"><div class="dp-h">🗓 Monthly average (°C)</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Month</th><th>n</th>'+PTS.map(p => '<th>'+p.n+'</th>').join('')+'</tr></thead><tbody>'+
+    const M = S.panel === 'month' ? monthly(L) : [];
+    if(S.panel === 'month') h += '<div class="dp-card xp-panel"><div class="dp-h">🗓 Monthly average (°C) — '+(S.range === 'all' ? 'all readings' : 'last '+S.range+' days')+'</div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Month</th><th>n</th>'+PTS.map(p => '<th>'+p.n+'</th>').join('')+'</tr></thead><tbody>'+
       (M.length ? M.map(m => '<tr><td class="td-c">'+m.ym+'</td><td class="td-c">'+m.n+'</td>'+PTS.map(p => { const s = m[p.k]; if(!s) return '<td class="td-c dp-na">–</td>';
         return '<td class="td-r'+(s.off ? ' dp-off' : '')+'" title="min '+s.min+' · max '+s.max+(s.off ? ' · '+s.off+' off-spec' : '')+'">'+fmt(s.avg,1)+'</td>'; }).join('')+'</tr>').join('') : '<tr><td colspan="6" class="td-c dp-na">–</td></tr>')+
-      '</tbody></table></div></div></div>';
+      '</tbody></table></div></div>';
     /* lịch sử */
-    h += '<div class="dp-card"><div class="dp-h">📋 History ('+L.length+') <small>click a row to edit</small></div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>No.</th><th>Date</th><th>Time</th>'+
+    if(S.panel === 'hist') h += '<div class="dp-card xp-panel"><div class="dp-h">📋 History ('+L.length+') <small>click a row to edit</small></div><div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>No.</th><th>Date</th><th>Time</th>'+
       PTS.map(p => '<th>'+p.n+'<br><small>&lt;'+p.lim+'</small></th>').join('')+'<th>Note</th><th>By</th><th></th></tr></thead><tbody>'+
       (L.length ? L.slice().reverse().map(r => r._x
         ? '<tr class="lx-xrow" title="Extra reading of the same day (imported) — delete only"><td class="td-c">＋</td><td class="td-c">'+dmy(r.date)+'</td><td class="td-c">'+esc(r.time)+'</td>'+
@@ -511,12 +526,14 @@ const DEWPT = (function(){
   }
   function range(k){ S.range = k; if(k === 'all' && !S.P[S.prod].all){ loadAll(); return; } render(); }
   function toggle(k){ S.show[k] = S.show[k] ? 0 : 1; render(); }
+  /* v4.209 — mở / đóng một mục (nhớ theo máy) */
+  function panel(k){ S.panel = S.panel === k ? '' : k; ENGX_U.prefSet('dew_panel', S.panel); render(); }
   function refresh(){ if(!S.loaded) load(); else render(); }
   function reload(){ load(true); }
   /* LABX vừa ghi dữ liệu import ⇒ đọc lại (giữ chế độ 2 năm / tất cả) */
   function afterImport(prod){ const P = S.P[prod]; if(P && P.loaded){ const cur = S.prod; S.prod = prod; load(true); S.prod = cur; } }
 
-  return { PTS, PRODS, refresh, reload, render, ingest, c3Rows, c3Hist, setF, save, del, delX, edit, newForm, range, toggle, exportXlsx,
+  return { PTS, PRODS, refresh, reload, render, ingest, c3Rows, c3Hist, panel, setF, save, del, delX, edit, newForm, range, toggle, exportXlsx,
            pasteOpen, pasteClose, pastePreview, pasteCommit, setProd, loadAll, afterImport,
            _test:{ stats, alerts, parsePaste, monthly, list, S } };
 })();

@@ -2783,6 +2783,16 @@ const ENG = (function(){
       MC.coqReport(coq, fname, rowLotStr + (rowTk ? (' · TK-' + rowTk) : ''));
       return;
     }
+    /* ── 2c. v4.217 — ĐỐI CHIẾU SỐ trước khi điền (chung MC.coqPlaus với Tank Mix) ── */
+    if(!coq._plausOk && typeof MC.coqPlaus === 'function'){
+      const _n = v => { const x = parseFloat(String(v == null ? '' : v).replace(/,/g, '')); return isNaN(x) ? 0 : x; };
+      const items = MC.coqPlaus(coq, { lotNum:rowLot.num, lotYear:rowLot.year, tank:rowTk, tgtVol:_n(r[30]), tgtC3:_n(r[29]),
+                                       start:String(r[3] || ''), finD:'', finT:String(r[5] || ''), hardCap:0, rows:ROWS });
+      if(items.length){
+        MC.coqReview(items, coq, fname, rowLotStr + (rowTk ? (' · TK-' + rowTk) : '') + ' (Tank Log edit)', () => { coq._plausOk = true; _applyCoqToModal(coq, fname); });
+        return;
+      }
+    }
     /* ── 3. Fill modal INPUTS (not the row) — same col map as Tank Mix ── */
     const setC = (col, v, dec)=>{
       if(v == null || v === '') return;

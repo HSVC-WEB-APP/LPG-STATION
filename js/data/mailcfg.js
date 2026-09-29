@@ -157,6 +157,9 @@ const MAILCFG = (function(){
       }, e => console.warn('[MAILCFG] listen', e));
     }catch(e){ console.warn('[MAILCFG] attach', e); }
   }
+  /* v4.210 — đóng ✉ REPORT MAIL ⇒ ngắt listener mail_cfg: máy không làm email thì không nhận cập nhật danh bạ /
+     nhóm người nhận. Mở lại ⇒ attach() đọc lại một lần (vài KB). Dữ liệu đã có vẫn nằm trong RAM. */
+  function detach(){ if(!_ref) return; try{ _ref.off(); }catch(_){} _ref = null; }
   function save(cfg){
     const by = (typeof CURRENT_USER !== 'undefined' && (CURRENT_USER.name || CURRENT_USER.email)) || '?';
     const at = Date.now();
@@ -175,6 +178,6 @@ const MAILCFG = (function(){
     });
     return out;
   }
-  return { DIR, GROUPS, ROUTE, SENDERS, MAILS, CTX, COMPANY, person, expand,
+  return { detach, DIR, GROUPS, ROUTE, SENDERS, MAILS, CTX, COMPANY, person, expand,
            apply, snapshot, save, attach, resetDefault, meta:() => META, DEF };
 })();

@@ -1437,6 +1437,8 @@ function _makePlanModule(opts){
   let _pdayDay = '', _pdayT = null;
   function _pdayAuto(){
     if(ID !== 'tp' || typeof PLANDAY === 'undefined' || !_loaded) return;
+    /* v4.210 — chỉ máy ĐƯỢC SỬA Today Plan mới lo việc ghi (máy xem / trạm cân chỉ đọc không tốn lượt đọc plan_day) */
+    if(typeof canWrite === 'function' && !canWrite(PERMK)) return;
     const d = _isoToday();
     if(d !== _pdayDay){ _pdayDay = d; }                /* sang ngày mới ⇒ reset */
     if(PLANDAY.get(d)) return;                        /* hôm nay đã có kế hoạch đầu ngày */

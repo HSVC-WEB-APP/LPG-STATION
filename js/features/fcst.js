@@ -445,6 +445,7 @@ const FCST = (function(){
     const R=calc();
     if(bar && !R.ok){
       bar.className='fc-bar off';
+      bar.title='Stock forecast unavailable — paste a ZMMFR022 export under LPG Sales ▸ SAP';   /* v4.212 — màn hẹp chữ bị cắt ⇒ rê chuột đọc đủ */
       bar.innerHTML='<span class="fc-off">📉 <b>Stock forecast unavailable</b> — the SAP tab has no '
         + 'End Stock for the cavern and the tanks yet. Paste a ZMMFR022 export under '
         + '<b>LPG Sales ▸ SAP</b> and the figures appear here.</span>';
@@ -481,7 +482,9 @@ const FCST = (function(){
       h+='<button class="fc-more" onclick="FCST.toggle(event)" title="Show how every figure is built, '
         + 'type the vessel / heater estimates, and pick the lot used for each sale ratio">▾</button>';
       bar.className='fc-bar'+(R.over.length?' bad':'');
+      bar.title='Click for the full forecast: every step, the lot used for each ratio, vessel / heater estimates';
       bar.innerHTML=h;
+      _fit();
     }
     _paint();
     renderFull();
@@ -772,6 +775,25 @@ const FCST = (function(){
 
   /* Gộp lượt vẽ: mọi đường (SAP dán về, plan sửa, tank đổi lot, xe cân xong)
      đều gọi schedule(), một lượt vẽ cho cả cụm thay đổi. */
+  /* ⭐ v4.213 — DẢI SỐ TỰ VỪA CHỖ. Không đặt mốc bề rộng cố định (v4.212 cắt
+     quá tay — màn còn dư chỗ mà vẫn ẩn cột). Nay ĐO thật: hiện đủ 5 bước; tràn
+     thì bỏ 3 cột giữa (lv1: còn STOCK + = LEFT); vẫn tràn thì chỉ còn = LEFT
+     (lv2). Đo lại mỗi khi dải đổi bề rộng (ResizeObserver) hoặc vẽ lại. */
+  function _fit(){
+    const bar=_el('fcstBar');
+    if(!bar || bar.classList.contains('off') || !bar.clientWidth) return;
+    const over=()=>bar.scrollWidth > bar.clientWidth + 1;
+    bar.classList.remove('lv1','lv2');
+    if(over()){ bar.classList.add('lv1'); if(over()) bar.classList.add('lv2'); }
+  }
+  let _ro=null;
+  function _watchFit(){
+    const bar=_el('fcstBar');
+    if(!bar || _ro || typeof ResizeObserver==='undefined') return;
+    let t=null;
+    _ro=new ResizeObserver(()=>{ if(t) return; t=requestAnimationFrame(()=>{ t=null; _fit(); }); });
+    _ro.observe(bar);
+  }
   function schedule(){
     if(_renT) return;
     _renT=setTimeout(()=>{ _renT=null; try{ render(); }catch(e){ console.warn('[FCST] render',e); } },250);
@@ -779,13 +801,14 @@ const FCST = (function(){
   function init(){
     _attach();
     schedule();
+    try{ _watchFit(); }catch(_){}
     /* Lưới an toàn: có đường thay đổi không gọi được vào đây (dán SAP ở máy
        khác, TL Data đẩy về…). 30 s một lượt là đủ, và rẻ — toàn bộ phép tính
        chạy trên RAM, không đọc Firebase. */
     try{ setInterval(()=>{ try{ if(!document.hidden) render(); }catch(_){} }, 30000); }catch(_){}
   }
 
-  return { init, render, renderFull, schedule, calc, toggle, setLot, setExtra,
+  return { init, render, renderFull, schedule, calc, toggle, setLot, setExtra, fit:_fit,
            /* hook kiểm thử — không dùng trong app */
            _state:{ MAP, EXTRA, ratio:_ratio, target:_target, pick:_pick, lots:_lots,
                     tankLots:_tankLots, dir:_dir, rowDir:_rowDir,

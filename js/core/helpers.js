@@ -353,3 +353,130 @@ window.MDAY = (function(){
            activeDates:activeDates, state:state, onChange:onChange,
            today:today, shift:shift, NODE:NODE };
 })();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   v4.215 — UIDLG · HỘP THOẠI CỦA APP thay cho alert()/confirm() của trình duyệt
+   ───────────────────────────────────────────────────────────────────────
+   Hộp "This page says" của trình duyệt chỉ là chữ trơn, cảnh báo quan trọng
+   lẫn với câu thường ⇒ user bỏ sót. UIDLG đọc CHÍNH chuỗi cũ và dựng lại:
+     • dòng đầu            → tiêu đề, màu theo biểu tượng (⛔❌🚨 đỏ · ⚠ cam · ✅ xanh)
+     • "Khoá : giá trị"    → bảng 2 cột (kể cả dòng "• Tank: TK-3502")
+     • "• …" / "- …"       → danh sách
+     • "OK = …" / "Cancel = …" / "[OK] = …" → thành CHỮ TRÊN NÚT
+     • "────"              → bỏ
+   ⇒ KHÔNG phải viết lại nội dung ở từng chỗ gọi.
+   • UIDLG.alert(text)   → Promise<void>. window.alert được TRỎ VỀ ĐÂY nên mọi
+     alert() cũ tự đổi giao diện. Khác biệt duy nhất: không còn CHẶN code phía
+     sau (code chạy tiếp ngay, hộp vẫn nằm trên cùng tới khi bấm OK).
+   • UIDLG.ask(text)     → Promise<boolean>. confirm() của trình duyệt là hàm
+     ĐỒNG BỘ, không thay tự động được — mỗi chỗ gọi phải đổi sang
+     `await UIDLG.ask(...)` trong hàm async. Làm dần theo từng màn hình
+     (xem DRIVE_V4_DEV_KIT/UI_ROADMAP.md). Chưa đổi thì vẫn là hộp cũ.
+   • Nhiều hộp cùng lúc ⇒ xếp hàng, hiện lần lượt. Enter = nút chính,
+     Esc = Cancel/đóng. Nền mờ chặn bấm nhầm vào trang phía sau.
+   Nhẹ: một khối DOM dựng khi cần, gỡ khi đóng; không listener thường trực.
+   ═══════════════════════════════════════════════════════════════════════ */
+const UIDLG = (function(){
+  const _W = (typeof window !== 'undefined') ? window : {};
+  const _native = { alert: _W.alert ? _W.alert.bind(_W) : null };
+  const Q = []; let busy = false;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ICON = /^[\s⚠⛔❌✅ℹ★⏳\u{1F6A8}\u{1F9F9}\u{1F504}\u{1F4CB}️]+/u;
+  function _tone(t){
+    if(/[⛔❌]|\u{1F6A8}/u.test(t)) return 'bad';
+    if(/⚠/.test(t)) return 'warn';
+    if(/✅/.test(t)) return 'ok';
+    if(/KHÔNG|SAI |THIẾU|VƯỢT|LỖI|FAIL|CHANGED|THAY ĐỔI|DUPLICATE|MISSING|RỦI RO/.test(t)) return 'warn';
+    return 'info';
+  }
+  /* chuỗi cũ → { title, tone, html, ok, cancel } */
+  function parse(text){
+    const lines = String(text == null ? '' : text).replace(/\r/g,'').split('\n');
+    while(lines.length && !lines[0].trim()) lines.shift();
+    const first = (lines.shift() || '').trim();
+    const tone = _tone(first);
+    const title = first.replace(ICON, '').trim() || first;
+    let ok = '', cancel = '';
+    const out = []; let tbl = [], ul = [], para = [];
+    const flush = () => {
+      if(para.length){ out.push('<p>' + para.map(esc).join('<br>') + '</p>'); para = []; }
+      if(ul.length){ out.push('<ul>' + ul.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>'); ul = []; }
+      if(tbl.length){ out.push('<table>' + tbl.map(r => '<tr><th>' + esc(r[0]) + '</th><td>' + esc(r[1]) + '</td></tr>').join('') + '</table>'); tbl = []; }
+    };
+    lines.forEach(raw => {
+      const l = raw.replace(/\s+$/, '');
+      const t = l.trim();
+      if(!t){ flush(); return; }
+      if(/^[─━—=\-_]{6,}$/.test(t)) { flush(); return; }
+      /* "OK = … · Cancel = …" trên một dòng, hoặc từng dòng riêng */
+      const parts = t.split(/\s+·\s+/);
+      let used = false;
+      parts.forEach(p => {
+        const mo = p.match(/^\[?\s*OK\s*\]?\s*=\s*(.+)$/i), mc = p.match(/^\[?\s*Cancel\s*\]?\s*=\s*(.+)$/i);
+        if(mo){ ok = mo[1].trim(); used = true; } else if(mc){ cancel = mc[1].trim(); used = true; }
+      });
+      if(used) return;
+      const kv = t.match(/^(?:[•\-]\s*)?([^:•]{1,42}?)\s*:\s+(\S.*)$/);
+      if(kv && !/[.!?]$/.test(kv[1])){
+        if(para.length || ul.length){ const keep = tbl; tbl = []; flush(); tbl = keep; }
+        tbl.push([kv[1].trim(), kv[2].trim()]); return;
+      }
+      const b = t.match(/^[•\-]\s*(.+)$/);
+      if(b){ if(para.length || tbl.length){ const keep = ul; ul = []; flush(); ul = keep; } ul.push(b[1]); return; }
+      if(ul.length || tbl.length) flush();
+      para.push(t);
+    });
+    flush();
+    return { title, tone, html: out.join(''), ok, cancel };
+  }
+  function _next(){
+    if(busy || !Q.length) return;
+    busy = true;
+    const it = Q.shift(), P = it.p;
+    const ov = document.createElement('div');
+    ov.className = 'uidlg-ov';
+    const btns = it.kind === 'ask'
+      ? '<button type="button" class="uidlg-b no" data-v="0">' + esc(it.cancel || P.cancel || 'Cancel') + '</button>'
+      + '<button type="button" class="uidlg-b yes ' + (it.danger ? 'danger' : '') + '" data-v="1">' + esc(it.ok || P.ok || 'OK') + '</button>'
+      : '<button type="button" class="uidlg-b yes" data-v="1">' + esc(it.ok || 'OK') + '</button>';
+    ov.innerHTML = '<div class="uidlg t-' + (it.tone || P.tone) + '" role="dialog" aria-modal="true">'
+      + '<div class="uidlg-h"><span class="ic"></span><span class="tt">' + esc(it.title || P.title) + '</span></div>'
+      + (P.html ? '<div class="uidlg-bd">' + P.html + '</div>' : '')
+      + '<div class="uidlg-f">' + btns + '</div></div>';
+    const prevFocus = document.activeElement;
+    const done = v => {
+      document.removeEventListener('keydown', onKey, true);
+      ov.remove(); busy = false;
+      try{ it.res(it.kind === 'ask' ? v === '1' : undefined); }catch(_){}
+      try{ if(prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus(); }catch(_){}
+      setTimeout(_next, 0);
+    };
+    const onKey = e => {
+      if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); done('0'); }
+      else if(e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); done('1'); }
+    };
+    ov.addEventListener('click', e => { const b = e.target.closest('.uidlg-b'); if(b) done(b.dataset.v); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(ov);
+    /* chỗ gọi alert() cũ hay focus() lại ô nhập ngay sau đó ⇒ trả focus về nút sau lượt hiện tại */
+    const _f = () => { try{ ov.querySelector('.uidlg-b.yes').focus(); }catch(_){} };
+    _f(); setTimeout(_f, 0);
+  }
+  function _push(kind, text, o){
+    o = o || {};
+    return new Promise(res => {
+      if(typeof document === 'undefined' || !document.body){ if(kind === 'ask'){ res(_W.confirm ? _W.confirm(text) : false); } else { _native.alert && _native.alert(text); res(); } return; }
+      Q.push({ kind, p: parse(text), res, ok: o.ok, cancel: o.cancel, title: o.title, tone: o.tone, danger: !!o.danger });
+      _next();
+    });
+  }
+  const api = {
+    alert: (text, o) => _push('alert', text, o),
+    ask:   (text, o) => _push('ask', text, o),
+    parse
+  };
+  /* mọi alert() cũ trong app ⇒ hộp của app (không chặn luồng code) */
+  try{ if(typeof window !== 'undefined') window.alert = function(t){ api.alert(t); }; }catch(_){}
+  return api;
+})();
+if(typeof window !== 'undefined') window.UIDLG = UIDLG;
