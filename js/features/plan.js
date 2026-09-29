@@ -1170,6 +1170,26 @@ function _makePlanModule(opts){
     olds.forEach(o => { const i = findNew(o); if(i >= 0){ used.add(i); matched.add(o._oid); } else gone.push(o); });
     const st = o => String(getEffectiveStatus(o)||'').toLowerCase();
     let cand = gone.filter(o => { const s2 = st(o); return s2 !== 'cancel' && s2 !== 'done' && s2 !== 'loading' && !o._altSkip; });
+    /* ⭐ v4.221 — xe ĐÃ 🚫 Cancelled mà bản dán mới gỡ luôn khỏi plan: không hỏi lại (đã huỷ rồi) nhưng
+       PHẢI ghi plan_cx (wc=1) — trước đây bị bỏ qua ⇒ mất dấu khỏi danh sách huỷ email P2 / Cancel List.
+       Nhóm 🔗 ALT = MỘT chuyến; nhóm còn xe trong plan mới / có xe đang nạp · đã xong ⇒ không tính. */
+    try{
+      const cxg = gone.filter(o => st(o) === 'cancel' && !o._altSkip), seenG = new Set(), its = [];
+      cxg.forEach(o => {
+        const g = lnkKind(o) === LNK_ALT ? lnkGid(o) : '';
+        let grp = [o];
+        if(g){
+          if(seenG.has(g)) return; seenG.add(g);
+          const mem = lnkMembers(g);
+          if(mem.some(m => matched.has(m._oid) || /^(loading|done)$/.test(st(m)))) return;
+          grp = cxg.filter(q => lnkKind(q) === LNK_ALT && lnkGid(q) === g);
+        }
+        its.push({ act:'vanish', wasCx:1, on:true, oids:grp.map(q => q._oid), oid:o._oid, alt:grp.length > 1, date,
+          rows:grp.map(q => Object.assign(_rowInfo(q), { qtyOwn:String(q.qty||''), noteOwn:String(q.note||'') })),
+          why:'Already cancelled in Today Plan — dropped by the new paste' });
+      });
+      diff.__cxGone = its;
+    }catch(e){ console.warn('[plan] cancelled-gone scan', e); diff.__cxGone = []; }
     /* nhóm ALT: còn một xe trong plan mới ⇒ cả nhóm không tính */
     cand = cand.filter(o => !(lnkKind(o) === LNK_ALT && lnkMembers(lnkGid(o)).some(m => matched.has(m._oid))));
     /* xe mới ghi Change TL cùng khách thay cho xe biến mất */
@@ -3505,7 +3525,7 @@ function _makePlanModule(opts){
     closeDiff();
     if((diff.cx||[]).some(x => x.act === 'link' && x.on)) setTimeout(()=>{ try{ lnkSyncAlt(); renderLedger(); }catch(_){} }, 60);
     try{ if(diff.cx.length && typeof AILOG !== 'undefined') AILOG.paste(UILABEL, pastedDate, mode, diff.cx); }catch(e){ console.warn('[AILOG]', e); }
-    try{ const vn = (diff.cx||[]).filter(x => x.act === 'vanish'); if(vn.length && typeof PLANCX !== 'undefined') PLANCX.record(pastedDate, vn); }catch(e){ console.warn('[PLANCX]', e); }
+    try{ const vn = (diff.cx||[]).filter(x => x.act === 'vanish').concat(diff.__cxGone || []); if(vn.length && typeof PLANCX !== 'undefined') PLANCX.record(pastedDate, vn); }catch(e){ console.warn('[PLANCX]', e); }   /* v4.221 — + xe đã huỷ bị gỡ (wc=1) */
     /* v4.183 — kế hoạch đầu ngày (một lần) + sổ ghi chú sale */
     try{ _pdayRecord(pastedDate, 'paste'); }catch(e){ console.warn('[PLANDAY]', e); }
     try{ if(typeof SNOTE !== 'undefined') SNOTE.collect(pastedRows, pastedDate); }catch(e){ console.warn('[SNOTE]', e); }
@@ -4647,8 +4667,9 @@ const PLANDAY = (function(){
   function get(date){ return C[date]; }       /* undefined = chưa đọc */
   const _pl = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const _cu = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
-  /* xe có trong kế hoạch đầu ngày mà KHÔNG còn trong kế hoạch cuối (bị gỡ, không ghi cancel) */
-  function dropped(date, finalRows){
+  /* xe có trong kế hoạch đầu ngày mà KHÔNG còn trong kế hoạch cuối (bị gỡ, không ghi cancel)
+     v4.221 — withCx: lấy cả dòng ĐÃ HUỶ lúc chụp (x=1) rồi bị gỡ — trước đây bị bỏ, mất khỏi danh sách huỷ */
+  function dropped(date, finalRows, withCx){
     const f = C[date]; if(!f || !f.rows) return [];
     const fr = finalRows || [];
     const all = (Array.isArray(f.rows) ? f.rows : Object.values(f.rows)).filter(Boolean);
@@ -4661,7 +4682,7 @@ const PLANDAY = (function(){
     const liveG = new Set(all.filter(x => x.g && inFinal(x)).map(x => x.g));
     const seenG = new Set();
     return all.filter(x => {
-      if(x.x || inFinal(x)) return false;
+      if((x.x && !withCx) || inFinal(x)) return false;
       if(x.g){ if(liveG.has(x.g) || seenG.has(x.g)) return false; seenG.add(x.g); x.grpN = all.filter(y => y.g === x.g).length; }
       return true;
     });
@@ -4838,7 +4859,7 @@ const PLANCX = (function(){
     items.forEach(x => {
       const r0 = x.rows[0] || {};
       const key = db.ref(FB + '/' + date).push().key;
-      const rec = { at:now, by:_who(), cx:x.on ? 1 : 0, trips:1, n:x.rows.length, why:String(x.why||''), repl:String(x.replacedBy||''),
+      const rec = { at:now, by:_who(), cx:x.on ? 1 : 0, wc:x.wasCx ? 1 : 0, trips:1, n:x.rows.length, why:String(x.why||''), repl:String(x.replacedBy||''),
                     c:r0.cust||'', p:x.rows.map(r => r.plate).filter(Boolean).join(' / '), m:r0.rmooc||'', d:x.rows.map(r => r.driver).filter(Boolean).join(' / '),
                     q:parseFloat(String(r0.qtyOwn || r0.qty || '').replace(/,/g,'')) || 0, t:r0.type||'', no:r0.no||'', do:r0.doNum||'', nt:r0.noteOwn || r0.note || '',
                     oids:(x.oids || [x.oid]).join(',') };

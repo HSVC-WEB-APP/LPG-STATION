@@ -1,5 +1,10 @@
 /* ============================================================
- * MAIL — mail.js  (v4.216)
+ * MAIL — mail.js  (v4.221)
+ * v4.221: danh sách xe huỷ P2 — xe ĐÃ XÁC NHẬN huỷ luôn được tick sẵn: 🚫 Cancelled trong Today Plan (bấm tay
+ *         hoặc nhận từ ghi chú sale lúc dán) · 🚫 đã huỷ rồi bị bản dán mới GỠ khỏi plan (plan_cx wc=1, trước đây
+ *         mất hẳn) · 🚫 đã huỷ trong kế hoạch đầu ngày rồi bị gỡ (x=1, trước đây mất hẳn) · 🕳/📌 có ghi chú sale
+ *         nói cancel. Chỉ xe BIẾN MẤT không có dấu huỷ nào mới để user tick. Thêm 📝 dòng còn trong plan có ghi
+ *         chú cancel nhưng chưa ở trạng thái Cancelled (không tick sẵn — người dán đã bỏ gợi ý).
  * v4.216: xe huỷ P2 KHÔNG điền sẵn — nút 🚫 Cancel list mở bảng ứng viên (🚫 Cancelled · 🕳 biến mất lúc dán ·
  *         📌 có trong kế hoạch đầu ngày), gộp trùng biển số, gợi ý "đã nạp hôm nay" / "còn trong Today Plan";
  *         người dùng tick + ✓ Confirm. Chỉ 🚫 Cancelled được tick sẵn. Dùng chung cho thư P2 và sheet Cancel List.
@@ -506,27 +511,50 @@ const MAIL = (function(){
       }
       add({ customer:r.customer||'', plate:r.plate||'', rmooc:r.rmooc||'', driver:r.driver||'', qty:num(r.qty), note:String(r.note||'').trim() || 'Cancel', src:'cancel', oid:r._oid||'' });
     });
-    /* ② 🕳 biến mất khỏi Today Plan, xác nhận lúc dán (plan_cx) */
+    /* ② 🕳 biến mất khỏi Today Plan, xác nhận lúc dán (plan_cx)
+       v4.221 — wc=1: xe ĐÃ 🚫 Cancelled rồi bị bản dán mới gỡ ⇒ nguồn 'cxgone', tick sẵn.
+                ghi chú sale nói cancel ⇒ tick sẵn (noteCx). Còn lại (biến mất không dấu huỷ) ⇒ user tick. */
+    const cxT = s => { try{ return !!(typeof TP !== 'undefined' && TP._cxText && TP._cxText(String(s||''))); }catch(_){ return false; } };
+    const planOids = new Set(plan.map(r => String(r._oid||'')).filter(Boolean));
     const PX = (typeof PLANCX !== 'undefined') ? PLANCX : null;
     const vx = PX ? PX.get(iso) : [];
-    (vx || []).filter(v => +v.cx === 1).forEach(v => add({ customer:v.c||'', plate:v.p||'', rmooc:v.m||'', driver:v.d||'', qty:num(v.q), by:v.by||'', oid:v.oids||'', no:v.no||'',
-      note:(v.nt && !/^arrived/i.test(v.nt) ? v.nt + ' · ' : '') + 'Removed from plan' + (+v.n > 1 ? ' (1 of '+v.n+' trucks/drivers)' : ''), src:'vanish' }));
+    (vx || []).filter(v => +v.cx === 1).forEach(v => {
+      const wc = +v.wc === 1, nt = String(v.nt||'').trim();
+      if(wc && String(v.oids||'').split(',').some(o => o && planOids.has(o))) return;     /* còn trong plan ⇒ ① đã tính */
+      const grpTxt = +v.n > 1 ? ' (1 of '+v.n+' trucks/drivers)' : '';
+      add({ customer:v.c||'', plate:v.p||'', rmooc:v.m||'', driver:v.d||'', qty:num(v.q), by:v.by||'', oid:v.oids||'', no:v.no||'',
+        note:wc ? (nt || 'Cancel') + grpTxt : (nt && !/^arrived/i.test(nt) ? nt + ' · ' : '') + 'Removed from plan' + grpTxt,
+        src:wc ? 'cxgone' : 'vanish', noteCx:!wc && cxT(nt), pre:wc || cxT(nt) });
+    });
     /* ③ 📌 có trong kế hoạch đầu ngày mà Today Plan không còn */
     let planMT = 0;
     try{ planMT = TP.lnkTotals(plan).planMT; }catch(_){ plan.forEach(r => { if(_planStatus(r) !== 'cancel') planMT += num(r.qty) || 0; }); }
     const PD = (typeof PLANDAY !== 'undefined') ? PLANDAY : null;
     const first = PD ? PD.get(iso) : null;
-    const drop = first ? PD.dropped(iso, plan) : [];
-    drop.forEach(x => add({ customer:x.c, plate:x.p, rmooc:x.m, driver:x.d, qty:num(x.q), oid:x.o||'', no:x.n||'',
-      note:(x.nt && !/^arrived/i.test(x.nt) ? x.nt + ' · ' : '')+'Removed from plan'+(x.grpN > 1 ? ' (1 of '+x.grpN+' trucks/drivers)' : ''), src:'removed' }));
+    /* v4.221 — lấy cả dòng ĐÃ HUỶ trong kế hoạch đầu ngày (x=1) rồi bị gỡ ⇒ 'cxfirst', tick sẵn */
+    const dropAll = first ? PD.dropped(iso, plan, true) : [];
+    const drop = dropAll.filter(x => !x.x);
+    dropAll.forEach(x => {
+      const grpTxt = x.grpN > 1 ? ' (1 of '+x.grpN+' trucks/drivers)' : '', nt = String(x.nt||'').trim();
+      add({ customer:x.c, plate:x.p, rmooc:x.m, driver:x.d, qty:num(x.q), oid:x.o||'', no:x.n||'',
+        note:x.x ? (nt || 'Cancel') + grpTxt : (nt && !/^arrived/i.test(nt) ? nt + ' · ' : '')+'Removed from plan'+grpTxt,
+        src:x.x ? 'cxfirst' : 'removed', noteCx:!x.x && cxT(nt), pre:!!x.x || cxT(nt) });
+    });
+    /* ④ 📝 còn trong Today Plan, ghi chú sale nói cancel mà trạng thái KHÔNG phải Cancelled (người dán đã bỏ
+       gợi ý, hoặc ghi chú từ ô gộp không đủ điều kiện) ⇒ chỉ liệt kê, KHÔNG tick sẵn. Đang nạp / xong ⇒ bỏ. */
+    plan.forEach(r => {
+      const s = _planStatus(r);
+      if(s === 'cancel' || s === 'loading' || s === 'done' || r._altSkip || !cxT(r.note)) return;
+      add({ customer:r.customer||'', plate:r.plate||'', rmooc:r.rmooc||'', driver:r.driver||'', qty:num(r.qty), note:String(r.note||'').trim(), src:'note', oid:r._oid||'' });
+    });
     /* gợi ý kiểm tra: xe đã có GI hôm nay? còn nằm trong Today Plan (không phải Cancelled)? */
     const S = _cnSel(iso);
     cands.forEach(c => {
       const ps = _cnPlates(c.plate);
       c.loadedMT = 0;
       if(ps.length) tl.forEach(r => { if(ps.indexOf(_cnPl(r.truck)) >= 0) c.loadedMT += _c34(r).nw / 1000; });
-      c.inPlan = !ps.length || c.src === 'cancel' ? '' : uniq(plan.filter(r => ps.indexOf(_cnPl(r.plate)) >= 0).map(r => _planStatus(r) || 'waiting')).join(', ');
-      c.sel = S[c.key] !== undefined ? !!S[c.key] : c.src === 'cancel';
+      c.inPlan = !ps.length || c.src === 'cancel' || c.src === 'note' ? '' : uniq(plan.filter(r => ps.indexOf(_cnPl(r.plate)) >= 0).map(r => _planStatus(r) || 'waiting')).join(', ');
+      c.sel = S[c.key] !== undefined ? !!S[c.key] : (c.src === 'cancel' || !!c.pre);     /* v4.221 — mọi xe đã xác nhận huỷ */
     });
     const rows = cands.filter(c => c.sel).map(c => ({ customer:c.customer, plate:c.plate, rmooc:c.rmooc, driver:c.driver, qty:c.qty, note:c.note, src:c.src }));
     const reviewed = !!(ST.cnOk && ST.cnOk[iso]);
@@ -541,12 +569,13 @@ const MAIL = (function(){
   }
   /* v4.216 — bảng chọn xe huỷ (nằm trong ô 🚫 Cancel list, thu gọn) */
   function _cnPanel(CX){
-    const iso = CX.iso, SRC = { cancel:['🚫','Cancelled in Today Plan'], vanish:['🕳','Removed from Today Plan at paste'], removed:['📌','In the first plan, not in Today Plan now'] };
+    const iso = CX.iso, SRC = { cancel:['🚫','Cancelled in Today Plan'], cxgone:['🚫','Cancelled, then removed from Today Plan'], cxfirst:['🚫','Cancelled in the first plan, then removed'],
+                                vanish:['🕳','Removed from Today Plan at paste'], removed:['📌','In the first plan, not in Today Plan now'], note:['📝','Sale note says cancel — status is not Cancelled'] };
     const th = t => '<th style="padding:3px 6px;border:1px solid #cbd5e1;background:#e2e8f0;text-align:left;white-space:nowrap">'+t+'</th>';
     const tdc = (t, st) => '<td style="padding:3px 6px;border:1px solid #e2e8f0;'+(st||'')+'">'+t+'</td>';
     let h = '<div style="padding:4px 2px">'+
-      '<div class="ml-cap" style="margin-bottom:4px">Tick the trucks that are <b>really cancelled</b> on '+esc(iso)+'. Only 🚫 Cancelled (set in Today Plan) is ticked for you — '+
-      'a truck removed from the plan may already be loaded, or be listed only for coordination.</div>'+
+      '<div class="ml-cap" style="margin-bottom:4px">Cancelled trucks of '+esc(iso)+': 🚫 Cancelled (button or sale note) and trucks whose sale note says cancel are <b>ticked for you</b>. '+
+      'Tick a truck that just <b>disappeared</b> from the plan only if it is really cancelled — it may already be loaded, or be listed only for coordination.</div>'+
       '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;flex-wrap:wrap">'+
       '<button class="ml-mini" onclick="MAIL.cnAll(1)">☑ Tick all</button><button class="ml-mini" onclick="MAIL.cnAll(0)">☐ Untick all</button>'+
       '<button class="ml-save" onclick="MAIL.cnOk()" title="Confirm this list for the mail and the Daily Stock file (Cancel List sheet)">✓ Confirm list ('+CX.rows.length+' cancelled)</button>'+
@@ -559,7 +588,7 @@ const MAIL = (function(){
       if(c.inPlan) chk.push('<span style="color:#1d4ed8">still in Today Plan ('+esc(c.inPlan)+')</span>');
       h += '<tr style="'+(c.sel ? 'background:#fef2f2' : 'opacity:.75')+'">'+
         tdc('<input type="checkbox"'+(c.sel ? ' checked' : '')+' onchange="MAIL.cnPick(\''+k+'\',this.checked)">','text-align:center')+
-        tdc(s[0]+' <span class="ml-cap">'+s[1]+(c.by ? ' · by '+esc(c.by) : '')+'</span>')+
+        tdc(s[0]+' <span class="ml-cap">'+s[1]+(c.noteCx ? ' · <b>note says cancel</b>' : '')+(c.by ? ' · by '+esc(c.by) : '')+'</span>')+
         tdc(esc(c.customer))+tdc('<b>'+esc(c.plate || '(no truck)')+'</b>','white-space:nowrap')+tdc(esc(c.rmooc),'white-space:nowrap')+tdc(esc(c.driver))+
         tdc(fmt(num(c.qty),3),'text-align:right')+tdc(esc(c.note))+tdc(chk.join('<br>'))+'</tr>';
     });

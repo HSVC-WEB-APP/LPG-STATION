@@ -875,7 +875,7 @@ const INV = (function(){
         const x = _splitByWt(lpg, p);
         rows.push({ key:String(rid), doNo:String(r.doNo||'—'), cust:String(r.cust||''),
                     truck:String(r.truck||''), driver:String(r.driver||''),
-                    lot:String(r.lot||''), lpg:x.total, c3:x.c3, c4:x.c4 });
+                    lot:String(r.lot||''), lpg:x.total, c3:x.c3, c4:x.c4, half:x.half });
       });
     }
     rows.sort((a,b)=>String(a.doNo).localeCompare(String(b.doNo), undefined, { numeric:true }));
@@ -1175,14 +1175,21 @@ const INV = (function(){
   }
 
   /* ⚠ MỘT LUẬT LÀM TRÒN DUY NHẤT cho cả 🧮 lẫn 📤.
-     WMS làm tròn LÊN ở C3 rồi lấy phần bù làm C4. Mục đích của hai bảng này là
+     ⭐ v4.222 — WMS làm tròn GẦN NHẤT ở C3 (KHÔNG phải làm tròn lên như v4.148 tưởng) rồi lấy phần bù
+     làm C4. Bằng chứng 29/09 lot 433 @49 %: 24.990 × 0,49 = 12.245,1 ⇒ WMS ghi 12.245 / 12.745, app
+     ceil ra 12.246 / 12.744 (lệch 1 kg); 25.030 → 12.264,7 ⇒ WMS 12.265 (không phải cắt xuống).
+     Tỉ lệ tròn 50 % không bao giờ lệch vì net là bội số 10 ⇒ C3 luôn nguyên.
+     Trường hợp đúng .5 (vd. 25.050 × 49 % = 12.274,5) CHƯA có phiếu WMS đối chứng ⇒ làm tròn lên
+     (half-up) và gắn cờ half để màn hình nhắc kiểm lại. Mục đích của hai bảng này là
      ĐOÁN TRƯỚC con số WMS sẽ ghi, nên phải làm y hệt — lệch 1 kg là lệch phiếu.
      C4 là phần bù nên tổng luôn khớp tuyệt đối, không bao giờ lệch do làm tròn
      hai lần (cùng nguyên tắc "Σ bám chi tiết" của v4.75). */
   function _splitByWt(totalKg, pct){
     const t  = Math.round(num(totalKg));
-    const c3 = Math.ceil(t * (num(pct) / 100) - 1e-9);
-    return { total:t, c3:c3, c4:t - c3 };
+    const x  = t * (num(pct) / 100);
+    const c3 = Math.floor(x + 0.5 + 1e-9);                 /* gần nhất, .5 lên; 1e-9 chống 12.274,4999… */
+    const half = Math.abs(x - Math.floor(x) - 0.5) < 1e-6;
+    return { total:t, c3:c3, c4:t - c3, half:half };
   }
 
   /* ⚠ YÊU CẦU CỦA USER: số NGƯỜI NHẬP và số MÁY TÍNH phải khác nhau HẲN,

@@ -642,7 +642,7 @@ const TKC = (function(){
 
     let h = '<div class="tkc-basis k-' + kind + '" title="'
       +   esc('The C3 share WMS holds for this tank, rounded to a whole number — or the figure you '
-            + 'typed yourself. Every row below splits on it: C3 rounded up to the kg PER TRUCK, '
+            + 'typed yourself. Every row below splits on it: C3 rounded to the nearest kg PER TRUCK (same as WMS), '
             + 'C4 = that truck\'s net − its C3. Change it on the Stock tab.') + '">'
       +   '<span class="k">%wt C3 &mdash; WMS basis</span>'
       +   '<b>' + (MARK[kind]||'') + ' ' + (wt === null ? '—' : wt) + ' %</b>'
@@ -676,7 +676,8 @@ const TKC = (function(){
                + esc(_shortLot(r.lot)) + '</i>' : '') + '</td>'
           +  '<td class="tk">' + esc(r.truck || '—') + '</td>'
           +  '<td class="dv" title="' + esc(r.cust || '') + '">' + esc(r.driver || '—') + '</td>'
-          +  '<td class="n c3">' + kg(r.c3) + '</td>'
+          +  '<td class="n c3"' + (r.half ? ' title="' + esc('Exactly .5 kg before rounding — the app rounds C3 up. Check this truck against WMS.') + '"' : '') + '>'
+          +    (r.half ? '<span style="color:#b45309;font-weight:700">½ </span>' : '') + kg(r.c3) + '</td>'
           +  '<td class="n c4">' + kg(r.c4) + '</td>'
           +  '<td class="n tot">' + kg(r.lpg) + '</td></tr>';
       });
