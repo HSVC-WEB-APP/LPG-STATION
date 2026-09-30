@@ -1,5 +1,11 @@
 /* ============================================================
- * MAIL — mail.js  (v4.221)
+ * MAIL — mail.js  (v4.226)
+ * v4.226: P3 biểu đồ — có file Excel dew point ⇒ MẶC ĐỊNH vẽ từ dữ liệu biểu đồ của file (cùng dòng, cùng khoảng ngày từ
+ *         dòng đầu, nhãn 10 ngày, không vạch −45, ô trống đứt đường); file chưa có ngày báo cáo ⇒ nhắc ▶ Fill. Ô 📈 Chart
+ *         vẫn chọn được "App history · 6M/1Y/16M/2Y" (lịch sử Firebase, cửa sổ kết thúc ở ngày báo cáo).
+ * v4.224: P3 bảng 3 ĐỢT GẦN NHẤT (2 lần trước + ngày gửi đậm nền xanh lá) · No. tự điền (DEWPT.nextNo) · CÙNG bộ kiểm
+ *         số với Engineer ▸ 💧 Dew Point (DEWPT.confirmCheck, inState tô màu ô) · 📂 file Excel dew point + ▶ Fill file &
+ *         attach (DEWXL, chọn file ở tab hay ở email đều dùng chung).
  * v4.221: danh sách xe huỷ P2 — xe ĐÃ XÁC NHẬN huỷ luôn được tick sẵn: 🚫 Cancelled trong Today Plan (bấm tay
  *         hoặc nhận từ ghi chú sale lúc dán) · 🚫 đã huỷ rồi bị bản dán mới GỠ khỏi plan (plan_cx wc=1, trước đây
  *         mất hẳn) · 🚫 đã huỷ trong kế hoạch đầu ngày rồi bị gỡ (x=1, trước đây mất hẳn) · 🕳/📌 có ghi chú sale
@@ -94,6 +100,7 @@ const MAIL = (function(){
   function _lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(_){} }
 
   /* ── hằng số Mix Calculator (khớp mixctrl.js DEF; ⚙ Settings ghi đè) ── */
+  const ODO_RPT_PPM = 10;   /* v4.223 — ppm ghi trên báo cáo (chỉ hiển thị, không vào công thức) */
   const MC_DEF = { c3l:0.483, c4l:0.560, c3v:0.01721, c4v:0.00825, tv:696.91, r:5.5, odoPpm:30, odoRef:570, odoBd:0.00003 };
   function _mcCfg(){
     let c = Object.assign({}, MC_DEF);
@@ -385,7 +392,10 @@ const MAIL = (function(){
        lúc gửi thư KHÔNG phải số chuyển kho đúng — số đúng là mục ADJ (điều chỉnh
        theo COQ/WMS) mà lúc gửi thư thì chưa có ⇒ in ra chỉ gây hiểu nhầm.
        Odorant: chỉ giữ BD SET (bỏ SET). */
-    sec('ODORANT ('+_mcCfg().odoPpm+' ppm)');
+    /* v4.223 — nhãn báo cáo ghi 10 ppm = tỉ lệ THỰC TẾ đang dùng. Hệ số 30 trong
+       công thức BD SET (odoPpm, ⚙ Settings) là đặc thù hệ thống — GIỮ NGUYÊN, KHÔNG
+       lấy nó làm nhãn. Đổi tỉ lệ thực tế thì sửa ODO_RPT_PPM. */
+    sec('ODORANT ('+ODO_RPT_PPM+' ppm)');
     row('BD SET', '', c => c.odoBd == null ? '' : fmt(c.odoBd,2), 'font-weight:bold;');
     return h + '</table>';
   }
@@ -755,6 +765,7 @@ const MAIL = (function(){
   /* ── P3 · DEW POINT ───────────────────────────────────────────── */
 
   /* ── P3 · DEW POINT — số đo lưu node dew_point/<ngày> (người gõ ⇒ Firebase) ── */
+  const _dn = v => (typeof ENGX_U !== 'undefined' && ENGX_U.num) ? ENGX_U.num(v) : num(v);   /* v4.224 — đọc số dew point như tab Engineer (−45 unicode, dấu phẩy) */
   const DEW_PTS = [['ca','Outlet Coalescer A',-32],['cb','Outlet Coalescer B',-32],['da','Outlet Dryer A',-45],['db','Outlet Dryer B',-45]];
   function _dewLoad(date){
     if(ST.dew.loaded === date) return;
@@ -762,39 +773,47 @@ const MAIL = (function(){
     try{
       firebase.database().ref('dew_point/'+date).once('value').then(s => {
         const v = s.val();
-        if(v && ST.dew.loaded === date){ ['no','time','ca','cb','da','db'].forEach(k => { if(v[k] != null) ST.dew[k] = String(v[k]); }); ST.dew.saved = true; _renderAll(); }
+        if(v && ST.dew.loaded === date){ ['no','time','ca','cb','da','db'].forEach(k => { if(v[k] != null) ST.dew[k] = String(v[k]); });
+          if(String(v.no == null ? '' : v.no).trim()) ST.dew.noUser = true; ST.dew.saved = true; _renderAll(); }
       }).catch(e => console.warn('[MAIL] dew load', e));
-      /* số thứ tự mặc định = số lớn nhất đã lưu + 1 */
-      if(!ST.dew.no) firebase.database().ref('dew_point').orderByKey().limitToLast(1).once('value').then(s => {
-        const v = s.val(); if(!v || ST.dew.no) return;
-        const last = Object.values(v)[0]; const n = parseInt(last && last.no, 10);
-        if(n){ ST.dew.no = String(n + 1); _renderAll(); }
-      }).catch(() => {});
+      /* v4.224 — No. KHÔNG còn lấy "bản ghi cuối + 1" (lịch sử import không có No. ⇒ luôn trống): _dewAutoNo()
+         đếm theo lịch sử DEWPT + dòng cuối file Excel đang chọn — cùng một cách với Engineer ▸ 💧 Dew Point */
     }catch(_){}
   }
+  function _dewAutoNo(){
+    const d = ST.dew; if(d.noUser) return;
+    if(typeof DEWPT === 'undefined' || !DEWPT.nextNo || !DEWPT.isLoaded('c3')) return;
+    const n = DEWPT.nextNo(ST.date, 'c3'); if(n !== d.no) d.no = n;
+  }
   /* v4.207 — CHỈ lưu khi người dùng bấm 💾 (hoặc chọn 💾 ở hộp nhắc lúc rời email). Trả Promise<true|false>. */
-  function dewSave(){
-    if(typeof canWrite === 'function' && !canWrite('mail')){ _toast('⛔ Your account has no write permission', 'er'); return Promise.resolve(false); }
-    if(!ST.date || !DEW_PTS.some(p => num(ST.dew[p[0]]) !== null)){ _toast('⚠ No dew point reading to save', 'er'); return Promise.resolve(false); }
-    const d = ST.dew, rec = { no:d.no, time:d.time, _ts:Date.now(), by:(typeof CURRENT_USER!=='undefined' && CURRENT_USER.name) || '?' };
-    DEW_PTS.forEach(p => { const v = num(d[p[0]]); rec[p[0]] = v == null ? '' : v; });
-    /* số khả nghi (dương / ngoài dải vật lý) ⇒ hỏi lại trước khi ghi vào lịch sử */
-    const odd = DEW_PTS.filter(p => rec[p[0]] !== '' && (rec[p[0]] > 0 || rec[p[0]] < -110 || rec[p[0]] > 20)).map(p => p[1]+' = '+rec[p[0]]);
-    if(odd.length && !confirm('Check these readings before saving ('+ST.date+'):\n\n  • '+odd.join('\n  • ')+'\n\nDew point is normally NEGATIVE.\nOK = save anyway · Cancel = go back and correct')) return Promise.resolve(false);
+  async function dewSave(){
+    if(typeof canWrite === 'function' && !canWrite('mail')){ _toast('⛔ Your account has no write permission', 'er'); return false; }
+    if(!ST.date || !DEW_PTS.some(p => String(ST.dew[p[0]] == null ? '' : ST.dew[p[0]]).trim() !== '')){ _toast('⚠ No dew point reading to save', 'er'); return false; }
+    const d = ST.dew;
+    /* ⭐ v4.224 — CÙNG bộ kiểm với Engineer ▸ 💧 Dew Point (DEWPT.confirmCheck): không phải số / ngoài dải ⇒ chặn;
+       số dương (thiếu dấu âm) · vượt giới hạn · lệch ≥ 12 °C so với lần đo trước · dryer ướt hơn coalescer ⇒ hỏi lại */
+    if(typeof DEWPT !== 'undefined' && DEWPT.confirmCheck){ if(!(await DEWPT.confirmCheck('c3', ST.date, d))) return false; }
+    else { const bad = DEW_PTS.filter(p => { const t = String(d[p[0]] == null ? '' : d[p[0]]).trim(); return t !== '' && _dn(t) === null; });
+      if(bad.length){ _toast('⚠ '+bad.map(p => p[1]).join(', ')+': not a number', 'er'); return false; }
+      const odd = DEW_PTS.map(p => [p, _dn(d[p[0]])]).filter(([, v]) => v != null && (v > 0 || v < -110)).map(([p, v]) => p[1]+' = '+v);
+      if(odd.length){ const msg = '⚠ Check these readings before saving ('+ST.date+')\n\n• '+odd.join('\n• ')+'\n\nDew point is normally NEGATIVE.\n\nOK = Save anyway\nCancel = Go back and fix';
+        if(!((typeof UIDLG !== 'undefined' && UIDLG.ask) ? await UIDLG.ask(msg) : confirm(msg))) return false; } }
+    const rec = { no:String(d.no == null ? '' : d.no).trim(), time:d.time, _ts:Date.now(), by:(typeof CURRENT_USER!=='undefined' && CURRENT_USER.name) || '?' };
+    DEW_PTS.forEach(p => { const v = _dn(d[p[0]]); rec[p[0]] = v == null ? '' : v; });
     try{
       /* v4.176 — update (không set) để giữ ô Note gõ ở Engineer ▸ 💧 Dew Point */
       return firebase.database().ref('dew_point/'+ST.date).update(rec)
-        .then(() => { ST.dew.saved = true; ST.dew.touched = false; try{ DEWPT.ingest(ST.date, rec); }catch(_){} _toast('💾 Dew point '+ST.date+' saved', 'ok'); _renderAll(); return true; })
+        .then(() => { ST.dew.saved = true; ST.dew.touched = false; if(rec.no) ST.dew.noUser = true; try{ DEWPT.ingest(ST.date, rec); }catch(_){} _toast('💾 Dew point '+ST.date+' saved', 'ok'); _renderAll(); return true; })
         .catch(e => { _toast('⚠ Save failed: '+e.message, 'er'); return false; });
-    }catch(e){ _toast('⚠ Save failed: '+e.message, 'er'); return Promise.resolve(false); }
+    }catch(e){ _toast('⚠ Save failed: '+e.message, 'er'); return false; }
   }
   /* v4.207 — có số VỪA GÕ mà chưa lưu ⇒ rời email P3 (đổi báo cáo / đổi ngày / 👥 / đóng) thì HỎI:
      💾 Save & continue · Discard & continue · Stay. Không bao giờ tự lưu. */
-  function _dewDirty(){ return ST.view === 'rep' && ST.rep === 'P3' && !!ST.dew.touched && !ST.dew.saved && DEW_PTS.some(p => num(ST.dew[p[0]]) !== null); }
+  function _dewDirty(){ return ST.view === 'rep' && ST.rep === 'P3' && !!ST.dew.touched && !ST.dew.saved && DEW_PTS.some(p => _dn(ST.dew[p[0]]) !== null); }
   function _dewGuard(go){
     if(!_dewDirty()){ go(); return; }
     const d = ST.dew;
-    const vals = DEW_PTS.filter(p => num(d[p[0]]) !== null).map(p => esc(p[1].replace('Outlet ',''))+' <b>'+esc(String(num(d[p[0]])))+'</b>').join(' · ');
+    const vals = DEW_PTS.filter(p => _dn(d[p[0]]) !== null).map(p => esc(p[1].replace('Outlet ',''))+' <b>'+esc(String(_dn(d[p[0]])))+'</b>').join(' · ');
     let box = document.getElementById('mlDewAsk'); if(box) box.remove();
     box = document.createElement('div'); box.id = 'mlDewAsk';
     box.setAttribute('style', 'position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center');
@@ -822,18 +841,35 @@ const MAIL = (function(){
      trục Y trần −40 °C như biểu đồ Excel cũ, vạch giới hạn −45 °C. .eml nhúng ảnh dạng cid (multipart/related). */
   const DEW_RANGE = { '6m':[183,'6 months'], '1y':[365,'1 year'], '16m':[480,'16 months'], '2y':[730,'2 years'] };
   const DEW_CW = 620, DEW_CH = 420;
-  function dewRange(k){ if(DEW_RANGE[k]){ ST.dewRange = k; ST.dewPng = null; _renderAll(); } }
+  function dewRange(k){ if(DEW_RANGE[k] || k === 'xl'){ ST.dewRange = k; ST.dewPick = true; ST.dewPng = null; _renderAll(); } }
+  /* ⭐ v4.226 — có file Excel dew point ⇒ biểu đồ trong thư vẽ từ CHÍNH vùng dữ liệu biểu đồ của file (DEWXL.chart):
+     cùng dòng, cùng khoảng ngày, cùng tên / màu series, trần trục Y, ô trống = đứt đường như Excel ⇒ khớp file đính kèm.
+     (File .xlsx không chứa ảnh biểu đồ, chỉ chứa định nghĩa ⇒ không "chép ảnh" được, phải vẽ lại từ đúng dữ liệu đó.)
+     Người dùng vẫn chọn lại được 6M / 1Y / 16M / 2Y từ lịch sử app. */
+  function _dewUseXl(){ return typeof DEWXL !== 'undefined' && DEWXL.has && DEWXL.has('c3') && (ST.dewRange === 'xl' || !ST.dewPick); }
   function _dewSeries(d){
     const H = (typeof DEWPT !== 'undefined' && DEWPT.c3Rows) ? DEWPT.c3Rows() : null;
     if(!H) return null;
     const to = ST.date, from = isoAdd(to, -DEW_RANGE[ST.dewRange][0]);
     const m = {};
-    Object.keys(H).forEach(k => { if(k >= from && k <= to && H[k]) m[k] = { da:num(H[k].da), db:num(H[k].db) }; });
-    const cur = { da:num(d.da), db:num(d.db) };                  /* số đang gõ (có thể chưa lưu) thắng số cũ */
+    Object.keys(H).forEach(k => { if(k >= from && k <= to && H[k]) m[k] = { da:_dn(H[k].da), db:_dn(H[k].db) }; });
+    const cur = { da:_dn(d.da), db:_dn(d.db) };                  /* số đang gõ (có thể chưa lưu) thắng số cũ */
     if(cur.da !== null || cur.db !== null) m[to] = { da:cur.da !== null ? cur.da : (m[to] || {}).da, db:cur.db !== null ? cur.db : (m[to] || {}).db };
     return Object.keys(m).sort().map(k => ({ date:k, da:m[k].da, db:m[k].db })).filter(r => r.da !== null || r.db !== null);
   }
   function _dewChart(d){
+    if(_dewUseXl()){
+      const C = DEWXL.chart('c3');
+      if(!C) return { warn:'Reading the chart of the Excel file…' };
+      const Cv = C.rows.filter(r => r.da != null || r.db != null);
+      if(!Cv.length) return { warn:'The Excel file chart has no Dryer A/B data — chart not included.' };
+      const w = Cv[Cv.length-1].date < ST.date ? 'The chart is drawn from the Excel file, which has no reading for '+ST.date+' yet — press ▶ Fill file & attach.' : '';
+      const key = 'xl|'+C.sig;
+      if(ST.dewPng && ST.dewPng.key === key) return { url:ST.dewPng.url, warn:w };
+      const url = _dewDraw(C.rows, { title:C.title, hi:C.ymax, lo:C.ymin, names:C.names, cols:C.cols, gap:C.gap });
+      if(!url) return { warn:(w ? w+' ' : '')+'This browser cannot draw the chart — chart not included.' };
+      ST.dewPng = { key, url }; return { url, warn:w };
+    }
     const H = (typeof DEWPT !== 'undefined' && DEWPT.c3Rows) ? DEWPT.c3Rows() : null;
     if(!H){
       if(typeof DEWPT === 'undefined' || !DEWPT.c3Hist) return { warn:'Dew point history module not loaded — chart not included.' };
@@ -851,36 +887,40 @@ const MAIL = (function(){
     ST.dewPng = { key, url };
     return { url };
   }
-  function _dewDraw(S){
+  function _dewDraw(S, o){
+    o = o || {};
     let cv; try{ cv = document.createElement('canvas'); }catch(_){ return ''; }
     const k = 2, W = DEW_CW, Hh = DEW_CH; cv.width = W * k; cv.height = Hh * k;
     const g = cv.getContext && cv.getContext('2d'); if(!g) return '';
     g.scale(k, k);
     const day = iso => { const p = iso.split('-'); return Date.UTC(+p[0], +p[1]-1, +p[2]) / 864e5; };
     const L = 62, R = 16, T = 78, B = 44;                       /* nhãn ngày nằm TRÊN như biểu đồ Excel cũ */
-    const x0 = day(S[0].date), x1 = Math.max(day(S[S.length-1].date), x0 + 1);
+    const Sv = S.filter(r => r.da != null || r.db != null); if(!Sv.length) return '';
+    const x0 = day(Sv[0].date), x1 = Math.max(day(Sv[Sv.length-1].date), x0 + 1);
     const vals = S.flatMap(r => [r.da, r.db]).filter(v => v != null);
-    const hi = Math.max(-40, Math.ceil(Math.max(...vals) / 5) * 5), lo = Math.min(-85, Math.floor(Math.min(...vals) / 5) * 5);
+    const hi = o.hi != null ? o.hi : Math.max(-40, Math.ceil(Math.max(...vals) / 5) * 5), lo = o.lo != null ? o.lo : Math.min(-85, Math.floor(Math.min(...vals) / 5) * 5);
     const X = dd => L + (dd - x0) / (x1 - x0) * (W - L - R), Y = v => T + (hi - v) / (hi - lo) * (Hh - T - B);
     g.fillStyle = '#fff'; g.fillRect(0, 0, W, Hh);
-    g.fillStyle = '#404040'; g.font = '13px Arial'; g.textAlign = 'center'; g.fillText('Dew Point of C3 Dryer Outlet', W / 2, 18);
+    g.fillStyle = '#404040'; g.font = '13px Arial'; g.textAlign = 'center'; g.fillText(o.title || 'Dew Point of C3 Dryer Outlet', W / 2, 18);
     /* lưới + trục Y */
     g.font = '10px Arial'; g.textAlign = 'right'; g.textBaseline = 'middle';
     for(let v = hi; v >= lo; v -= 5){ g.strokeStyle = '#d9d9d9'; g.lineWidth = 1; g.beginPath(); g.moveTo(L, Y(v) + .5); g.lineTo(W - R, Y(v) + .5); g.stroke(); g.fillStyle = '#595959'; g.fillText(v.toFixed(1), L - 6, Y(v)); }
     g.save(); g.translate(14, T + (Hh - T - B) / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center'; g.font = 'bold 10px Arial'; g.fillStyle = '#404040'; g.fillText('Dew Point (\u2103)', 0, 0); g.restore();
     /* nhãn ngày (m/d, dọc) ~ 45 nhãn */
-    const step = Math.max(1, Math.round((x1 - x0) / 45));
+    const step = o.title && (x1 - x0) / 10 <= 55 ? 10 : Math.max(1, Math.round((x1 - x0) / 45));      /* file Excel: nhãn mỗi 10 ngày như biểu đồ gốc */
     g.font = '9px Arial'; g.fillStyle = '#404040'; g.textBaseline = 'middle';
     for(let dd = x0; dd <= x1; dd += step){ const dt = new Date(dd * 864e5); g.save(); g.translate(X(dd), T - 4); g.rotate(-Math.PI / 2); g.textAlign = 'left'; g.fillText((dt.getUTCMonth()+1)+'/'+dt.getUTCDate(), 0, 0); g.restore(); }
     g.strokeStyle = '#bfbfbf'; g.beginPath(); g.moveTo(L, T); g.lineTo(W - R, T); g.stroke();
     /* giới hạn dryer −45 °C */
-    if(-45 <= hi && -45 >= lo){ g.save(); g.setLineDash([6, 4]); g.strokeStyle = '#7f7f7f'; g.beginPath(); g.moveTo(L, Y(-45)); g.lineTo(W - R, Y(-45)); g.stroke(); g.restore();
+    if(!o.title && -45 <= hi && -45 >= lo){                    /* biểu đồ theo file Excel: file không có vạch này ⇒ không vẽ */ g.save(); g.setLineDash([6, 4]); g.strokeStyle = '#7f7f7f'; g.beginPath(); g.moveTo(L, Y(-45)); g.lineTo(W - R, Y(-45)); g.stroke(); g.restore();
       g.fillStyle = '#7f7f7f'; g.font = '9px Arial'; g.textAlign = 'right'; g.textBaseline = 'bottom'; g.fillText('Limit -45', W - R - 2, Y(-45) - 2); }
-    const SER = [['da','Outlet Dryer A','#4472c4'], ['db','Outlet Dryer B','#c0504d']];
+    const nm = o.names || {}, cl = o.cols || {};
+    const SER = [['da', nm.da || 'Outlet Dryer A', cl.da || '#4472c4'], ['db', nm.db || 'Outlet Dryer B', cl.db || '#c0504d']];
     SER.forEach(([kk, , col]) => {
       const P = S.filter(r => r[kk] != null); if(!P.length) return;
       g.strokeStyle = col; g.lineWidth = 1.6; g.lineJoin = 'round'; g.beginPath();
-      P.forEach((r, i) => { const px = X(day(r.date)), py = Y(r[kk]); if(i) g.lineTo(px, py); else g.moveTo(px, py); }); g.stroke();
+      /* o.gap (file Excel, dispBlanksAs=gap): dòng có ngày mà ô trống ⇒ đứt đường; lịch sử app: nối liền */
+      let pen = false; S.forEach(r => { if(r[kk] == null){ if(o.gap) pen = false; return; } const px = X(day(r.date)), py = Y(r[kk]); if(pen) g.lineTo(px, py); else g.moveTo(px, py); pen = true; }); g.stroke();
       if(P.length === 1){ g.fillStyle = col; g.beginPath(); g.arc(X(day(P[0].date)), Y(P[0][kk]), 2.5, 0, 7); g.fill(); }
       /* xu hướng tuyến tính (chấm) */
       const n = P.length; if(n < 2) return;
@@ -894,11 +934,11 @@ const MAIL = (function(){
     SER.forEach(([kk, nm, col]) => {
       g.strokeStyle = col; g.lineWidth = 2; g.setLineDash([]); g.beginPath(); g.moveTo(lx, ly); g.lineTo(lx + 22, ly); g.stroke(); g.fillStyle = '#404040'; g.fillText(nm, lx + 27, ly); lx += 27 + g.measureText(nm).width + 18;
       g.save(); g.setLineDash([2, 3]); g.lineWidth = 1.4; g.beginPath(); g.moveTo(lx, ly); g.lineTo(lx + 22, ly); g.stroke(); g.restore();
-      const t = 'Linear ('+nm.replace('Outlet ','')+')'; g.fillText(t, lx + 27, ly); lx += 27 + g.measureText(t).width + 22;
+      const t = 'Linear ('+(o.names ? nm : nm.replace('Outlet ',''))+')'; g.fillText(t, lx + 27, ly); lx += 27 + g.measureText(t).width + 22;
     });
-    const last = S[S.length-1];
+    const last = Sv[Sv.length-1];
     g.textAlign = 'right'; g.fillStyle = '#7f7f7f'; g.font = '9px Arial';
-    g.fillText(S[0].date.split('-').reverse().join('/')+' – '+last.date.split('-').reverse().join('/')+' · '+S.length+' readings', W - R, 36);
+    g.fillText(Sv[0].date.split('-').reverse().join('/')+' – '+last.date.split('-').reverse().join('/')+' · '+Sv.length+' readings', W - R, 36);
     try{ return cv.toDataURL('image/png'); }catch(_){ return ''; }
   }
   async function dewCopyChart(){
@@ -910,7 +950,7 @@ const MAIL = (function(){
     }catch(e){ _toast('⚠ Cannot copy the chart: '+e.message, 'er'); }
   }
   function buildP3(){
-    _dewLoad(ST.date);
+    _dewLoad(ST.date); _dewAutoNo();
     const d = ST.dew, warn = [];
     let tb = T_OPEN.replace("'Times New Roman',Times,serif","Arial,sans-serif") +
       '<tr>'+td('DEWPOINT DATA SHEET - CAVERN','font-size:16pt;font-weight:bold;'+CE+'background:#9dc3e6','colspan="7"')+'</tr>'+
@@ -918,19 +958,30 @@ const MAIL = (function(){
       th('Sampling point','background:#ffff99','colspan="4"')+'</tr>'+
       '<tr>'+DEW_PTS.map(p=>th(p[1],'background:#ffff99')).join('')+'</tr>'+
       '<tr>'+th('Spec (&deg;C)','background:#ffff99','colspan="3"')+DEW_PTS.map(p=>th('&lt;'+p[2],'background:#ffff99')).join('')+'</tr>';
-    const cells = DEW_PTS.map(p => {
-      const v = num(d[p[0]]);
+    /* ⭐ v4.224 — 3 ĐỢT GẦN NHẤT: 2 lần đo trước (chữ thường, xám) + đợt của NGÀY GỬI (đậm, nền xanh lá) */
+    const rowOf = (no, iso, time, V, cur) => {
+      const b = cur ? 'font-weight:bold;background:#e2efda;color:#000;' : 'color:#404040;';
+      return '<tr>'+td(esc(no), CE+b)+td(iso.split('-').reverse().join('/'), CE+b)+td(esc(time), CE+b)+DEW_PTS.map(p => {
+        const v = V[p[0]], off = v != null && v >= p[2];
+        return td(v == null ? '' : fmt(v,1), CE+b+(off ? 'background:#ffc7ce;color:#9c0006;font-weight:bold;' : '')); }).join('')+'</tr>';
+    };
+    const prev = (typeof DEWPT !== 'undefined' && DEWPT.recent && DEWPT.isLoaded('c3')) ? DEWPT.recent('c3', ST.date, 2) : [];
+    prev.forEach(r => { tb += rowOf(r.n == null ? '' : r.n, r.date, r.time, { ca:r.ca, cb:r.cb, da:r.da, db:r.db }, false); });
+    const cur = {};
+    DEW_PTS.forEach(p => {
+      const t = String(d[p[0]] == null ? '' : d[p[0]]).trim(), v = _dn(t); cur[p[0]] = v;
+      if(t !== '' && v === null) warn.push(p[1]+': "'+t+'" is not a number.');
       if(v !== null && v > 0) warn.push(p[1]+': positive value '+v+' — missing minus sign?');
-      if(v !== null && (v < -110 || v > 20)) warn.push(p[1]+': '+v+' °C is outside the physical range.');
-      const bad = v !== null && v >= p[2];
-      if(bad) warn.push(p[1]+' '+v+' °C is OFF-SPEC (limit <'+p[2]+').');
-      return td(v === null ? '' : fmt(v,1), CE+(bad ? 'background:#ffc7ce;color:#9c0006;font-weight:bold' : ''));
-    }).join('');
-    tb += '<tr>'+td(esc(d.no),CE)+td(ST.date.split('-').reverse().join('/'),CE)+td(esc(d.time),CE)+cells+'</tr></table>';
-    const empty = DEW_PTS.filter(p => num(d[p[0]]) === null);
+      if(v !== null && (v < -110 || v > 30)) warn.push(p[1]+': '+v+' °C is outside the physical range.');
+      if(v !== null && v <= 0 && v >= p[2]) warn.push(p[1]+' '+v+' °C is OFF-SPEC (limit <'+p[2]+').');
+    });
+    tb += rowOf(d.no, ST.date, d.time, cur, true)+'</table>';
+    const empty = DEW_PTS.filter(p => _dn(d[p[0]]) === null);
     if(empty.length === DEW_PTS.length) warn.push('No dew point reading entered.');
     else if(empty.length) warn.push('No reading for: '+empty.map(p => p[1]).join(', ')+'.');
     if(!d.saved) warn.push('Readings not saved yet — press 💾 Save reading so they go into the dew point history.');
+    if(!ST.files.some(f => f.rep === 'P3')) warn.push('Dew point Excel file not attached — 📂 pick the file then press ▶ Fill file & attach.');
+    else { const a = ST.files.find(f => f.auto && f.rep === 'P3'); if(a && a.date && a.date !== ST.date) warn.push('The attached Excel file was filled for '+a.date+', not '+ST.date+' — press ▶ Fill again.'); }
     let b = greet('Dear sir,');
     b += para('I would like to send the <b>Propane Dew Point</b> result on <span style="color:#1f4e79">'+longDate(ST.date)+'</span>.');
     b += tb;
@@ -939,9 +990,25 @@ const MAIL = (function(){
     if(ch.url) b += '<p style="margin:10px 0 4px 0"><img src="'+ch.url+'" width="'+DEW_CW+'" height="'+DEW_CH+'" alt="Dew Point of C3 Dryer Outlet" style="display:block;width:'+DEW_CW+'px;height:'+DEW_CH+'px;border:1px solid #bfbfbf"></p>';
     if(ch.warn) warn.push(ch.warn);
     b += para('Please find the attached file.');
-    const p = ST.date.split('-');
+    const p = ST.date.split('-'), af = ST.files.find(f => f.rep === 'P3');
     return { subject:'[LPGT] Propane Dew Point – '+ST.date, body:b, warn,
-             attach:'Dew Point of Propane_CAVERN_'+p[1]+'.'+p[2]+'.'+p[0]+'.xlsx' };
+             attach: af ? af.name : 'Dew Point of Propane_CAVERN_'+p[1]+'.'+p[2]+'.'+p[0]+'.xlsx' };
+  }
+  /* ⭐ v4.224 — P3 ▶ Fill file & attach: DEWXL (dùng chung với Engineer ▸ 💧 Dew Point) điền mọi lần đo ĐÃ LƯU
+     tới ngày báo cáo vào file Excel đã chọn ⇒ lưu file mới cùng thư mục ⇒ đính kèm (thay bản điền trước) */
+  async function dewFill(){
+    if(typeof DEWXL === 'undefined' || !DEWXL.has('c3')){ _toast('📂 Pick the dew point Excel file first', 'er'); return; }
+    const d = ST.dew;
+    if(!d.saved && DEW_PTS.some(p => String(d[p[0]] == null ? '' : d[p[0]]).trim() !== '')){
+      const y = await ENGX_U.ask('⚠ Readings of '+ST.date+' are not saved\n\nThe Excel file only gets SAVED readings.\n\nOK = Save them, then fill the file\nCancel = Stop');
+      if(!y || !(await dewSave())) return;
+    }
+    const iso = ST.date, out = await DEWXL.run('c3', iso, iso);
+    if(!out) return;
+    ST.files = ST.files.filter(f => !(f.auto && f.rep === 'P3'));
+    await attachBlob(out.blob, out.name, false);
+    const a = ST.files.find(f => f.name === out.name); if(a){ a.rep = 'P3'; a.date = iso; }
+    _toast('📎 '+out.name+' attached', 'ok'); _renderAll();
   }
 
   function weekOf(iso){
@@ -1737,15 +1804,31 @@ const MAIL = (function(){
       else if(built && built.cnSig !== undefined && built.cnSig !== CXd.sig) h += '<span class="ml-cap" style="color:#b91c1c;font-weight:600">⚠ Cancel list changed after the report was built — press ▶ Build again</span>';
     }
     if(ST.rep === 'P3'){
-      const d = ST.dew;
-      h += inBox('No.', d.no, '', "MAIL.dew('no',this.value)", 56)+inBox('Time', d.time, 'hh:mm', "MAIL.dew('time',this.value)", 56)+
+      const d = ST.dew; _dewAutoNo();
+      /* v4.224 — màu ô giống Engineer ▸ 💧 Dew Point (DEWPT.inState): đỏ = không phải số / dương / ngoài dải · hồng = vượt giới hạn · vàng = sát giới hạn */
+      const STY = { bad:'border:2px solid #dc2626;background:#fee2e2', off:'background:#ffc7ce;border-color:#f0b8b3;color:#9c0006', near:'background:#fff2cc;border-color:#f5d08a;color:#8a5300' };
+      const noB = inBox('No.', d.no, '', "MAIL.dew('no',this.value)", 56, d.noUser ? 'Number typed / saved for this reading' : 'Filled automatically: the number after the previous reading (or the last row of the Excel file). Type to change.');
+      h += (d.noUser || !d.no ? noB : noB.replace('style="width:56px"', 'style="width:56px;color:#1d4ed8;font-style:italic"'))+inBox('Time', d.time, 'hh:mm', "MAIL.dew('time',this.value)", 56)+
         DEW_PTS.map(p => { const x = inBox(p[1].replace('Outlet ',''), d[p[0]], '<'+p[2], "MAIL.dew('"+p[0]+"',this.value)", 62);
-          return num(d[p[0]]) > 0 ? x.replace('style="width:62px"', 'style="width:62px;border:2px solid #dc2626;background:#fee2e2"') : x; }).join('')+   /* v4.208 — số dương tô đỏ */
+          const stt = (typeof DEWPT !== 'undefined' && DEWPT.inState) ? DEWPT.inState(p[0], d[p[0]]) : (_dn(d[p[0]]) > 0 ? 'bad' : '');
+          return stt ? x.replace('style="width:62px"', 'style="width:62px;'+STY[stt]+'"'+(stt === 'bad' ? ' title="Not a valid dew point — it must be a NEGATIVE number (e.g. -67.5)"' : '')) : x; }).join('')+
         '<button class="ml-save" onclick="MAIL.dewSave()" title="Save the readings to the dew point history (Firebase dew_point/'+ST.date+' + Engineer ▸ 💧 Dew Point). Nothing is saved until you press this.">💾 Save reading</button>'+
-        (d.saved ? '<span class="ml-ok">✓ saved</span>' : (d.touched && DEW_PTS.some(p => num(d[p[0]]) !== null) ? '<span class="ml-cap" style="color:#b45309">● not saved</span>' : ''))+
-        '<label class="ml-in" title="Period shown on the chart (ends on the report date)">📈 Chart <select onchange="MAIL.dewRange(this.value)">'+
-          Object.keys(DEW_RANGE).map(k => '<option value="'+k+'"'+(ST.dewRange === k ? ' selected' : '')+'>'+DEW_RANGE[k][1]+'</option>').join('')+'</select></label>'+
+        (d.saved ? '<span class="ml-ok">✓ saved</span>' : (d.touched && DEW_PTS.some(p => _dn(d[p[0]]) !== null) ? '<span class="ml-cap" style="color:#b45309">● not saved</span>' : ''))+
+        '<label class="ml-in" title="Chart source: the chart data of the Excel file (same rows as the attachment) or the app history for a period ending on the report date">📈 Chart <select onchange="MAIL.dewRange(this.value)">'+
+          (typeof DEWXL !== 'undefined' && DEWXL.has('c3') ? '<option value="xl"'+(_dewUseXl() ? ' selected' : '')+'>Excel file (as attached)</option>' : '')+
+          Object.keys(DEW_RANGE).map(k => '<option value="'+k+'"'+(!_dewUseXl() && ST.dewRange === k ? ' selected' : '')+'>App history · '+DEW_RANGE[k][1]+'</option>').join('')+'</select></label>'+
         (ST.dewPng && ST.dewPng.url ? '<button class="ml-mini" onclick="MAIL.dewCopyChart()" title="Copy the chart as a picture — paste it into Outlook if the chart is missing after Copy body">📋 Copy chart</button>' : '');
+      /* v4.224 — 📗 file Excel dew point: ① chọn (chỉ xem trước) · ② ▶ Fill mới ghi + lưu cùng thư mục + đính kèm */
+      if(typeof DEWXL !== 'undefined'){
+        const has = DEWXL.has('c3'), att = ST.files.find(f => f.auto && f.rep === 'P3');
+        h += DEWXL.pickHtml('c3', 'ml-file ml-file-in')+
+          '<button class="ml-save" onclick="MAIL.dewFill()"'+(!has || DEWXL.busy('c3') ? ' disabled style="opacity:.5;cursor:not-allowed"' : '')+' title="Write the saved readings up to '+ST.date+' into the selected file, save it as a new file in the same folder and attach it">'+(DEWXL.busy('c3') ? '⏳ Filling…' : '▶ Fill file '+ST.date+' & attach')+'</button>';
+        if(att && att.date && att.date !== ST.date) h += '<span class="ml-cap" style="color:#b45309">⚠ attached file is for '+esc(att.date)+'</span>';
+        if(has){ const P = DEWXL.plan('c3', ST.date), n = P && !P.loading ? P.add.length : 0, nd = P && P.diff ? P.diff.length : 0;
+          ST.big = { k:'P3', dflt:true, cls: P && !P.loading && (P.noUpto || nd) ? 'warn' : (n ? 'ok' : ''), tip:'Excel file preview — sheet, last row, rows to add, rows that differ from the app',
+                     html:'📗 Excel'+(P && P.loading ? ' ⏳' : ' <b>+'+n+'</b>'+(nd ? ' · ⚠'+nd : '')) };
+          h += '<div class="ml-big">'+DEWXL.planHtml('c3', ST.date)+'</div>'; }
+      }
     }
     if(ST.rep === 'P5'){
       const H = ST.heat;
@@ -2515,7 +2598,7 @@ const MAIL = (function(){
     if(k === 'date' && v !== ST.date && _dewDirty()){ _dewGuard(() => set(k, v)); _renderAll(); return; }      /* v4.207 */
     ST[k] = v;
     if(k === 'sig') _lsSet(LS.sig, v);
-    if(k === 'date'){ ST.files = ST.files.filter(f => !(f.auto && f.rep === 'P2' && f.date && f.date !== v));   /* v4.204 — bản dựng của ngày khác không còn đúng */
+    if(k === 'date'){ ST.files = ST.files.filter(f => !(f.auto && (f.rep === 'P2' || f.rep === 'P3') && f.date && f.date !== v));   /* v4.204 — bản dựng của ngày khác không còn đúng */
       ST.pick = {}; ST.bsWarn = null; ST.dew = { no:'', time:'09:00', ca:'', cb:'', da:'', db:'', loaded:'' }; ST.vlot = ''; if(ST.bsF){ ST.bsPlan = null; _bsInspect(); } }
     _renderAll();
   }
@@ -2567,9 +2650,12 @@ const MAIL = (function(){
   function lotSearch(q){ ST.lotQ = q; const el = $('mlLotRes'); if(el) el.innerHTML = _lotResults(); }
   function ovrSaveAll(){ Object.keys(ST.ovr).forEach(k => ovrSave(k, true)); _renderAll(); }
   /* v4.207 — gõ số KHÔNG tự lưu (có thể gõ sai / đang thử); rời email mà chưa lưu thì _dewGuard hỏi */
-  function dew(k, v){
-    { const P0 = DEW_PTS.find(p => p[0] === k); if(P0 && typeof ENGX_U !== 'undefined' && ENGX_U.dewSign) v = ENGX_U.dewSign(P0[1], v); }   /* v4.208 — số dương ⇒ hỏi ngay */
-    ST.dew[k] = v; ST.dew.saved = false; ST.dew.touched = true; _renderAll(); }
+  async function dew(k, v){
+    { const P0 = DEW_PTS.find(p => p[0] === k); if(P0 && _dn(v) > 0 && typeof ENGX_U !== 'undefined' && ENGX_U.dewSign) v = await ENGX_U.dewSign(P0[1], v); }   /* v4.208 — số dương ⇒ hỏi ngay (v4.224: hộp của app, Enter + change chỉ hỏi một lần) */
+    if(String(ST.dew[k] == null ? '' : ST.dew[k]) === String(v) && k !== 'no'){ _renderAll(); return; }
+    ST.dew[k] = v; ST.dew.saved = false; ST.dew.touched = true;
+    if(k === 'no') ST.dew.noUser = String(v).trim() !== '';           /* xoá trắng ô No. ⇒ quay về số tự điền */
+    _renderAll(); }
   function _ab2b64(buf){
     const u = new Uint8Array(buf); let s = '';
     for(let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
@@ -2600,6 +2686,8 @@ const MAIL = (function(){
   function _isOpen(){ return !!(_el && _el.classList.contains('on')); }
   /* v4.180 — bảng kiểm Batch Stock đổi (máy khác quyết định, gõ số ở tab SAP…) ⇒ vẽ lại P6 */
   try{ if(typeof SWR !== 'undefined') SWR.onChange(() => { if(_isOpen() && ST.view === 'rep' && ST.rep === 'P6') _renderAll(); }); }catch(_){}
+  /* v4.224 — file Excel dew point đổi (chọn ở tab Engineer hoặc ở đây) ⇒ vẽ lại P3 */
+  try{ if(typeof DEWXL !== 'undefined') DEWXL.onChange(() => { if(_isOpen() && ST.view === 'rep' && ST.rep === 'P3') _renderAll(); }); }catch(_){}
   /* HTR đổi dữ liệu ⇒ email P5 đang mở thì vẽ lại (ngày thư = ngày START) */
   function refreshIf(rep){
     if(!_isOpen() || ST.view !== 'rep' || ST.rep !== rep) return;
@@ -2710,7 +2798,7 @@ const MAIL = (function(){
   }
 
   return {
-    init, open, close, pick, set, lot, lotSearch, vlot, openVessel, ord:ordT, ovr, ovrSave, ovrSaveAll, dew, dewSave, dewRange, dewCopyChart, _dewDraw, _dewSeries,
+    init, open, close, pick, set, lot, lotSearch, vlot, openVessel, ord:ordT, ovr, ovrSave, ovrSaveAll, dew, dewSave, dewFill, dewRange, dewCopyChart, _dewDraw, _dewSeries,
     rcpFocus, rcpSearch, rcpAdd, rcpRm, rcpReset, fold, zoom, navMin, focus:focusT,
     heatFiles, heatRun, heatSet, heatSave, heatMaster, heatAttachLast, heatChartHtml, refreshIf, dewReload,
     bsFile, bsBuild, ol1Save, priceSave, dsFile, dsPick, dsBuild, dsClear,

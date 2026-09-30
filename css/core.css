@@ -5889,3 +5889,130 @@ table.tkc-exp tfoot td[id="tkcExpCnt"]{font-size:10px;letter-spacing:.5px;
 #scx2StockBrk .scx2-pc-c{height:auto;justify-content:flex-end}
 .scx2-pc-c .b{position:relative;flex:1 1 auto;width:100%;min-height:40px}
 .scx2-pc-c .b i{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:72%}
+
+/* ═══ v4.224 — 💧 DEW POINT: biểu đồ vừa khung nhìn + bảng 10 lần đo gần nhất + file Excel (DEWXL) ═══ */
+#dewWrap{container:dew / inline-size}
+.dp-main{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start;margin-bottom:2px}
+.dp-main>.dp-card{margin-bottom:0;min-width:0}
+@container dew (min-width:1180px){ .dp-main{grid-template-columns:minmax(0,1fr) minmax(430px,33%)} }
+@container dew (min-width:1700px){ .dp-main{grid-template-columns:minmax(0,1fr) minmax(520px,30%)} }
+.dp-chartbox{width:100%;min-height:170px}
+.dp-chartbox .dp-svg{height:auto}
+.dp-recent .dp-h{margin-bottom:6px}
+.dp-more{margin-left:auto;border:1px solid var(--line);background:var(--panel);color:var(--navy);border-radius:6px;font:inherit;font-size:11px;font-weight:700;padding:2px 8px;cursor:pointer}
+.dp-more:hover{background:var(--blue-soft)}
+.dp-rtbl{font-size:11.5px}
+.dp-rtbl thead th{font-size:10px;padding:4px 4px;line-height:1.15}
+.dp-rtbl td{padding:4px 6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dp-rtbl tbody tr:nth-child(1) td{font-weight:700}
+.dp-tbl td.dp-auto,.dp-rtbl td.dp-auto{color:#1d4ed8;font-style:italic}
+.dp-row input.dp-no{width:60px;text-align:center}
+.dp-row input.dp-auto{color:#1d4ed8;font-style:italic;background:#f5f9ff}
+.dp-row input.dp-bad{border:2px solid #dc2626;background:#fee2e2;color:#9c0006}
+.dp-xlbar{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:auto}
+.dp-xlcard{padding:7px 12px}
+/* bản xem trước file Excel — dùng chung tab Engineer và email P3 */
+.dx-pick{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dx-chip{display:inline-flex;align-items:center;gap:4px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#e8f5ec;color:#14532d;border:1px solid #bfe3cb;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:600}
+.dx-chip a{cursor:pointer;color:#64748b;font-weight:700}
+.dx-chip a:hover{color:#b91c1c}
+.dx-plan{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:11.5px;color:#334155}
+.dx-plan select{font:inherit;font-size:11.5px;padding:1px 4px;border:1px solid #cbd5e1;border-radius:4px}
+.dx-it small{color:#64748b}
+.dx-add{color:#166534}
+.dx-none{color:#64748b}
+.dx-warn{color:#b45309;font-weight:700}
+.dx-info{color:#1d4ed8;cursor:help}
+.dx-diff{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:6px;font-size:11.5px}
+.dx-d{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid #f5d08a;background:#fffbeb;border-radius:6px;cursor:pointer}
+.dx-d.on{border-color:#16a34a;background:#f0fdf4}
+/* màn thấp (laptop 1366×640…): gọn form + thẻ KPI để biểu đồ còn chỗ trong khung nhìn */
+@media (max-height:820px){
+  .dp-wrap{padding:8px 12px 16px}
+  .dp-card{padding:7px 10px;margin-bottom:8px}
+  .dp-h{margin-bottom:5px}
+  .dp-kpis{gap:8px;margin-bottom:8px}
+  .dp-kpi{padding:5px 10px}
+  .dp-kv{font-size:20px;margin:0}
+  .dp-ks{font-size:10.5px}
+  .dp-status{padding:5px 10px;margin-bottom:8px}
+  .lx-bar{margin-bottom:6px}
+  .dp-rtbl td{padding:3px 5px}
+}
+@container dew (max-width:900px){
+  .dp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dp-lg{margin-left:0}
+  .dp-xlbar{margin-left:0}
+}
+/* v4.224 — màn rộng: bảng 10 lần đo cao BẰNG thẻ biểu đồ (cuộn bên trong) để biểu đồ quyết định chiều cao */
+@container dew (min-width:1180px){
+  .dp-main{align-items:stretch}
+  .dp-recent{display:flex;flex-direction:column}
+  .dp-recent .dp-scroll{flex:1 1 0;min-height:0;overflow:auto}
+}
+/* màn thấp: 4 thẻ KPI thành MỘT dòng gọn (tên · số · margin · xu hướng) */
+@media (max-height:820px){
+  .dp-kpi{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;row-gap:0}
+  .dp-kpi .dp-kn{flex:none}
+  .dp-kv{font-size:18px}
+  .dp-kpi .dp-ks{font-size:10px;white-space:nowrap}
+  .dp-form .dp-h{margin-bottom:3px;font-size:11.5px}
+  .dp-row label{font-size:10px}
+  .dp-row input{padding:4px 7px}
+}
+@container dew (max-width:1200px){ .dp-row .dp-note input{width:170px} }
+/* v4.224 — xem trước file Excel nằm NGAY trên hàng C3/C4 (không thêm thẻ riêng — giữ chỗ cho biểu đồ) */
+.dp-xlbar .dx-chip{max-width:230px}
+.dp-xlbar .dx-plan{gap:4px 12px}
+.dp-xlbar .dx-diff{flex-basis:100%;margin-top:2px}
+@container dew (max-width:1500px){
+  #dewWrap .lx-bar>.lx-span{display:none}        /* "Loaded from …" vào tooltip nút ⤓ Load all */
+  .dp-xlbar .dx-chip{max-width:170px}
+}
+
+/* ═══ v4.225 — 💧 DEW POINT: bỏ form + KPI, nhập / sửa ngay trên bảng Readings ═══ */
+@container dew (min-width:1180px){ .dp-main{grid-template-columns:minmax(0,1fr) minmax(600px,42%)} }
+@container dew (min-width:1700px){ .dp-main{grid-template-columns:minmax(0,1fr) minmax(700px,38%)} }
+.dp-etbl{table-layout:fixed;min-width:560px}
+.dp-etbl th:nth-child(1){width:44px}.dp-etbl th:nth-child(2){width:100px}.dp-etbl th:nth-child(3){width:50px}
+.dp-etbl th:nth-child(4),.dp-etbl th:nth-child(5),.dp-etbl th:nth-child(6),.dp-etbl th:nth-child(7){width:62px}
+.dp-etbl th:nth-child(9){width:70px}
+.dp-etbl td{padding:1px 2px !important;overflow:hidden}
+.dp-ci{width:100%;box-sizing:border-box;border:1px solid transparent;background:transparent;border-radius:4px;padding:3px 4px;font:inherit;font-size:11.5px;color:var(--ink);font-variant-numeric:tabular-nums}
+.dp-ci:hover{border-color:var(--line)}
+.dp-ci:focus{outline:none;border-color:var(--blue);background:#fff}
+.dp-ci.dp-cn{text-align:right;font-weight:600}
+.dp-ci.dp-cno,.dp-ci.dp-ct{text-align:center}
+.dp-ci.dp-cd{padding:2px 1px;font-size:11px}
+.dp-ci.dp-cnote{color:var(--ink-2)}
+.dp-ci.dp-off{background:var(--red-soft);color:#9c0006}
+.dp-ci.dp-near{background:var(--yellow-soft);color:#8a5300}
+.dp-ci.dp-bad{border:1.5px solid #dc2626;background:#fee2e2;color:#9c0006}
+.dp-ci.dp-auto{color:#1d4ed8;font-style:italic}
+.dp-ro{display:block;text-align:center;padding:3px 2px;font-size:11.5px}
+.dp-etbl tbody tr:nth-child(1) td{font-weight:400}
+.dp-etbl tbody tr.dp-rdirty td{background:#fffbeb}
+.dp-etbl tbody tr.dp-newrow td{background:#f0fdf4}
+.dp-etbl tbody tr.dp-sel td{background:var(--blue-soft)}
+.dp-act{white-space:nowrap;text-align:right}
+.dp-act button{border:none;background:transparent;cursor:pointer;font-size:12px;padding:1px 3px;border-radius:4px}
+.dp-act .dp-sv,.dp-act .dp-dc{display:none}
+tr.dp-rdirty .dp-act .dp-sv,tr.dp-rdirty .dp-act .dp-dc{display:inline-block}
+.dp-act .dp-sv{background:#dcfce7}
+.dp-act button:hover{background:var(--line-2)}
+.dp-add{border:1px solid #16a34a;background:#f0fdf4;color:#166534;border-radius:6px;font:inherit;font-size:11px;font-weight:700;padding:2px 9px;cursor:pointer;margin-left:auto}
+.dp-add+.dp-more{margin-left:0}
+.dp-dirtyb{margin-left:auto;color:#c2410c;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+.dp-dirtyb button{border:1px solid #fdba74;background:#fff7ed;color:#9a3412;border-radius:5px;font:inherit;font-size:10.5px;padding:1px 6px;cursor:pointer}
+.dp-dirtyb+.dp-add{margin-left:0}
+#dewWrap .dp-status{margin-bottom:8px}
+.dp-recent .dp-h>small{margin-right:auto}
+.dp-recent .dp-add,.dp-recent .dp-dirtyb,.dp-recent .dp-more{margin-left:0}
+@container dew (max-width:1179px){ .dp-recent .dp-scroll{max-height:60vh;overflow:auto} }
+
+/* ═══ v4.227 — ⇅ đồng bộ lịch sử app = sheet Excel ═══ */
+.dx-sync{border-color:#93c5fd;background:#f8fbff}
+.dx-srow{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:12px;padding:3px 0;cursor:pointer}
+.dx-srow.none{color:var(--ink-3);cursor:default}
+.dx-sl{color:#475569;font-size:11px;cursor:help;flex:1 1 300px;min-width:0}
+.dx-sl small{color:#94a3b8}
