@@ -555,7 +555,17 @@ const SCALE = (function(){
           groups = Object.keys(g).map(k => Object.assign({ type:k, special:(k !== '50:50' && k !== '50:50 ?') }, TP.lnkTotals(g[k])))
                                  .filter(x => x.planCnt > 0);
         }
-        SCX2.renderPlanBreak(groups);
+        /* ⭐ v4.230 — PLAN CHIA THEO TRADE (Domestic · Export). Hướng bán lấy từ
+           MỘT NGUỒN DUY NHẤT window.TRADE (khớp NGUYÊN CHỮ — PETIMEX/PETROLIMEX
+           không bị đếm sang Export), cộng bằng TP.lnkTotals như khối loại hàng. */
+        let trades = null;
+        if(hasTP && typeof TP.lnkTotals === 'function' && typeof TRADE !== 'undefined' && TRADE.dirOfRow){
+          const g = { D:[], E:[] };
+          _typeRows.forEach(r => { const d = TRADE.dirOfRow(r).dir === 'E' ? 'E' : 'D'; g[d].push(r); });
+          trades = ['D', 'E'].map(k => Object.assign({ dir:k, type:(k === 'E' ? 'EXPORT' : 'DOMESTIC') }, TP.lnkTotals(g[k])))
+                             .filter(x => x.planCnt > 0);
+        }
+        SCX2.renderPlanBreak(groups, trades);
       }
     }catch(_){}
 

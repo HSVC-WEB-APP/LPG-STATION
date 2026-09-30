@@ -1,5 +1,11 @@
 /* ============================================================
- * ENGX — engx.js  (v4.227)
+ * ENGX — engx.js  (v4.229)
+ * v4.229: biểu đồ tab Dew Point MẶC ĐỊNH kiểu Excel (chartXl): Dryer A #4f81bd / B #c0504d liền + Linear chấm, trục −40…−85
+ *         nhãn 1 số lẻ, ngày m/d dựng đứng ở trên (bước 10 ngày), chú giải dưới, dòng thiếu số ⇒ đứt đường; Coalescer tick thêm;
+ *         vẫn khoanh điểm vượt / sát giới hạn, ▲ số dương. Nút Excel / Detail (biểu đồ cũ) + khoảng 16 m, nhớ theo máy.
+ * v4.228: Dew Point GỠ 📋 Paste history (parsePaste/paste*) · ⬇ Export Excel (exportXlsx) · ↻ Reload · 📥 Import file khỏi tab —
+ *         đã có ▶ Fill file Excel, email P3 và ⇅ Sync app ← file. Thanh công cụ index.html bỏ; tiêu đề + C3/C4 + số lần đo +
+ *         Load all + file Excel gộp MỘT hàng. (LABX Import file vẫn còn ở tab Heater / GC.)
  * v4.227: DEWXL ⇅ Sync app ← file — trong khoảng ngày của sheet đang chọn, lịch sử app = Y HỆT file (thêm / ghi đè / xoá,
  *         tick từng nhóm, xem trước, MỘT lệnh update); giữ nguyên số bất thường / sai và No. trùng; nhiều dòng một ngày ⇒
  *         lần đo thêm x/HHMM (có No.); Note của app giữ lại. Lần đo thêm nay đọc cả No. (listOf).
@@ -148,7 +154,7 @@ const DEWPT = (function(){
   const PRODS = { c3:{ node:'dew_point', name:'Propane (C3)', short:'C3' }, c4:{ node:'dew_point_c4', name:'Butane (C4)', short:'C4' } };
   const WIN_DAYS = 730;    /* mở tab chỉ tải 2 năm gần nhất — nút ⤓ Load all tải hết */
   const blank = () => ({ rows:{}, loaded:false, loading:false, all:false, from:'' });
-  const S = { prod:'c3', P:{ c3:blank(), c4:blank() }, range:'730', show:{ ca:1, cb:1, da:1, db:1 }, panel:ENGX_U.pref('dew_panel', ''), pv:null };
+  const S = { prod:'c3', P:{ c3:blank(), c4:blank() }, range:ENGX_U.pref('dew_range', '480'), show:{ ca:1, cb:1, da:1, db:1 }, showX:{ ca:0, cb:0, da:1, db:1 }, cst:ENGX_U.pref('dew_chart', 'xl'), panel:ENGX_U.pref('dew_panel', ''), pv:null };
   /* S.rows / S.loaded / S.loading = của sản phẩm ĐANG CHỌN (giữ nguyên mọi chỗ gọi cũ) */
   ['rows','loaded','loading'].forEach(k => Object.defineProperty(S, k, { get(){ return S.P[S.prod][k]; }, set(v){ S.P[S.prod][k] = v; } }));
   const node = () => PRODS[S.prod].node;
@@ -177,7 +183,7 @@ const DEWPT = (function(){
   async function setProd(p){
     if(!PRODS[p] || p === S.prod) return;
     if(hasDraft() && !(await ENGX_U.ask('⚠ '+nDirty()+' row(s) not saved\n\nOK = Discard them and switch to '+PRODS[p].name+'\nCancel = Stay'))) return;   /* v4.225 */
-    S.prod = p; S.ed = {}; S.pin = ''; S.pv = null;
+    S.prod = p; S.ed = {}; S.pin = '';
     if(!S.loaded) load(); else render();
   }
   /* một ngày = bản ghi chính + các lần đo thêm ở r.x[HHMM] (từ file import) */
@@ -466,47 +472,7 @@ const DEWPT = (function(){
     }).catch(e => toastM('⚠ Delete failed: '+e.message, 'er'));
   }
 
-  /* ── dán lịch sử từ Excel cũ ── */
-  function parsePaste(txt){
-    const out = [], bad = [];
-    String(txt || '').split(/\r?\n/).forEach(line => {
-      if(!line.trim()) return;
-      const c = line.split('\t').map(x => x.trim());
-      let di = -1, iso = '';
-      for(let j = 0; j < c.length && di < 0; j++){ const d = anyIso(c[j]); if(d && /^20\d\d-/.test(d)){ di = j; iso = d; } }
-      if(di < 0){ if(!/date|sampling|spec|no\.?$/i.test(line)) bad.push(line.slice(0, 60)); return; }
-      const rec = { date:iso, no:'', time:'' };
-      if(di > 0 && /^\d+$/.test(c[di-1])) rec.no = c[di-1];
-      let j = di + 1;
-      if(/^\d{1,2}:\d{2}/.test(c[j] || '')){ rec.time = c[j].slice(0,5).padStart(5,'0'); j++; }
-      const vs = [];
-      for(; j < c.length && vs.length < 4; j++){ if(c[j] === '' || c[j] === '-'){ vs.push(null); continue; } vs.push(num(c[j])); }
-      if(!vs.some(v => v != null)){ bad.push(line.slice(0, 60)); return; }
-      PTS.forEach((p, k) => { rec[p.k] = vs[k] == null ? '' : vs[k]; });
-      out.push(rec);
-    });
-    /* cùng một ngày dán hai lần ⇒ dòng sau thắng */
-    const m = {}; out.forEach(r => { m[r.date] = r; });
-    return { rows:Object.values(m).sort((a,b) => a.date < b.date ? -1 : 1), bad };
-  }
-  function pasteOpen(){ S.pv = { txt:'', res:null }; render(); setTimeout(() => { const t = $('dewPasteTxt'); if(t) t.focus(); }, 30); }
-  function pasteClose(){ S.pv = null; render(); }
-  function pastePreview(txt){
-    S.pv = { txt, res:parsePaste(txt) }; render();
-    const t = $('dewPasteTxt'); if(t){ t.focus(); t.selectionStart = t.selectionEnd = t.value.length; }
-  }
-  function pasteCommit(){
-    if(!mayWrite('eng_dew')){ toastM('⛔ Your account has no write permission', 'er'); return; }
-    const res = S.pv && S.pv.res; if(!res || !res.rows.length) return;
-    const up = {}, by = userName() + ' (paste)', now = Date.now();
-    res.rows.forEach(r => { const o = Object.assign({}, r, { note:(S.rows[r.date] && S.rows[r.date].note) || '', _ts:now, by }); if(S.rows[r.date] && S.rows[r.date].x) o.x = S.rows[r.date].x; delete o.date; up[r.date] = o; });
-    firebase.database().ref(node()).update(up).then(() => {
-      Object.keys(up).forEach(d => { S.rows[d] = up[d]; });
-      toastM('📋 '+res.rows.length+' reading(s) imported', 'ok'); S.pv = null; render();
-    }).catch(e => toastM('⚠ Import failed: '+e.message, 'er'));
-  }
-
-  /* ── xuất Excel (dữ liệu + thống kê tháng + nhận định) ── */
+  /* ── thống kê theo tháng (📊 / 🗓) — v4.228 bỏ ⬇ Export Excel (đã có ▶ Fill file Excel + email P3) và 📋 Paste history (đã có ⇅ Sync app ← file) ── */
   function monthly(L){
     const g = {};
     L.forEach(r => { const ym = r.date.slice(0,7); const m = g[ym] || (g[ym] = { ym, n:0 }); m.n++;
@@ -514,28 +480,61 @@ const DEWPT = (function(){
         s.sum += v; s.n++; s.min = Math.min(s.min, v); s.max = Math.max(s.max, v); if(v >= p.lim) s.off++; }); });
     return Object.values(g).sort((a,b) => a.ym < b.ym ? 1 : -1).map(m => { PTS.forEach(p => { if(m[p.k]) m[p.k].avg = m[p.k].sum / m[p.k].n; }); return m; });
   }
-  function exportXlsx(){
-    if(typeof XLSX === 'undefined'){ toastM('Excel library not loaded', 'er'); return; }
-    const L = ranged(list()); if(!L.length){ toastM('No reading in this range', 'er'); return; }
-    const wb = XLSX.utils.book_new();
-    const aoa = [['DEWPOINT DATA SHEET - CAVERN ('+PRODS[S.prod].name+')'], ['No.','Date','Time'].concat(PTS.map(p => p.full+' (°C)')).concat(['Note','Entered by']),
-                 ['Spec (°C)','',''].concat(PTS.map(p => '< '+p.lim)).concat(['',''])];
-    L.slice().reverse().forEach(r => aoa.push([r.no, dmy(r.date), r.time].concat(PTS.map(p => r[p.k] == null ? '' : r[p.k])).concat([r.note, r.by])));
-    const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [6,10,7,20,20,17,17,30,16].map(w => ({ wch:w }));
-    XLSX.utils.book_append_sheet(wb, ws, 'Dew Point');
-    const ma = [['Month','Readings'].concat(PTS.flatMap(p => [p.n+' avg', p.n+' min', p.n+' max', p.n+' off-spec']))];
-    monthly(L).forEach(m => ma.push([m.ym, m.n].concat(PTS.flatMap(p => { const s = m[p.k]; return s ? [+s.avg.toFixed(2), s.min, s.max, s.off] : ['','','','']; }))));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ma), 'Monthly');
-    const an = [['Point','Limit (°C)','Readings','Last','Last date','Margin to limit','Min','Max','Average','Std dev','Off-spec','Trend (°C/30d)','Projected to reach limit']];
-    PTS.forEach(p => { const s = stats(L, p); an.push([p.full, p.lim, s.n, s.last == null ? '' : s.last, s.lastDate ? dmy(s.lastDate) : '', s.margin == null ? '' : +s.margin.toFixed(1),
-      s.min == null ? '' : s.min, s.max == null ? '' : s.max, s.avg == null ? '' : +s.avg.toFixed(2), s.sd == null ? '' : +s.sd.toFixed(2), s.off,
-      s.slope == null ? '' : +(s.slope*30).toFixed(2), s.projDate ? dmy(s.projDate) : '']); });
-    an.push([]); an.push(['Findings']); alerts(list()).forEach(a => an.push([a.lvl.toUpperCase(), a.t]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(an), 'Analysis');
-    XLSX.writeFile(wb, 'Dew Point of '+(S.prod === 'c4' ? 'Butane' : 'Propane')+'_CAVERN_'+L[0].date+'_to_'+L[L.length-1].date+'.xlsx');
-  }
-
   /* ── biểu đồ SVG ── */
+  /* ⭐ v4.229 — BIỂU ĐỒ KIỂU EXCEL (mặc định): giống biểu đồ "Dew Point of C3 Dryer Outlet" trong file của nhân viên để
+     so sánh bằng mắt — Dryer A xanh #4f81bd · Dryer B đỏ #c0504d (màu theme Excel), đường liền không marker, xu hướng
+     tuyến tính chấm, trục Y trần −40 · sàn −85 (nới khi số vượt), nhãn 1 số lẻ, nhãn ngày m/d dựng đứng ở TRÊN,
+     chú giải dưới; ô trống ⇒ ĐỨT đường như Excel (dispBlanksAs=gap). Coalescer A/B tick thêm được (màu theme kế tiếp).
+     Giữ phần giúp phát hiện bất thường: điểm vượt giới hạn / sát giới hạn khoanh tròn, số dương / ngoài dải ▲ ở mép,
+     rê chuột vào đường xem từng lần đo. Nút "Detail" = biểu đồ cũ (vạch giới hạn, vùng đỏ). */
+  const XCOL = { ca:'#9bbb59', cb:'#8064a2', da:'#4f81bd', db:'#c0504d' };
+  function chartXl(L, W, H){
+    const shown = PTS.filter(p => S.showX[p.k]);
+    const pts = L.filter(r => shown.some(p => r[p.k] != null));
+    if(!pts.length) return '<div class="dp-empty">No reading in this range.</div>';
+    W = Math.max(360, Math.round(W || 1000)); H = Math.max(200, Math.round(H || 320));
+    const Lm = 58, Rm = 14, T = 76, B = 42;
+    let d0 = dayNo(pts[0].date), d1 = dayNo(pts[pts.length-1].date); if(d1 - d0 < 6){ d0 -= 3; d1 += 3; }
+    const vals = pts.flatMap(r => shown.map(p => r[p.k]).filter(v => v != null && v <= 0 && v >= -110));
+    const hi = Math.max(-40, Math.ceil(Math.max(...vals) / 5) * 5), lo = Math.min(-85, Math.floor(Math.min(...vals) / 5) * 5);
+    const X = d => Lm + (d - d0) / (d1 - d0) * (W - Lm - Rm), Y = v => T + (hi - Math.min(hi, Math.max(lo, v))) / (hi - lo) * (H - T - B);
+    const gs = (H - T - B) / ((hi - lo) / 5) < 14 ? 10 : 5;
+    let g = '<svg class="dp-svg dp-xls" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Dew point chart">'+
+      '<text x="'+(W/2)+'" y="16" class="dx-t" text-anchor="middle">Dew Point of '+PRODS[S.prod].short+(shown.every(p => p.k === 'da' || p.k === 'db') ? ' Dryer Outlet' : '')+'</text>';
+    for(let v = Math.floor(hi / gs) * gs; v >= lo; v -= gs) g += '<line x1="'+Lm+'" x2="'+(W-Rm)+'" y1="'+Y(v).toFixed(1)+'" y2="'+Y(v).toFixed(1)+'" class="dx-gr"/><text x="'+(Lm-6)+'" y="'+(Y(v)+3.5).toFixed(1)+'" class="dx-ax" text-anchor="end">'+v.toFixed(1)+'</text>';
+    g += '<text transform="translate(14,'+((T + H - B) / 2)+') rotate(-90)" class="dx-yt" text-anchor="middle">Dew Point (°C)</text>';
+    /* nhãn ngày m/d dựng đứng phía trên — bước 10 ngày như Excel, giãn ra khi hẹp */
+    let step = 10; while((d1 - d0) / step * 13 > (W - Lm - Rm)) step += 10;
+    for(let d = d0; d <= d1; d += step){ const i = isoOfDay(d); g += '<text transform="translate('+(X(d)+3).toFixed(1)+','+(T-5)+') rotate(-90)" class="dx-ax">'+(+i.slice(5,7))+'/'+(+i.slice(8,10))+'</text>'; }
+    g += '<line x1="'+Lm+'" x2="'+(W-Rm)+'" y1="'+T+'" y2="'+T+'" class="dx-top"/>';
+    shown.forEach(p => {
+      const col = XCOL[p.k];
+      /* đường: đi theo MỌI dòng của khoảng; dòng thiếu điểm này ⇒ đứt (giống ô trống trong Excel) */
+      let d = '', pen = false;
+      pts.forEach(r => { const v = r[p.k]; if(v == null || v > hi || v < lo){ pen = false; return; } d += (pen ? 'L' : 'M')+X(dayNo(r.date)).toFixed(1)+','+Y(v).toFixed(1); pen = true; });
+      if(d) g += '<path d="'+d+'" fill="none" stroke="'+col+'" stroke-width="1.6" stroke-linejoin="round"/>';
+      const s = pts.filter(r => r[p.k] != null && r[p.k] <= 0 && r[p.k] >= -110);
+      const lr = s.length > 1 ? linreg(s.map(r => [dayNo(r.date), r[p.k]])) : null;
+      if(lr){ const xa = dayNo(s[0].date), xb = dayNo(s[s.length-1].date);
+        g += '<line x1="'+X(xa).toFixed(1)+'" y1="'+Y(lr.a + lr.b * xa).toFixed(1)+'" x2="'+X(xb).toFixed(1)+'" y2="'+Y(lr.a + lr.b * xb).toFixed(1)+'" stroke="'+col+'" stroke-width="1.5" stroke-dasharray="2 3"><title>Linear trend '+p.full+': '+(lr.b * 30 >= 0 ? '+' : '')+fmt(lr.b * 30, 2)+' °C / 30 days</title></line>'; }
+      /* điểm để rê chuột + khoanh điểm bất thường */
+      pts.forEach(r => { const v = r[p.k]; if(v == null) return; const x = X(dayNo(r.date)).toFixed(1);
+        const tip = '<title>'+dmy(r.date)+(r.time ? ' '+esc(r.time) : '')+(r.n != null ? ' · No.'+r.n : '')+' · '+p.full+' '+fmt(v,1)+' °C</title>';
+        if(v > hi || v < lo){ g += '<path d="M'+(+x-5)+','+(Y(v)+(v > hi ? 8 : -8)).toFixed(1)+' l5,'+(v > hi ? -8 : 8)+' l5,'+(v > hi ? 8 : -8)+'z" fill="#dc2626">'+tip.replace('</title>', ' — outside the chart (positive / invalid value?)</title>')+'</path>'; return; }
+        const off = v >= p.lim, near = !off && p.lim - v < NEAR;
+        g += off || near ? '<circle cx="'+x+'" cy="'+Y(v).toFixed(1)+'" r="4" fill="#fff" stroke="'+(off ? '#b91c1c' : '#b45309')+'" stroke-width="2">'+tip.replace('</title>', off ? ' — OFF-SPEC</title>' : ' — near limit</title>')+'</circle>'
+                          : '<circle cx="'+x+'" cy="'+Y(v).toFixed(1)+'" r="3" fill="transparent" class="dx-hit">'+tip+'</circle>'; });
+    });
+    /* chú giải dưới */
+    const items = []; shown.forEach(p => { items.push([p, 0]); items.push([p, 1]); });
+    let lx = Lm + 10; const ly = H - 14;
+    const lab = (p, tr, sh) => (tr ? 'Linear (' : '')+(sh ? p.n : p.full)+(tr ? ')' : ''), wOf = t => 26 + t.length * 6.2 + 18;
+    const short = items.reduce((a, [p, tr]) => a + wOf(lab(p, tr, false)), Lm + 10) > W - Rm;      /* không đủ chỗ ⇒ tên ngắn */
+    items.forEach(([p, tr]) => { const t = lab(p, tr, short), w = wOf(t);
+      if(lx + w > W - Rm) return;
+      g += '<line x1="'+lx+'" x2="'+(lx+22)+'" y1="'+ly+'" y2="'+ly+'" stroke="'+XCOL[p.k]+'" stroke-width="'+(tr ? 1.5 : 2.4)+'"'+(tr ? ' stroke-dasharray="2 3"' : '')+'/><text x="'+(lx+27)+'" y="'+(ly+3.5)+'" class="dx-ax">'+t+'</text>'; lx += w; });
+    return g + '</svg>';
+  }
   /* v4.224 — W/H = kích thước THẬT của khung (đo sau khi vẽ) ⇒ chữ đúng cỡ, biểu đồ luôn nằm trong màn hình */
   function chart(L, W, H){
     const shown = PTS.filter(p => S.show[p.k]);
@@ -582,19 +581,19 @@ const DEWPT = (function(){
   }
   function render(){
     const w = $('dewWrap'); if(!w) return;
-    const st = $('dewStats');
     const P = S.P[S.prod];
-    const bar = '<div class="lx-bar"><span class="lx-seg">'+Object.keys(PRODS).map(k => '<button class="'+(S.prod === k ? 'on' : '')+'" onclick="DEWPT.setProd(\''+k+'\')">'+PRODS[k].name+'</button>').join('')+'</span>'+
-      '<span class="lx-span">'+(P.loading ? '⏳ loading…' : P.loaded ? (P.all ? 'All history loaded' : 'Loaded from <b>'+dmy(P.from)+'</b> (last 2 years)') : '')+'</span>'+
+    const all = S.loaded ? numbered(S.prod) : [];
+    /* ⭐ v4.228 — MỘT hàng đầu trang: tiêu đề · C3/C4 · số lần đo (tooltip: đã tải từ ngày nào) · Load all · file Excel / Sync / Fill
+       (bỏ thanh công cụ cũ Import file · Paste history · Export Excel · Reload trong index.html) */
+    const bar = '<div class="lx-bar dp-top"><span class="dp-ttl">💧 Dew Point</span><span class="lx-seg">'+Object.keys(PRODS).map(k => '<button class="'+(S.prod === k ? 'on' : '')+'" onclick="DEWPT.setProd(\''+k+'\')">'+PRODS[k].name+'</button>').join('')+'</span>'+
+      '<span class="dp-cnt" title="'+(P.loaded ? (P.all ? 'Whole history loaded' : 'Loaded from '+dmy(P.from)+' (last 2 years)') : '')+'">'+(P.loading ? '⏳ loading…' : P.loaded ? '<b>'+all.length+'</b> readings'+(all.length ? ' · last <b>'+dmy(all[all.length-1].date)+'</b>' : '') : '')+'</span>'+
       (P.loaded && !P.all && !P.loading ? '<button class="eng-btn" onclick="DEWPT.loadAll()" title="'+(P.from ? 'Loaded from '+dmy(P.from)+' (last 2 years). ' : '')+'Download the whole history of this product (older than 2 years too)">⤓ Load all history</button>' : '')+
       (typeof DEWXL !== 'undefined' ? '<span class="dp-xlbar">'+DEWXL.pickHtml(S.prod, 'eng-btn')+(DEWXL.has(S.prod) && S.loaded ? DEWXL.planHtml(S.prod, _xlUpto()) : '')+
         (DEWXL.has(S.prod) ? '<button class="eng-btn green" onclick="DEWPT.xlFill()"'+(DEWXL.busy(S.prod) ? ' disabled' : '')+' title="Write every saved reading newer than the last row of the file (and the rows you tick below) into the file, then save it as a NEW file in the same folder">'+(DEWXL.busy(S.prod) ? '⏳ Filling…' : '▶ Fill file & save')+'</button>' : '')+
         (DEWXL.has(S.prod) ? '<button class="eng-btn" onclick="DEWXL.syncOpen(\''+S.prod+'\')" title="Make the app history identical to the selected sheet (add / overwrite / delete inside its date range) — preview first">⇅ Sync app ← file</button>' : '')+'</span>' : '')+'</div>';
     if(!S.loaded){ w.innerHTML = bar+'<div class="dp-empty">'+(S.loading ? '⏳ Loading '+PRODS[S.prod].short+' dew point history…' : '')+'</div>'; return; }
-    const all = numbered(S.prod), L = ranged(all);
-    if(st) st.innerHTML = '<b>'+PRODS[S.prod].short+'</b> · <b>'+all.length+'</b> readings'+(all.length ? ' · last <b>'+dmy(all[all.length-1].date)+'</b>' : '');
+    const L = ranged(all);
     let h = bar;
-    if(S.pv) h += pasteHtml();
     if(typeof DEWXL !== 'undefined') h += DEWXL.syncHtml(S.prod);                /* v4.227 — ⇅ đồng bộ lịch sử app = sheet Excel */
     /* v4.225 — BỎ form nhập + 4 thẻ KPI: nhập / sửa ngay trên bảng bên cạnh biểu đồ (xu hướng / margin xem ở 📊 Statistics) */
     /* v4.209 — MỘT biểu đồ; nhận định / thống kê / tháng / lịch sử mở bằng nút. Cảnh báo nặng nhất vẫn hiện một dòng. */
@@ -603,10 +602,12 @@ const DEWPT = (function(){
       (S.panel !== 'find' ? '<button class="eng-btn" onclick="DEWPT.panel(\'find\')">🔎 All findings</button>' : '')+'</div>';
     /* biểu đồ */
     _lastL = L;
-    h += '<div class="dp-main"><div class="dp-card dp-chartc"><div class="dp-h">📈 '+PRODS[S.prod].short+' trend <span class="dp-rg">'+[['30','30 d'],['90','90 d'],['180','6 m'],['365','1 y'],['730','2 y'],['all','All']].map(([k, t]) =>
-      '<button class="'+(S.range === k ? 'on' : '')+'" onclick="DEWPT.range(\''+k+'\')">'+t+'</button>').join('')+'</span>'+
-      '<span class="dp-lg">'+PTS.map(p => '<label><input type="checkbox"'+(S.show[p.k] ? ' checked' : '')+' onchange="DEWPT.toggle(\''+p.k+'\')"><i style="background:'+p.col+'"></i>'+p.n+'</label>').join('')+'</span></div>'+
-      '<div id="dpChartBox" class="dp-chartbox">'+chart(L, _cw, _ch)+'</div></div>'+tableHtml(all, L.length)+'</div>';
+    const xl = S.cst === 'xl', SH = xl ? S.showX : S.show;
+    h += '<div class="dp-main"><div class="dp-card dp-chartc"><div class="dp-h">📈 '+PRODS[S.prod].short+' trend <span class="dp-rg">'+[['30','30 d'],['90','90 d'],['180','6 m'],['365','1 y'],['480','16 m'],['730','2 y'],['all','All']].map(([k, t]) =>
+      '<button class="'+(S.range === k ? 'on' : '')+'" onclick="DEWPT.range(\''+k+'\')"'+(k === '480' ? ' title="16 months — about the period of the Excel sheet"' : '')+'>'+t+'</button>').join('')+'</span>'+
+      '<span class="dp-rg" title="Excel = same look as the chart in the dew point Excel file · Detail = limit lines + off-spec band">'+[['xl','Excel'],['dt','Detail']].map(([k, t]) => '<button class="'+(S.cst === k ? 'on' : '')+'" onclick="DEWPT.cstyle(\''+k+'\')">'+t+'</button>').join('')+'</span>'+
+      '<span class="dp-lg">'+PTS.map(p => '<label><input type="checkbox"'+(SH[p.k] ? ' checked' : '')+' onchange="DEWPT.toggle(\''+p.k+'\')"><i style="background:'+(xl ? XCOL[p.k] : p.col)+'"></i>'+p.n+'</label>').join('')+'</span></div>'+
+      '<div id="dpChartBox" class="dp-chartbox">'+(xl ? chartXl : chart)(L, _cw, _ch)+'</div></div>'+tableHtml(all, L.length)+'</div>';
     h += ENGX_U.tabs('DEWPT.panel', [['find','🔎 Findings', AL.filter(a => a.lvl !== 'ok').length || '', worst ? worst.lvl : ''], ['stats','📊 Statistics'], ['month','🗓 Monthly'], ['hist','📋 History', L.length]], S.panel);
     if(S.panel === 'find') h += '<div class="dp-card xp-panel"><div class="dp-h">🔎 Findings — '+PRODS[S.prod].short+'</div><ul class="dp-al">'+AL.map(a => '<li class="dp-'+a.lvl+'">'+esc(a.t)+'</li>').join('')+'</ul></div>';
     /* thống kê theo khoảng + theo tháng */
@@ -688,7 +689,7 @@ const DEWPT = (function(){
     const top = br.top - wr.top + w.scrollTop;                       /* vị trí khung biểu đồ trong nội dung cuộn */
     const hh = Math.round(Math.max(200, Math.min(620, vis - top - 22)));     /* đáy thẻ biểu đồ chạm đáy khung nhìn; hàng nút mở mục nằm ngay dưới (cuộn) */
     if(Math.abs(bw - _cw) < 2 && Math.abs(hh - _ch) < 2 && box.firstChild) return;
-    _cw = bw; _ch = hh; box.innerHTML = chart(_lastL, bw, hh);
+    _cw = bw; _ch = hh; box.innerHTML = (S.cst === 'xl' ? chartXl : chart)(_lastL, bw, hh);
   }
   try{ window.addEventListener('resize', () => { clearTimeout(_rzT); _rzT = setTimeout(() => { const w = $('dewWrap'); if(w && w.offsetParent) _fit(); }, 150); }); }catch(_){}
   /* ngày chốt khi điền file ở tab: mọi lần đo đã lưu tới hôm nay (hoặc ngày đang sửa nếu là ngày tương lai) */
@@ -701,21 +702,6 @@ const DEWPT = (function(){
       if(!y || !(await saveAll())) return;
     }
     await DEWXL.run(S.prod, _xlUpto());
-  }
-  function pasteHtml(){
-    const r = S.pv.res;
-    let h = '<div class="dp-card dp-paste"><div class="dp-h">📋 Paste '+PRODS[S.prod].short+' history from Excel <button class="dp-x" onclick="DEWPT.pasteClose()" title="Close">✕</button></div>'+
-      '<div class="dp-hint">Copy the rows from the old dew point sheet: <b>No. · Date · Time · Coalescer A · Coalescer B · Dryer A · Dryer B</b> (No. and Time optional). A date that already exists is overwritten.</div>'+
-      '<textarea id="dewPasteTxt" rows="6" placeholder="Ctrl+V here…" oninput="DEWPT.pastePreview(this.value)">'+esc(S.pv.txt)+'</textarea>';
-    if(r){
-      const upd = r.rows.filter(x => S.rows[x.date]).length;
-      h += '<div class="dp-hint"><b>'+r.rows.length+'</b> row(s) read · '+(r.rows.length - upd)+' new · '+upd+' overwrite'+(r.bad.length ? ' · <span class="dp-offt" title="'+esc(r.bad.slice(0,5).join('\n'))+'">'+r.bad.length+' line(s) skipped</span>' : '')+'</div>';
-      if(r.rows.length) h += '<div class="dp-scroll"><table class="eng-tbl dp-tbl"><thead><tr><th>Date</th><th>No.</th><th>Time</th>'+PTS.map(p => '<th>'+p.n+'</th>').join('')+'</tr></thead><tbody>'+
-        r.rows.slice(0, 8).map(x => '<tr><td class="td-c">'+dmy(x.date)+(S.rows[x.date] ? ' <small>(overwrite)</small>' : '')+'</td><td class="td-c">'+esc(x.no)+'</td><td class="td-c">'+esc(x.time)+'</td>'+PTS.map(p => cell(x[p.k], p)).join('')+'</tr>').join('')+
-        (r.rows.length > 8 ? '<tr><td colspan="7" class="td-c dp-na">… '+(r.rows.length - 8)+' more</td></tr>' : '')+'</tbody></table></div>'+
-        '<button class="eng-btn green" onclick="DEWPT.pasteCommit()">✔ Import '+r.rows.length+' reading(s)</button>';
-    }
-    return h + '</div>';
   }
   /* email P3 vừa lưu một ngày ⇒ cập nhật bộ nhớ (khỏi đọc lại Firebase) */
   function ingest(date, rec){ const P = S.P.c3; if(!P.loaded) return; P.rows[date] = Object.assign({}, P.rows[date], rec); render(); }
@@ -734,20 +720,20 @@ const DEWPT = (function(){
     }, e => { _c3p = null; throw e; });
     return _c3p;
   }
-  function range(k){ S.range = k; if(k === 'all' && !S.P[S.prod].all){ loadAll(); return; } render(); }
-  function toggle(k){ S.show[k] = S.show[k] ? 0 : 1; render(); }
+  function range(k){ S.range = k; ENGX_U.prefSet('dew_range', k); if(k === 'all' && !S.P[S.prod].all){ loadAll(); return; } render(); }
+  function toggle(k){ const o = S.cst === 'xl' ? S.showX : S.show; o[k] = o[k] ? 0 : 1; render(); }
+  function cstyle(k){ S.cst = k === 'dt' ? 'dt' : 'xl'; ENGX_U.prefSet('dew_chart', S.cst); _cw = 0; render(); }   /* v4.229 — kiểu Excel / Detail, nhớ theo máy */
   /* v4.209 — mở / đóng một mục (nhớ theo máy) */
   function panel(k){ S.panel = S.panel === k ? '' : k; ENGX_U.prefSet('dew_panel', S.panel); render(); }
   function refresh(){ if(!S.loaded) load(); else render(); }   /* v4.224 — lịch sử do email P3 nạp trước ⇒ form chưa có ngày */
-  function reload(){ load(true); }
   /* LABX vừa ghi dữ liệu import ⇒ đọc lại (giữ chế độ 2 năm / tất cả) */
   function afterImport(prod){ const P = S.P[prod]; if(P && P.loaded){ const cur = S.prod; S.prod = prod; load(true); S.prod = cur; } }
 
-  return { PTS, PRODS, refresh, reload, render, ingest, c3Rows, c3Hist, panel, add, cell:cellIn, key, setCell, saveRow, saveAll, discard, discardAll, pin, hasDraft, del, delX, range, toggle, exportXlsx,
-           pasteOpen, pasteClose, pastePreview, pasteCommit, setProd, loadAll, afterImport,
+  return { PTS, PRODS, refresh, render, ingest, c3Rows, c3Hist, panel, add, cell:cellIn, key, setCell, saveRow, saveAll, discard, discardAll, pin, hasDraft, del, delX, range, toggle, cstyle,
+           setProd, loadAll, afterImport,
            listOf, numbered, nextNo, check, confirmCheck, inState, recent, xlFill, isLoaded:prod => !!(S.P[prod] && S.P[prod].loaded),
            rowsOf:prod => (S.P[prod] || {}).rows, loadedFrom:prod => { const P = S.P[prod]; return P && !P.all ? P.from : ''; },
-           _test:{ stats, alerts, parsePaste, monthly, list, S } };
+           _test:{ stats, alerts, monthly, list, S } };
 })();
 
 
