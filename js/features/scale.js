@@ -488,7 +488,9 @@ const SCALE = (function(){
       if(typeof TP.lnkTotals === 'function'){
         const t = TP.lnkTotals(todayRows);
         planTotalMt = t.planMT; planDoneLoadMt = t.loadedMT;
-        planRowCount = t.planCnt; planDoneCount = t.doneCnt;
+        /* ⭐ v4.232 — đếm CHUYẾN XE (ALT = 1 xe, nhóm MDO = 1 xe), không đếm đơn */
+        planRowCount = (t.tripCnt != null) ? t.tripCnt : t.planCnt;
+        planDoneCount = (t.tripDone != null) ? t.tripDone : t.doneCnt;
       } else {
         /* dự phòng: bản plan.js cũ chưa có lnkTotals */
         const getEff = (typeof TP.getEffectiveStatus === 'function') ? TP.getEffectiveStatus : null;

@@ -98,8 +98,24 @@ const ENG = (function(){
      MAIL · P1) = "ms|người gửi|chữ ký số liệu". Chữ ký = băm các ô mà email
      dùng ⇒ Tank Log sửa SAU khi gửi thì cột hiện "⚠ changed" để biết mà gửi lại.
      Chỉ ghi đúng MỘT ô (eng_tkmix/<rid>/cells/80), không ghi lại cả dòng. */
-  const ROW_W = 81;
+  /* v4.236 — +2 → 83: THỂ TÍCH BỒN THỰC TẾ LÚC DỪNG TỪNG SẢN PHẨM (m³)
+     (chỉ đạo giám đốc 07/10/2026 — "describe C3, C4 volume after each
+     transfer finish"):
+       [81] Vol @ C4 stop — số đọc thể tích bồn ngay khi DỪNG bơm C4
+       [82] Vol @ C3 stop — số đọc thể tích bồn ngay khi DỪNG bơm C3
+     Đây là số NGƯỜI GÕ (đo thật) nên mới lưu Firebase. Thể tích ĐÃ BƠM của
+     C4 / C3 thì suy ra được ⇒ KHÔNG lưu, tính trên máy bằng _xferCalc:
+       sản phẩm bơm TRƯỚC = số dừng của nó − Init Vol [10]
+       sản phẩm bơm SAU   = số dừng của nó − số dừng sản phẩm trước
+     Thứ tự bơm không cần lưu: thể tích bồn chỉ TĂNG trong lúc mix nên số
+     dừng NHỎ hơn chính là sản phẩm bơm trước. Chỉ có một số (bơm một sản
+     phẩm, hoặc chưa ghi số kia) ⇒ coi đó là lần bơm đầu tiên/duy nhất.
+     Ghi từ: ô 📏 ACTUAL STOP ở 🧮 Tank (lúc FINISH / SAVE, hoặc nút 💾 của ô)
+     · bấm thẳng ô trên Tank Log · modal sửa dòng. */
+  const ROW_W = 83;
   const M_SENT = 80;
+  const X_V4 = 81, X_V3 = 82;
+  const X_LBL = { [X_V4]:'Vol @ C4 stop', [X_V3]:'Vol @ C3 stop' };
   const C_ST = 53, C_ST_TS = 54, C_ST_BY = 55;
   /* v4.111 — 4 cột đối chiếu chuyển kho (kg) */
   const S_GAP3 = 69, S_GAP4 = 70, S_ADJ3 = 71, S_ADJ4 = 72;
@@ -557,7 +573,12 @@ const ENG = (function(){
   /* ── v4.174 — dấu đã gửi email P1 ─────────────────────────────── */
   const MAIL_SIG_COLS = [1,2,3,4,5,6,7,8,9,10,11,13,14,16,17,18,19,20,21,22,23,26,29,30,31,32,33];
   function mailSig(r){
-    let h = 5381; const t = MAIL_SIG_COLS.map(i => String(r[i] == null ? '' : r[i]).trim()).join('|');
+    let t = MAIL_SIG_COLS.map(i => String(r[i] == null ? '' : r[i]).trim()).join('|');
+    /* v4.236 — số dừng C4/C3 cũng in trong email P1. Chỉ nối vào khi CÓ số ⇒ chữ ký
+       của các lot đã gửi trước đây (chưa có hai ô này) giữ nguyên, không bị báo "changed". */
+    const xs = [X_V4, X_V3].map(i => String(r[i] == null ? '' : r[i]).trim());
+    if(xs[0] || xs[1]) t += '|x' + xs.join('|');
+    let h = 5381;
     for(let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) >>> 0;
     return h.toString(36);
   }
@@ -659,6 +680,8 @@ const ENG = (function(){
         '<td class="td-r">'+_fmtNum(c[10],3)+'</td>' +
         '<td class="td-r td-c3">'+_fmtPct(c[11])+'</td>' +
         '<td class="td-r td-c4">'+_fmtPct(c[12])+'</td>' +
+        /* v4.236 — cụm TRANSFER VOL: 2 số dừng (lưu) + 2 thể tích đã bơm (tính) */
+        _xferTds(c, realIdx) +
         '<td class="td-r td-fill-c3">'+_fmtNum(c[13],3)+'</td>' +
         '<td class="td-r td-fill-c4">'+_fmtNum(c[14],3)+'</td>' +
         (function(){ const L = _lpgOf(c);
@@ -706,8 +729,7 @@ const ENG = (function(){
         '<td class="td-r">'+_fmtNum(c[22],4)+'</td>' +
         '<td class="td-r">'+_fmtNum(c[23],4)+'</td>' +
         '<td class="td-r">'+_fmtNum(c[31],1)+'</td>' +
-        '<td class="td-r">'+_fmtNum(c[32],2)+'</td>' +
-        '<td class="td-r td-density">'+_fmtDen(c[33])+'</td>' +
+        '<td class="td-r">'+_fmtNum(c[32],2)+'</td>' +   /* v4.237 — Density dời lên cụm TRANSFER */
         '<td class="td-r">'+_fmtNum(c[26],2)+'</td>' +
         '<td class="td-c '+qualCls+'">'+_esc(c[27])+draftBadge+'</td>' +
         '<td>'+_esc(c[28])+'</td>' +
@@ -742,6 +764,10 @@ const ENG = (function(){
         '<tr class="eng-tfoot-row">' +
           '<td colspan="10" class="td-tot-lbl">Σ TỔNG — '+filtered.length+' lot'+
             (filtered.length !== ROWS.length ? ' (đang lọc / '+ROWS.length+')' : '')+'</td>' +
+          /* v4.236 — số dừng là mức tại một thời điểm ⇒ không cộng; thể tích đã bơm thì cộng được */
+          '<td class="td-xf g-xf-l"></td>' + _totNoSum('td-xf') + _totNoSum('td-xf') +
+          '<td class="td-r td-xf-p k4">'+(T.nX4 ? _fmtNum(T.x4,3) : '—')+'</td>' +
+          '<td class="td-r td-xf-p k3 g-xf-r">'+(T.nX3 ? _fmtNum(T.x3,3) : '—')+'</td>' +
           '<td class="td-r td-fill-c3">'+_fmtNum(T.fc3,3)+'</td>' +
           '<td class="td-r td-fill-c4">'+_fmtNum(T.fc4,3)+'</td>' +
           '<td class="td-r td-fill-lpg">'+_fmtNum(T.flpg,3)+'</td>' +
@@ -767,11 +793,13 @@ const ENG = (function(){
           '<td class="td-r gt gt-gap gt-r">'+(T.nG ? _gapKg(T.g4) : '—')+'</td>' +
           '<td class="td-r">'+_fmtNum(T.vol,3)+'</td>' +
           '<td class="td-r" style="color:var(--green)">'+_fmtNum(T.qty,2)+'</td>' +
-          '<td colspan="11"></td>' +
+          '<td colspan="10"></td>' +   /* v4.237 — 11 → 10: Density dời lên cụm TRANSFER */
           '<td class="td-r" style="color:#7b2d8e">'+_fmtNum(T.odo,2)+'</td>' +
-          '<td colspan="21"></td>' +
+          '<td colspan="22"></td>' +   /* v4.236 — 21 → 22: thiếu ô của cột ✉ Mail (v4.174) */
         '</tr>';
     }
+    /* v4.236 — ẩn/hiện các cụm cột theo trạng thái đã chọn */
+    try{ _cgApply(); }catch(e){ console.warn('[ENG] col groups', e); }
 
     if(stats){
       let html = '<b>'+filtered.length+'</b> / '+ROWS.length+' rows';
@@ -1158,6 +1186,276 @@ const ENG = (function(){
             + ' · lot ' + (row[1]||'—') + ' (' + (row[2]||'—') + ')', 'ok');
   }
 
+  /* ══ v4.236 — TRANSFER VOL: số dừng C4/C3 (lưu) + thể tích đã bơm (tính) ══
+     MỘT hàm tính duy nhất — Tank Log, ô 📏 ACTUAL STOP ở 🧮 Tank và email P1
+     đều gọi hàm này, nên ba nơi không thể nói khác nhau.
+     Trả về p4/p3 = thể tích (m³) đã bơm của C4/C3, first = sản phẩm bơm trước. */
+  /* v4.237 — fv = Final Vol [6]. Sản phẩm bơm SAU dừng đúng ở thể tích cuối, nên khi
+     mới có MỘT số dừng mà Final Vol lớn hơn nó ≥ XF_GAP m³ ⇒ coi đây là mẻ 2 sản phẩm
+     và lấy Final Vol thay cho số dừng còn trống (o.fb = 'v4' | 'v3' — KHÔNG lưu,
+     chỉ tính). Chênh < XF_GAP ⇒ mẻ bơm một sản phẩm. */
+  const XF_GAP = 2;
+  function _xferCalc(iv, v4, v3, fv){
+    const I = _num(iv), F = _num(fv);
+    let A = _num(v4), B = _num(v3), fb = null;
+    if(F !== null && (A === null) !== (B === null)){
+      const s0 = A !== null ? A : B;
+      if(F - s0 >= XF_GAP){ if(A === null){ A = F; fb = 'v4'; } else { B = F; fb = 'v3'; } }
+    }
+    const o = { iv:I, v4:A, v3:B, fv:F, fb:fb, first:null, p4:null, p3:null, single:false, bad:[] };
+    if(A === null && B === null) return o;
+    const r3 = x => Math.round(x * 1000) / 1000;
+    if(A !== null && B !== null){
+      /* thể tích bồn chỉ TĂNG trong lúc mix ⇒ số dừng nhỏ hơn = bơm trước */
+      o.first = A <= B ? 'C4' : 'C3';
+      if(o.first === 'C4'){ o.p4 = I === null ? null : r3(A - I); o.p3 = r3(B - A); }
+      else                { o.p3 = I === null ? null : r3(B - I); o.p4 = r3(A - B); }
+    } else {
+      o.single = true;
+      o.first = A !== null ? 'C4' : 'C3';
+      const p = I === null ? null : r3((A !== null ? A : B) - I);
+      if(o.first === 'C4') o.p4 = p; else o.p3 = p;
+    }
+    if(I === null) o.bad.push('Init Vol is empty — the first transfer cannot be worked out');
+    else {
+      const fs = o.first === 'C4' ? A : B;
+      if(fs < I - 0.05) o.bad.push('Stop reading ' + fs + ' m³ is BELOW Init Vol ' + I + ' m³');
+    }
+    return o;
+  }
+  function _xferOf(r){ return _xferCalc(r && r[10], r && r[X_V4], r && r[X_V3], r && r[6]); }
+
+  function _xferTds(c, realIdx){
+    const x = _xferOf(c);
+    const tipEd = '\nClick the cell to edit · Enter saves · Esc cancels · leave it EMPTY and press Enter to clear.';
+    const ed = col => (realIdx === undefined || realIdx === null) ? ''
+      : ' onclick="event.stopPropagation();ENG.xferEdit(' + realIdx + ',' + col + ',this)"';
+    const stop = (col, k, extra) => {
+      const v = _num(c[col]);
+      const prod = col === X_V4 ? 'C4' : 'C3';
+      /* v4.237 — ô trống của sản phẩm bơm sau ⇒ hiện Final Vol (nghiêng, xám) */
+      const isFb = v === null && x.fb === (col === X_V4 ? 'v4' : 'v3');
+      return '<td class="td-r td-xf td-xf-ed ' + k + (extra || '') + (v === null && !isFb ? ' td-xf-na' : '') + (isFb ? ' td-xf-fb' : '') + '"' + ed(col)
+        + ' title="' + _esc((isFb
+            ? 'Not entered — taken as FINAL VOL (' + _fmtNum(x.fv, 3) + ' m³): the transfer pumped last stops at the final volume.'
+            : 'Tank volume read when the ' + prod + ' transfer STOPPED (m³) — entered on 🧮 Tank at STOP ' + prod + '.') + tipEd) + '">'
+        + (isFb ? _fmtNum(x.fv, 3) : v === null ? '·' : _fmtNum(v, 3)) + '</td>';
+    };
+    const pumped = (p, prod, k, extra) => {
+      if(p === null){
+        const why = (x.v4 === null && x.v3 === null) ? 'No stop reading entered for this lot.'
+          : (x.single && x.first !== prod) ? 'Only one stop reading — no ' + prod + ' transfer recorded.'
+          : 'Init Vol is empty — the first transfer cannot be worked out.';
+        return '<td class="td-r td-xf-p ' + k + (extra || '') + ' td-xf-na" title="' + _esc(why) + '">·</td>';
+      }
+      const first = x.first === prod;
+      const tip = prod + ' pumped (m³) = Vol @ ' + prod + ' stop − '
+        + (first ? 'Init Vol' : 'Vol @ ' + (prod === 'C4' ? 'C3' : 'C4') + ' stop')
+        + ' · pumped ' + (first ? 'FIRST' : 'SECOND')
+        + (x.single ? '\nOnly one stop reading — taken as the first (or only) transfer.' : '')
+        + (x.fb ? '\nThe last stop is not entered — FINAL VOL is used in its place.' : '')
+        + (x.bad.length ? '\n⚠ ' + x.bad.join('\n⚠ ') : '')
+        + '\nCalculated on this machine — not stored.';
+      return '<td class="td-r td-xf-p ' + k + (extra || '') + ((p < 0 || x.bad.length) ? ' td-xf-bad' : '') + '" title="' + _esc(tip) + '">'
+        + _fmtNum(p, 3) + '<i class="xo">' + (first ? '①' : '②') + '</i></td>';
+    };
+    /* v4.237 — Applied Density (cột [33], trước là "Density") đứng đầu cụm, giống bảng của sếp */
+    return '<td class="td-r td-density td-xf g-xf-l" title="Applied density (kg/L)">' + _fmtDen(c[33]) + '</td>'
+         + stop(X_V4, 'k4') + stop(X_V3, 'k3')
+         + pumped(x.p4, 'C4', 'k4') + pumped(x.p3, 'C3', 'k3', ' g-xf-r');
+  }
+
+  /* chuỗi gõ → số m³ (3 số lẻ) · '' = xoá · null = gõ bậy */
+  function _xferParse(raw){
+    const t = String(raw == null ? '' : raw).replace(/[\s,]/g,'').replace(/[−–—]/g,'-').trim();
+    if(t === '') return '';
+    const n = Number(t);
+    return isFinite(n) ? Math.round(n * 1000) / 1000 : null;
+  }
+  /* Ghi số dừng của MỘT dòng. vals = {81: raw, 82: raw}; undefined/null = không đụng, '' = xoá.
+     cb(ok, why) — why: 'same' | 'nan' | 'range' | 'fb' | null */
+  function _xferWrite(row, vals, cb, quiet){
+    const done = (ok, why) => { if(typeof cb === 'function'){ try{ cb(ok, why); }catch(_){} } };
+    const upd = {};
+    for(const col of [X_V4, X_V3]){
+      const raw = vals[col];
+      if(raw === undefined || raw === null) continue;
+      const v = _xferParse(raw);
+      if(v === null){
+        if(typeof toast === 'function') toast('❌ ' + X_LBL[col] + ': "' + raw + '" is not a number — nothing was saved','er');
+        done(false, 'nan'); return false;
+      }
+      if(v !== '' && (v <= 0 || v > 2000)){
+        if(typeof toast === 'function') toast('❌ ' + X_LBL[col] + ' = ' + v + ' m³ is not a tank volume — nothing was saved','er');
+        done(false, 'range'); return false;
+      }
+      if(String(v) !== String(row[col] == null ? '' : row[col])) upd[col] = v;
+    }
+    const cols = Object.keys(upd).map(Number);
+    if(!cols.length){ done(true, 'same'); return true; }
+    while(row.length < ROW_W) row.push('');
+    const before = {};
+    cols.forEach(c => { before[c] = row[c]; row[c] = upd[c]; });
+    _saveCache();
+    _pushRowFb(row._rid, row, ok => {
+      if(!ok && typeof toast === 'function')
+        toast('❌ Could not save the stop volume of lot ' + (row[1]||'—') + ' (network/Firebase error) — try again','er');
+      done(ok, ok ? null : 'fb');
+    });
+    try{ cols.forEach(c => logAudit('eng:tank_log:xfer_vol', row._rid, X_LBL[c],
+           String(before[c] == null ? '' : before[c]), String(upd[c]), 'tank volume at transfer stop (m³)')); }catch(_){}
+    try{ render(); }catch(_){}
+    if(!quiet && typeof toast === 'function')
+      toast(cols.map(c => upd[c] === '' ? '🧹 Cleared ' + X_LBL[c] : '✓ ' + X_LBL[c] + ' = ' + _fmtNum(upd[c], 3) + ' m³').join(' · ')
+            + ' · lot ' + (row[1]||'—') + ' (' + (row[2]||'—') + ')', 'ok');
+    return true;
+  }
+  /* API cho 🧮 Tank: ghi số dừng vào dòng Tank Log của lot/bồn (đã có dòng) */
+  function setXferVol(lot, tank, v4, v3, cb, quiet){
+    const row = findRowByLotTank(lot, tank);
+    if(!row){ if(typeof cb === 'function') cb(false, 'no-row'); return false; }
+    return _xferWrite(row, { [X_V4]:v4, [X_V3]:v3 }, cb, quiet);
+  }
+  /* bấm thẳng ô số dừng trên Tank Log để sửa (cùng quy ước với stxEdit) */
+  function xferEdit(idx, col, td){
+    if(!X_LBL[col]) return;
+    const row = ROWS[idx];
+    if(!row || !td) return;
+    if(typeof canWrite === 'function' && !canWrite('eng_tkmix')){
+      if(typeof toast === 'function') toast('No permission to edit the Tank Log','er');
+      return;
+    }
+    if(td.querySelector('input')) return;
+    const html0 = td.innerHTML;
+    const cur = _num(row[col]);
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'eng-stx-inp';
+    inp.setAttribute('inputmode','decimal');
+    inp.value = cur === null ? '' : String(cur);
+    inp.title = X_LBL[col] + ' (m³) — Enter saves · Esc cancels · leave empty and press Enter to clear';
+    td.textContent = ''; td.appendChild(inp);
+    try{ inp.focus(); inp.select(); }catch(_){}
+    let settled = false;
+    /* bỏ dở / không đổi / gõ bậy ⇒ chỉ trả lại đúng ô đó, không dựng lại cả bảng */
+    const restore = () => { try{ td.innerHTML = html0; }catch(_){} };
+    const close = save => {
+      if(settled) return; settled = true;
+      if(!save){ restore(); return; }
+      _xferWrite(row, { [col]: inp.value }, (ok, why) => {
+        if(why === 'same' || why === 'nan' || why === 'range') restore();
+      });
+    };
+    inp.onclick = e => e.stopPropagation();
+    inp.onkeydown = e => {
+      e.stopPropagation();
+      if(e.key === 'Enter'){ e.preventDefault(); close(true); }
+      else if(e.key === 'Escape'){ e.preventDefault(); close(false); }
+    };
+    inp.onblur = () => close(true);
+  }
+
+  /* ══ v4.236 — CỤM CỘT THU / MỞ ĐƯỢC ═════════════════════════════════
+     Tank Log đã ~70 cột. Mỗi <th> của hàng tiêu đề cột mang data-cg = tên
+     cụm; hàng tiêu đề cụm (▾ TÊN) dựng tự động phía trên. Bấm ▾ ⇒ thu
+     cụm, cụm đã thu hiện thành nút ▸ ở ô đầu hàng để mở lại.
+     Ẩn bằng MỘT thẻ <style> (nth-child) nên vẽ lại bảng không tốn thêm gì;
+     riêng dòng Σ (có colspan) co colspan bằng JS. Trạng thái nhớ THEO MÁY
+     (localStorage) — chỉ là tiện ích xem, không lên Firebase. */
+  const CG_KEY = 'lpg_v4_eng_cg_v2';   /* v4.237 — v1→v2 để mặc định mới áp cho mọi máy */
+  const CG_DEF = {
+    xfer:{ lbl:'APPLIED DENSITY · TRANSFER VOL (m³)', tip:'Applied density · tank volume read when each transfer stopped · volume pumped of C4 / C3' },
+    fill:{ lbl:'FILLED (ton)',        tip:'Filled C3 / C4: GC reference · Init ◈ · official ◈COQ · End ◈ · figure sent to Scale' },
+    stx: { lbl:'STOCK TRANSFER (kg)', tip:'ST flag · WMS initial stock · gap · adjusted stock transfer posted in SAP/WMS' },
+    tadj:{ lbl:'COQ@T REFERENCE',     tip:'Reference only — Filled C3 / C4 converted to the actual temperature' },
+    res: { lbl:'FINAL RESULT',        tip:'Final volume · quantity · %C3 / %C4 after mixing' },
+    gc:  { lbl:'GC (%vol)',           tip:'GC composition of the finished batch' },
+    cond:{ lbl:'CONDITIONS',          tip:'Temperature · pressure · odorant' },
+    stat:{ lbl:'QUALITY & TARGET',    tip:'Quality · remark · target C3 % / target volume' },
+    coq: { lbl:'COQ CERTIFICATE',     tip:'Lab certificate details' },
+    mail:{ lbl:'MAIL',                tip:'Mixing report mail sent' }
+  };
+  /* v4.237 — user chốt: mặc định LUÔN thu COQ@T (tham khảo nhiệt độ) và GC — cần mới bấm mở */
+  const CG_DEFAULT_OFF = { tadj:true, gc:true };
+  let _cgOff = null;
+  function _cgLoad(){
+    if(_cgOff) return _cgOff;
+    _cgOff = Object.assign({}, CG_DEFAULT_OFF);
+    try{
+      const v = JSON.parse(localStorage.getItem(CG_KEY) || 'null');
+      if(v && typeof v === 'object') _cgOff = v;
+    }catch(_){}
+    return _cgOff;
+  }
+  function _cgSave(){ try{ localStorage.setItem(CG_KEY, JSON.stringify(_cgOff)); }catch(_){} }
+  /* nhóm của từng cột đọc từ HTML (th[data-cg]) — không ghim số cột trong mã */
+  function _cgCols(){
+    const tbl = document.getElementById('engTbl'); if(!tbl) return null;
+    const hr = tbl.querySelector('thead tr.eng-colrow'); if(!hr) return null;
+    return Array.prototype.map.call(hr.children, th => th.getAttribute('data-cg') || '');
+  }
+  function _cgApply(){
+    const tbl = document.getElementById('engTbl'); if(!tbl) return;
+    const cols = _cgCols(); if(!cols || !cols.length) return;
+    const off = _cgLoad();
+    const runs = [];
+    cols.forEach((k, i) => {
+      const last = runs[runs.length - 1];
+      if(last && last.k === k) last.b = i + 1;
+      else runs.push({ k:k, a:i + 1, b:i + 1 });
+    });
+    /* 1) ẩn cột */
+    const sels = [];
+    runs.forEach(r => {
+      if(!r.k || !off[r.k]) return;
+      const nth = ':nth-child(n+' + r.a + '):nth-child(-n+' + r.b + ')';
+      sels.push('#engTbl>thead>tr.eng-colrow>th' + nth, '#engTbl>tbody>tr>td' + nth);
+    });
+    let st = document.getElementById('engCgStyle');
+    if(!st){ st = document.createElement('style'); st.id = 'engCgStyle'; document.head.appendChild(st); }
+    const css = sels.length ? sels.join(',') + '{display:none}' : '';
+    if(st.textContent !== css) st.textContent = css;
+    /* 2) hàng tiêu đề cụm */
+    const thead = tbl.querySelector('thead');
+    let gr = thead.querySelector('tr.eng-cgrow');
+    if(!gr){ gr = document.createElement('tr'); gr.className = 'eng-cgrow'; thead.insertBefore(gr, thead.firstChild); }
+    const closed = Object.keys(CG_DEF).filter(k => off[k] && cols.indexOf(k) >= 0);
+    let h = '';
+    runs.forEach(r => {
+      const n = r.b - r.a + 1;
+      if(!r.k){
+        h += '<th colspan="' + n + '" class="cg-base"><span class="cg-acts">'
+          + '<button type="button" class="cg-all" onclick="ENG.cgAll(false)" title="Collapse every column group">⊟</button>'
+          + '<button type="button" class="cg-all" onclick="ENG.cgAll(true)" title="Expand every column group">⊞</button>'
+          + (closed.length ? '<span class="cg-hint">Hidden:</span>' : '<span class="cg-hint">Click a group name to collapse it</span>')
+          + closed.map(k => '<button type="button" class="cg-pill cg-' + k + '" onclick="ENG.cgToggle(\'' + k + '\')" title="'
+              + _esc('Show ' + CG_DEF[k].lbl + ' — ' + CG_DEF[k].tip) + '">▸ ' + _esc(CG_DEF[k].lbl) + '</button>').join('')
+          + '</span></th>';
+        return;
+      }
+      if(off[r.k]) return;
+      const d = CG_DEF[r.k] || { lbl:r.k, tip:'' };
+      h += '<th colspan="' + n + '" class="cg-h cg-' + r.k + '" onclick="ENG.cgToggle(\'' + r.k + '\')" title="'
+        + _esc(d.tip + ' — click to collapse') + '">▾ ' + _esc(d.lbl) + '</th>';
+    });
+    gr.innerHTML = h;
+    /* 3) dòng Σ: co colspan theo số cột còn hiện */
+    const tf = document.getElementById('engTfoot');
+    if(tf) Array.prototype.forEach.call(tf.rows, tr => {
+      let c = 0;
+      Array.prototype.forEach.call(tr.cells, td => {
+        if(!td.hasAttribute('data-span')) td.setAttribute('data-span', String(td.colSpan || 1));
+        const span = parseInt(td.getAttribute('data-span'), 10) || 1;
+        let vis = 0;
+        for(let i = c; i < c + span; i++) if(!(cols[i] && off[cols[i]])) vis++;
+        c += span;
+        if(!vis) td.style.display = 'none';
+        else { td.style.display = ''; td.colSpan = vis; }
+      });
+    });
+  }
+  function cgToggle(k){ _cgLoad(); _cgOff[k] = !_cgOff[k]; _cgSave(); _cgApply(); }
+  function cgAll(open){ _cgLoad(); Object.keys(CG_DEF).forEach(k => { _cgOff[k] = !open; }); _cgSave(); _cgApply(); }
+
   function _totNoSum(cls){
     return '<td class="td-r ' + cls + '" style="color:#c4cfda" ' +
       'title="Stock level at one point in time — adding it up across lots is meaningless, so no total is shown.">—</td>';
@@ -1289,7 +1587,8 @@ const ENG = (function(){
                 /* v4.111 — tổng số chuyển kho đã điều chỉnh (kg) + số lot đã đối chiếu */
                 adj3:0, adj4:0, nAdj:0,
                 /* v4.159 -- tong quy doi nhiet do + Gap T-adj */
-                t3:0, t4:0, nT:0, g3:0, g4:0, nG:0 };
+                t3:0, t4:0, nT:0, g3:0, g4:0, nG:0,
+                x4:0, x3:0, nX4:0, nX3:0 };
     (list||[]).forEach(r=>{
       T.n++;
       { const v = _tadjView(r);
@@ -1314,6 +1613,10 @@ const ENG = (function(){
       const e = _num(r[7]);  if(e !== null) T.qty  += e;
       const f = _num(r[26]); if(f !== null) T.odo  += f;
       if(String(r[C_ST]||'') === '1') T.stOn++;
+      /* v4.236 — Σ thể tích đã bơm C4/C3 (m³) */
+      { const x = _xferOf(r);
+        if(x.p4 !== null){ T.x4 += x.p4; T.nX4++; }
+        if(x.p3 !== null){ T.x3 += x.p3; T.nX3++; } }
     });
     return T;
   }
@@ -1581,7 +1884,7 @@ const ENG = (function(){
     {
       const prev = RID_MAP[rid];
       if(prev){
-        [T_FC3, T_FC4, T_FACTOR, T_DIFF, T_DIFFPCT].forEach(col=>{
+        [T_FC3, T_FC4, T_FACTOR, T_DIFF, T_DIFFPCT, X_V4, X_V3].forEach(col=>{
           if(String(safe[col] == null ? '' : safe[col]).trim() === '' && prev[col] !== '' && prev[col] != null)
             safe[col] = prev[col];
         });
@@ -1817,7 +2120,10 @@ const ENG = (function(){
       {col:30,label:'Target Vol (m³)'},
       {col:6, label:'Final Vol (m³)'},
       {col:7, label:'Final Qty (ton)'},
-      {col:26,label:'Odorant (kg)'}
+      {col:26,label:'Odorant (kg)'},
+      /* v4.236 — thể tích bồn đọc được lúc dừng từng sản phẩm */
+      {col:X_V4,label:'Vol @ C4 stop (m³)', cls:'hl-c4'},
+      {col:X_V3,label:'Vol @ C3 stop (m³)', cls:'hl-c3'}
     ]},
     { key:'gc', title:'GC ANALYSIS', sub:'Composition of the finished batch', fields:[
       {col:16,label:'CH₄'},
@@ -1832,7 +2138,7 @@ const ENG = (function(){
       {col:9, label:'%C4 Result',  cls:'hl-c4'},
       {col:31,label:'Temp (°C)'},
       {col:32,label:'Pressure'},
-      {col:33,label:'Density (kg/L)'}
+      {col:33,label:'Applied Density (kg/L)'}
     ]},
     { key:'coq', title:'COQ CERTIFICATE', sub:'Lab certificate of the batch just mixed', fields:[
       {col:34,label:'COQ No',            cls:'hl-coq', type:'str'},
@@ -3079,7 +3385,9 @@ const ENG = (function(){
       /* v4.156 -- 5 cot THAM KHAO quy doi theo nhiet do thuc */
       'TempAdjFilledC3_ton','TempAdjFilledC4_ton','TempAdjFactor','TempAdjDiff_ton','TempAdjDiff_pct',
       /* v4.174 — dấu đã gửi email P1 */
-      'MailSent'];
+      'MailSent',
+      /* v4.236 — thể tích bồn lúc dừng C4 / C3 (m³) */
+      'VolStopC4_m3','VolStopC3_m3'];
     const csvLines = [headers.join(',')];
     /* v4.63 — export theo thứ tự lot MỚI NHẤT → CŨ NHẤT (khớp bảng) */
     const ordered = ROWS.slice().sort((a,b)=> _lotKey(b[1]) - _lotKey(a[1]));
@@ -4184,6 +4492,10 @@ const ENG = (function(){
     loadAll,                          /* v4.62 — fetch full Tank Log on demand */
     /* v4.174 — dấu đã gửi Ball Tank Mixing Report */
     markMailSent, mailInfo, mailSig, M_SENT,
+    /* v4.236 — thể tích lúc dừng C4/C3 + thể tích đã bơm; cụm cột thu/mở */
+    xferCalc: _xferCalc, xferOf: _xferOf, setXferVol, xferEdit,
+    X_COLS: { v4:X_V4, v3:X_V3 },
+    cgToggle, cgAll, cgApply: _cgApply,
     get allLoaded(){ return _allLoaded; },
     /* v4.161 — { miss:[so lot thieu], noLot:n } tren tap dang co trong RAM */
     lotGaps: _lotGaps,

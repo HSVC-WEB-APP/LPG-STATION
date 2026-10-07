@@ -1,6 +1,14 @@
 /* ============================================================
  * MAILCFG — mailcfg.js  (v4.172 · v4.177: tuyến P7 Vessel Mixing Report
- *                        · v4.182: nhóm G tự thêm, email P tự soạn, danh bạ thêm tay)
+ *                        · v4.182: nhóm G tự thêm, email P tự soạn, danh bạ thêm tay
+ *                        · v4.233/4.234: NHÓM EMAIL CHUNG (group mailbox) G10/G11/G12 theo chỉ đạo
+ *                          Mr. Kim 06/10/2026 — chỉ THÊM lựa chọn, KHÔNG đổi tuyến)
+ * v4.233: thêm 3 hộp thư nhóm vào DIR (title 'Group mailbox'): lpg.cavern (Cavern only),
+ *         vc9Q10 (LPG Terminal kể cả Jetty), LPG.Domestic — mỗi cái là MỘT nhóm G riêng
+ *         (G10/G11/G12) để chọn TO/CC như nhóm thường. Nhóm G2..G9 (từng người) VẪN GIỮ.
+ *         v4.234 (user chốt): app KHÔNG tự đổi tuyến To/CC của thư nào — user tự bật G10/G11/G12
+ *         ở 👥 Recipients. Cấu hình mail_cfg cũ trên Firebase (REV < 2) ⇒ apply() chỉ BÙ 3 hộp thư
+ *         + 3 nhóm vào RAM (_migrate2); bấm 💾 Save for everyone là lưu hẳn.
  * v4.182: cfg có thêm MAILS {P8:{ttl,subj,body,attach}} = email CHỈ CÓ CHỮ do admin soạn
  *         trên app (email cần dữ liệu vẫn viết trong mail.js), và CTX = người THÊM TAY vào
  *         danh bạ công ty (nhân viên mới chưa có trong file Contact List) — cùng định dạng
@@ -60,6 +68,10 @@ const MAILCFG = (function(){
     { id:"nsigma", n:"Jang Jong Chan", vn:"Jang Jong Chan", e:"nsigma@hyosung.com", title:"Department chief", sex:"Male" },
     { id:"cuong_new", n:"Tong Manh Cuong", vn:"Tống Mạnh Cường", e:"", title:"Engineer", sex:"Male" },
     { id:"vc9D20", n:"LPG 영업팀(비나케미칼즈)", vn:"LPG 영업팀(비나케미칼즈)", e:"vc9D20@hyosung.com", title:"Group mailbox", sex:"" },
+    /* v4.233 — hộp thư nhóm theo chỉ đạo Mr. Kim (06/10/2026); thành viên do Ms. Vân cập nhật trên Outlook */
+    { id:"lpgcavern", n:"LPG Cavern", vn:"LPG Cavern", e:"lpg.cavern@hyosung.com", title:"Group mailbox", sex:"" },
+    { id:"vc9Q10", n:"LPG Terminal (incl. Jetty)", vn:"LPG Terminal (incl. Jetty)", e:"vc9Q10@hyosung.com", title:"Group mailbox", sex:"" },
+    { id:"lpgdomestic", n:"LPG Domestic", vn:"LPG Domestic", e:"LPG.Domestic@hyosung.com", title:"Group mailbox", sex:"" },
   ];
 
   const GROUPS = {
@@ -73,7 +85,11 @@ const MAILCFG = (function(){
     G6:{ name:'LPG Sales — Korean managers',     ids:['chjo','yswoo','cha2633','vc9D20'] },
     G7:{ name:'PP Technical',                    ids:['anh44180147','thuy44180046','trang44180083','hanh44240016','nhi44250024'] },
     G8:{ name:'Planning',                        ids:['thy44210095','yen44210094'] },
-    G9:{ name:'DH Process (OL1)',                ids:['nsigma'] }
+    G9:{ name:'DH Process (OL1)',                ids:['nsigma'] },
+    /* v4.233 — nhóm email CHUNG: một địa chỉ, Outlook tự chia cho mọi thành viên */
+    G10:{ name:'LPG Cavern (group mail)',        ids:['lpgcavern'] },
+    G11:{ name:'LPG Terminal + Jetty (group mail)', ids:['vc9Q10'] },
+    G12:{ name:'LPG Domestic (group mail)',      ids:['lpgdomestic'] }
   };
 
   /* To / CC của từng báo cáo — tham chiếu nhóm (G..) hoặc id người */
@@ -106,8 +122,11 @@ const MAILCFG = (function(){
      Save trong màn hình Recipients, cả bộ ghi vào node Firebase `mail_cfg`
      (MỘT object nhỏ, ghi rất hiếm) và mọi máy nạp lại bằng listener. Đây là
      dữ liệu NGƯỜI GÕ nên được lên Firebase (đúng luật RAM v4.170).       */
+  /* v4.233 — số hiệu cấu trúc cấu hình; cfg trên Firebase có REV nhỏ hơn ⇒ apply() nâng cấp trong RAM */
+  const REV = 2;
   const DEF = { DIR: JSON.parse(JSON.stringify(DIR)), GROUPS: JSON.parse(JSON.stringify(GROUPS)),
-                ROUTE: JSON.parse(JSON.stringify(ROUTE)), SENDERS: SENDERS.slice(), MAILS:{}, CTX:[] };
+                ROUTE: JSON.parse(JSON.stringify(ROUTE)), SENDERS: SENDERS.slice(), MAILS:{}, CTX:[], REV };
+  let CUR_REV = REV;
   let BYID = {};
   let META = { src:'default', at:0, by:'' };
   function _reindex(){ BYID = {}; DIR.forEach(p => { if(p && p.id) BYID[p.id] = p; }); }
@@ -116,6 +135,27 @@ const MAILCFG = (function(){
   function _replaceObj(obj, next){ Object.keys(obj).forEach(k => delete obj[k]); Object.assign(obj, next || {}); }
   /* Firebase trả mảng rỗng thành "không có", mảng thưa thành object ⇒ đưa về mảng */
   function _arr(v){ return Array.isArray(v) ? v.filter(x => x != null) : (v && typeof v === 'object') ? Object.values(v).filter(x => x != null) : []; }
+  /* v4.233/4.234 — nâng cấp cfg cũ (REV < 2): CHỈ thêm 3 hộp thư nhóm + nhóm G riêng cho từng cái.
+     KHÔNG đụng ROUTE (user tự chọn nhóm cho từng thư), không đụng tên/thành viên nhóm admin đã sửa;
+     nhóm trùng thì dùng nhóm sẵn có, khoá G đã có người dùng thì lấy khoá trống kế tiếp. */
+  function _migrate2(){
+    const ensureP = id => {
+      const d = DEF.DIR.find(p => p.id === id); if(!d) return null;
+      const ex = DIR.find(p => p.id === id) || DIR.find(p => String(p.e||'').toLowerCase() === String(d.e||'').toLowerCase());
+      if(ex) return ex.id;
+      DIR.push(JSON.parse(JSON.stringify(d))); return id;
+    };
+    const freeG = want => { if(!GROUPS[want]) return want; let n = 10; while(GROUPS['G'+n]) n++; return 'G'+n; };
+    const ensureG = (want, pid) => {
+      const id = ensureP(pid); if(!id) return null;
+      const hit = Object.keys(GROUPS).find(g => GROUPS[g].ids.length === 1 && GROUPS[g].ids[0] === id);
+      if(hit) return hit;
+      const k = freeG(want); GROUPS[k] = { name:DEF.GROUPS[want].name, ids:[id] }; return k;
+    };
+    ensureG('G10', 'lpgcavern');
+    ensureG('G11', 'vc9Q10');
+    ensureG('G12', 'lpgdomestic');
+  }
   /* nạp một bộ cấu hình (từ Firebase hoặc từ màn hình sửa) */
   function apply(cfg, meta){
     if(!cfg || !Array.isArray(cfg.DIR) || !cfg.GROUPS || !cfg.ROUTE) return false;
@@ -136,13 +176,15 @@ const MAILCFG = (function(){
        ⇒ bù tuyến MẶC ĐỊNH cho đúng những báo cáo còn thiếu, không đụng tuyến admin đã chỉnh */
     Object.keys(DEF.ROUTE).forEach(k => { if(!ROUTE[k]) ROUTE[k] = JSON.parse(JSON.stringify(DEF.ROUTE[k])); });
     if(Array.isArray(cfg.SENDERS)) _replace(SENDERS, cfg.SENDERS);
+    if((+cfg.REV || 0) < 2){ try{ _migrate2(); }catch(e){ console.warn('[MAILCFG] migrate v4.233', e); } }   /* v4.233 */
+    CUR_REV = REV;
     META = Object.assign({ src:'firebase', at:0, by:'' }, meta || {});
     _reindex();
     try{ document.dispatchEvent(new CustomEvent('mailcfg:changed')); }catch(_){}
     return true;
   }
   function snapshot(){
-    return JSON.parse(JSON.stringify({ DIR, GROUPS, ROUTE, SENDERS, MAILS, CTX }));
+    return JSON.parse(JSON.stringify({ DIR, GROUPS, ROUTE, SENDERS, MAILS, CTX, REV:CUR_REV }));
   }
   function resetDefault(){ apply(JSON.parse(JSON.stringify(DEF)), { src:'default', at:0, by:'' }); }
   let _ref = null;

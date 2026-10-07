@@ -63,6 +63,7 @@
      Email P2 dùng để điền Daily plan + danh sách xe huỷ (kể cả xe bị gỡ khỏi plan).
    • SNOTE (sale_notes/<khoá mẫu>): sổ gom GHI CHÚ CỦA SALE (cột M) theo mẫu — để sau này dạy app
      hiểu note (vd. một xe hai loại hàng, cố định số tấn một loại). Chỉ gom, chưa tự xử lý.
+     v4.231 — CHỈ GHI, app không đọc lại; phân tích bằng ⚙ ▸ ⬇ Download JSON.
    ===== BÓC TỪ V4-54 dòng 9940–12568 ===== */
 function _makePlanModule(opts){
   /* destructure once for readability (these are CONSTANT for the lifetime
@@ -1728,20 +1729,30 @@ function _makePlanModule(opts){
        planMT    Σ qty đơn không cancel      · loadedMT Σ qty đơn done + loading
        remainMT  planMT − loadedMT
        planCnt/doneCnt  số ĐƠN (đã thu gọn ALT), KHÔNG phải số dòng
+       tripCnt/tripDone ⭐ v4.232 — số CHUYẾN XE: ALT = 1 xe (đã thu gọn), MỘT
+                 NHÓM 🔗 MDO = 1 xe · 1 lần nạp (nhiều DO chỉ là tách hoá đơn).
+                 Nhóm MDO tính là đã nạp khi có một DO của nhóm done/loading.
        altSaved  số dòng bị loại nhờ ALT (để hiện chú thích) */
   function lnkTotals(rows){
     const src  = rows || Object.values(PLAN);
     const list = lnkCollapse(src);
-    let planMT = 0, loadedMT = 0, planCnt = 0, doneCnt = 0;
+    let planMT = 0, loadedMT = 0, planCnt = 0, doneCnt = 0, tripCnt = 0, tripDone = 0;
+    const mdo = new Map();                       /* gid nhóm MDO → đã tính 'done' chưa */
     list.forEach(r=>{
       const q  = parseFloat(r.qty||0) || 0;
       const st = String(getEffectiveStatus(r)||'').toLowerCase();
       if(st === 'cancel') return;
+      const isDone = (st === 'done' || st === 'loading');
       planCnt++; planMT += q;
-      if(st === 'done' || st === 'loading'){ doneCnt++; loadedMT += q; }
+      if(isDone){ doneCnt++; loadedMT += q; }
+      const gid = lnkKind(r) === LNK_MDO ? lnkGid(r) : '';
+      if(!gid){ tripCnt++; if(isDone) tripDone++; return; }
+      if(!mdo.has(gid)){ mdo.set(gid, isDone); tripCnt++; if(isDone) tripDone++; }
+      else if(isDone && !mdo.get(gid)){ mdo.set(gid, true); tripDone++; }
     });
     return { planMT, loadedMT, remainMT: Math.max(0, planMT - loadedMT),
              planCnt, doneCnt, remainCnt: Math.max(0, planCnt - doneCnt),
+             tripCnt, tripDone, tripRemain: Math.max(0, tripCnt - tripDone),
              altSaved: src.length - list.length };
   }
 
@@ -3677,10 +3688,7 @@ function _makePlanModule(opts){
     _pendingDeleteOid = null;
   }
 
-  /* -------- Export -------- */
-  function exportCsv(){
-    if(table) table.download('csv', PERMK + '_'+planDate+'_'+Date.now()+'.csv');
-  }
+  /* ⛔ v4.231 — ĐÃ GỠ ⬇ Export (CSV) của Today/Tomorrow Plan — user: không cần. */
 
   /* -------- Public API -------- */
   /* ════════ v4.35.0 — CUSTOMER LEDGER render layer ════════
@@ -3981,7 +3989,8 @@ function _makePlanModule(opts){
       '<span class="pl-fchip'+(_ledgerFilter===k?' on':'')+'" onclick="'+G+'.setLedgerFilter(\''+k+'\')">'+lbl+' '+cnt[k]+'</span>'
     ).join('')
       + '<span class="pv-sum">Plan <b>'+_fmtMT(planMT)+'</b> · Loaded <b class="g">'+_fmtMT(loadedMT)+'</b> · Remain <b class="o">'+_fmtMT(remainMT)+'</b> MT'
-      + '<span class="pv-sum-cnt">'+_tot.planCnt+' order'+(_tot.planCnt===1?'':'s')+'</span>'
+      + '<span class="pv-sum-cnt">'+_tot.planCnt+' order'+(_tot.planCnt===1?'':'s')
+      +   (_tot.tripCnt !== _tot.planCnt ? ' · <span title="🔗 Multi-DO: one truck, one loading — counted as one trip">'+_tot.tripCnt+' truck'+(_tot.tripCnt===1?'':'s')+'</span>' : '')+'</span>'
       + (_tot.altSaved>0
           ? '<span class="pv-sum-alt" title="'+_tot.altSaved+' row(s) belong to a 🔗 ALT group (one order, several possible trucks) and are NOT counted a second time.">🔗 −'+_tot.altSaved+' alt row'+(_tot.altSaved===1?'':'s')+'</span>'
           : '')
@@ -4213,174 +4222,12 @@ function _makePlanModule(opts){
     h += '</tbody></table></div>';
     host.innerHTML = h;
   }
-  /* ══════════════ v4.139 · DON DONG TRUNG DA NAM TREN FIREBASE ══════════════
-     Luoi chan luc dan chi ngan dong trung MOI. Nhung dong trung DA co (18 dong
-     ngay 09/09/26) phai co cach don, va phai do NGUOI dung bam — khong bao gio
-     tu xoa du lieu. Nut 🧹 Duplicates: quet lai Firebase → gom nhom theo
-     _identKey → chon MOT dong giu lai → hien danh sach → bam Delete moi xoa.
-     KHONG BAO GIO tu xoa dong da co tien do can (loading/done/actual): nhom nhu
-     vay bi danh dau "review by hand" va khong xoa gi ca. */
-  function _dedupScore(r){
-    let sc = 0;
-    const st = String(r._status||'');
-    if(st === 'loading' || st === 'done') sc += 1000;
-    if(String(r._actualQty||'').trim()) sc += 500;
-    if(isRealDO(String(r.doNum||'').trim())) sc += 200;
-    if(isTempOid(String(r._oid||''))) sc += 100;
-    if(String(r._lnkK||'')) sc += 50;
-    return sc;
-  }
+  /* ⛔ v4.231 — ĐÃ GỠ nút 🧹 Duplicates (dedupOpen/Scan/Apply) theo yêu cầu user.
+     Chặn dòng trùng lúc dán (v4.139 quét-lại-trước-khi-dán) vẫn giữ. */
   function _hasProgress(r){
     const st = String(r._status||'');
     return st === 'loading' || st === 'done' || !!String(r._actualQty||'').trim();
   }
-  /* Gom nhom cac dong GIONG HET nhau (cung ngay · khach · tai xe · bien so ·
-     no · qty · DO). Tra ve nhom co tu 2 dong tro len. */
-  function dedupScan(){
-    const groups = new Map();
-    Object.values(PLAN).forEach(r=>{
-      const k = _identKey(r, r._forDate || planDate);
-      if(!k) return;
-      if(!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(r);
-    });
-    const out = [];
-    groups.forEach((rows, k)=>{
-      if(rows.length < 2) return;
-      const sorted = rows.slice().sort((a,b)=>{
-        const d = _dedupScore(b) - _dedupScore(a);
-        if(d) return d;
-        const ta = Number(a.lastAt||0), tb = Number(b.lastAt||0);
-        if(ta !== tb) return ta - tb;                      /* dong CU hon duoc giu */
-        return String(a._oid||'').localeCompare(String(b._oid||''));
-      });
-      const withProgress = rows.filter(_hasProgress);
-      const manual = withProgress.length > 1;              /* hai dong deu da can */
-      out.push({
-        key: k,
-        rows: sorted,
-        keep: sorted[0],
-        drop: manual ? [] : sorted.slice(1),
-        manual
-      });
-    });
-    out.sort((a,b)=>String(a.keep.customer||'').localeCompare(String(b.keep.customer||'')));
-    return out;
-  }
-  /* Xoa han cac khoa RAC (khong con du lieu nghiep vu). Chay am tham trong
-     _fullResync, chi khi tai khoan co quyen ghi. */
-  const _junkPurged = new Set();
-  function _purgeJunk(oids){
-    if(!FB_DB) return 0;
-    try{ if(!canWrite(PERMK)) return 0; }catch(_){ return 0; }
-    const payload = {}; let n = 0;
-    (oids||[]).forEach(oid=>{
-      if(_junkPurged.has(oid)) return;
-      _junkPurged.add(oid);
-      payload[`${FBN}${oid}`] = null; n++;
-    });
-    if(!n) return 0;
-    console.warn(`[${PERMK}] purge ${n} empty key(s) left behind by a field write to a deleted row:`, Object.keys(payload));
-    bumpVersion(payload);
-    _fbUpdate(payload).catch(e=>console.warn('plan purgeJunk', e));
-    return n;
-  }
-  /* ---- modal 🧹 ---- */
-  function _dedupModal(){
-    let m = document.getElementById(ID + 'DedupModal');
-    if(m) return m;
-    m = document.createElement('div');
-    m.className = 'tp-diff-modal';
-    m.id = ID + 'DedupModal';
-    m.innerHTML =
-      '<div class="tp-diff-box">'
-      + '<div class="tp-diff-hdr"><div><h3>🧹 Duplicate rows</h3>'
-      + '<div class="sub" id="' + ID + 'DedupSub"></div></div>'
-      + '<button class="modal-close" onclick="' + G + '.dedupClose()">×</button></div>'
-      + '<div class="tp-diff-body" id="' + ID + 'DedupBody"></div>'
-      + '<div class="tp-diff-foot"><button class="btn" onclick="' + G + '.dedupClose()">Cancel</button>'
-      + '<button class="btn btn-red-soft" id="' + ID + 'DedupBtn" onclick="' + G + '.dedupApply()">🗑 Delete duplicates</button></div>'
-      + '</div>';
-    document.body.appendChild(m);
-    return m;
-  }
-  let _dedupPending = null;
-  function dedupOpen(){
-    toast('Reading the current plan from Firebase…','ok');
-    _resyncNow('dedup').then(()=>{
-      if(!_resyncOk){ toast('Cannot read Firebase right now — try again in a moment','er'); return; }
-      const groups = dedupScan();
-      _dedupPending = groups;
-      const m = _dedupModal();
-      const dropN = groups.reduce((n,g)=>n + g.drop.length, 0);
-      const manualN = groups.filter(g=>g.manual).length;
-      document.getElementById(ID + 'DedupSub').textContent = groups.length
-        ? (groups.length + ' group(s) of identical rows · ' + dropN + ' row(s) can be deleted'
-           + (manualN ? ' · ' + manualN + ' group(s) need manual review' : ''))
-        : 'Nothing to clean up.';
-      let h = '';
-      if(!groups.length){
-        h = '<div class="tp-diff-warn" style="background:#e8f6ee;border-color:#8fd3ac;color:#155e3a">'
-          + '✅ No duplicate rows found in ' + UILABEL + '.</div>';
-      } else {
-        h += '<div class="tp-diff-warn">Rows below are identical (same plan date, customer, driver, truck, No, quantity and DO). '
-           + 'The row that is kept is the oldest one, or the one already loading / loaded / carrying a DO. '
-           + 'Nothing is deleted until you press the red button.</div>';
-        groups.forEach(g=>{
-          h += '<div class="tp-diff-section' + (g.manual ? ' rem' : ' chg') + '">'
-             + '<h4>' + escapeHtml(String(g.keep.customer||'—')) + ' · '
-             + escapeHtml(String(g.keep.plate||'—')) + ' · ' + escapeHtml(String(g.keep.qty||'—')) + ' MT'
-             + '<span class="badge">' + g.rows.length + ' identical</span>'
-             + (g.manual ? '<span style="color:#b4232c;font-weight:700;text-transform:none">⚠ two rows already have weighing progress — nothing deleted, check by hand</span>' : '')
-             + '</h4><div class="tp-diff-list">';
-          g.rows.forEach(r=>{
-            const isKeep = (r === g.keep) || g.manual;
-            h += '<div class="tp-diff-item"' + (isKeep ? '' : ' style="opacity:.75"') + '>'
-               + (isKeep ? '<span class="stat-tag" style="background:#e8f6ee;color:#157a40">KEEP</span>'
-                         : '<span class="stat-tag" style="background:#fdecec;color:#b4232c">DELETE</span>')
-               + ' <span class="who">' + escapeHtml(String(r._oid||'')) + '</span> · '
-               + escapeHtml(String(r.driver||'—')) + ' · DO ' + escapeHtml(String(r.doNum||'—'))
-               + ' · ' + escapeHtml(String(r._status||'pending'))
-               + ' · by ' + escapeHtml(String(r.lastBy||'—'))
-               + '</div>';
-          });
-          h += '</div></div>';
-        });
-      }
-      document.getElementById(ID + 'DedupBody').innerHTML = h;
-      const btn = document.getElementById(ID + 'DedupBtn');
-      if(btn){ btn.style.display = dropN ? '' : 'none'; btn.textContent = '🗑 Delete ' + dropN + ' duplicate row(s)'; }
-      m.classList.add('on');
-    });
-  }
-  function dedupClose(){
-    const m = document.getElementById(ID + 'DedupModal');
-    if(m) m.classList.remove('on');
-    _dedupPending = null;
-  }
-  function dedupApply(){
-    if(!_dedupPending){ dedupClose(); return; }
-    if(!canWrite(PERMK)){ toast('You do not have permission to edit ' + UILABEL,'er'); return; }
-    if(!FB_DB){ toast('Offline — Firebase not connected','er'); return; }
-    const payload = {}; const oids = [];
-    _dedupPending.forEach(g=>g.drop.forEach(r=>{
-      const oid = String(r._oid||''); if(!oid) return;
-      oids.push(oid);
-      delete PLAN[oid];
-      payload[`${FBN}${oid}`] = null;
-    }));
-    if(!oids.length){ dedupClose(); toast('Nothing to delete','ok'); return; }
-    bumpVersion(payload);
-    _fbUpdate(payload)
-      .then(()=>toast('Deleted ' + oids.length + ' duplicate row(s)','ok'))
-      .catch(e=>{ console.error('plan dedupApply', e); toast('Delete failed','er'); });
-    try{ logAudit(PERMK + ':dedup', '_bulk_', '_dedup', oids.length + ' rows', oids.join(','), 'remove duplicates'); }catch(_){}
-    dedupClose();
-    if(table) rebuildTableData(); else renderLedger();
-    refreshCounts(); refreshBadge();
-    try{ if(typeof FCHECK!=='undefined') FCHECK.recompute(); }catch(_){}
-  }
-
   /* ════════ v4.140 · HỎI NHÂN VIÊN KHI KHÔNG CHẮC ĐÓ CÓ PHẢI MỘT ĐƠN KHÔNG ════════
      Chỉ hiện khi computeDiff gặp cặp mơ hồ:
        kind 'moved' — trùng khách + xe + tài xế, CHỈ LỆCH cột No (sale chèn dòng
@@ -4511,14 +4358,14 @@ function _makePlanModule(opts){
     openPaste, closePaste, submitPaste,
     closeChoice, runChoice,
     closeDiff, confirmDiff,
-    clearAll, requestDeleteRow, exportCsv,
+    clearAll, requestDeleteRow,
     createTempDO, toggleRowSync,
     autoSet, refreshStatus,
     setPlanDate, toggleDateSel, clearDateSel,
     _clearDatesActual,
     findTempOrderByVehicle, findTempOrderStrict, renameOid,
-    /* v4.139 — don dong trung + khoa dinh danh (test dung truc tiep) */
-    dedupOpen, dedupClose, dedupApply, dedupScan, _identKey, _isJunkRow,
+    /* v4.139 — khoa dinh danh (test dung truc tiep) · v4.231 gỡ dedup* */
+    _identKey, _isJunkRow,
     /* v4.140 — hộp thoại xác nhận "một đơn hay hai đơn" */
     ambSet, ambSetAll, ambConfirm, ambCancel,
     cxTick, _cxScan, _cxWhy, _cxApply, _parse: parsePlanSheet,   /* v4.183 */
@@ -4699,10 +4546,15 @@ const PLANDAY = (function(){
    các dòng cùng ô gộp) để sau này dựng luật xử lý thông minh (vd. một xe hai
    loại hàng — cố định số tấn một loại, GI phần còn lại vào loại kia).
    Chỉ GOM + PHÂN LOẠI THÔ, chưa tự đổi dữ liệu nào (trừ Cancel ở trên).
-   Firebase: đọc cả node MỘT lần/phiên lúc dán đầu tiên; mỗi mẫu tối đa một
-   lần ghi mỗi ngày.                                                         */
+   ⭐ v4.231 — CHỈ GHI, KHÔNG BAO GIỜ ĐỌC. App không tải node này (kể cả lúc
+   dán); gỡ luôn nút 📝 Sale notes. Mỗi lần dán ghi thẳng theo đường dẫn:
+     sale_notes/<khoá>/{pat, kinds, ex}        — ghi đè (ex = câu chữ mới nhất)
+     sale_notes/<khoá>/days/<ngày> = true      — số ngày gặp = số khoá days
+     sale_notes/<khoá>/eg/<ngày>_<biển số>     — ví dụ đủ ngữ cảnh
+   Cần phân tích thì admin ⚙ ▸ ⬇ Download JSON rồi đưa file cho Claude đọc.
+   (Bản ghi cũ trước v4.231 còn các trường n / first / last — giữ nguyên.)    */
 const SNOTE = (function(){
-  const FB = 'sale_notes', EG_MAX = 12;
+  const FB = 'sale_notes';
   const KINDS = [
     ['cancel',      { test:s => (typeof TP !== 'undefined' && TP._cxText) ? TP._cxText(s) : /\bcancel|hủy|huỷ/i.test(s) }, 'Cancelled — truck will not come'],
     ['split',       null,                                                'One truck, several cargo types / fixed tonnage'],
@@ -4748,17 +4600,7 @@ const SNOTE = (function(){
   }
   function pattern(note){ return String(note || '').trim().replace(/\s+/g, ' ').toLowerCase().replace(/\d+([.,]\d+)?/g, '#'); }
   function keyOf(pat){ let h = 5381; for(let i = 0; i < pat.length; i++) h = ((h << 5) + h + pat.charCodeAt(i)) >>> 0; return 'n' + h.toString(36); }
-  let C = null, _loading = null;
   const _db = () => (typeof firebase !== 'undefined' && firebase.database) ? firebase.database() : null;
-  function load(){
-    if(C) return Promise.resolve(C);
-    if(_loading) return _loading;
-    const db = _db(); if(!db) return Promise.resolve({});
-    _loading = db.ref(FB).once('value').then(s => { C = s.val() || {}; return C; })
-      .catch(e => { console.warn('[SNOTE] load', e); C = null; return {}; })
-      .finally(() => { _loading = null; });
-    return _loading;
-  }
   /* rows = dòng vừa dán (parsePlanSheet), theo thứ tự trong file. Gom khối ô gộp. */
   function blocks(rows){
     const out = [];
@@ -4774,70 +4616,22 @@ const SNOTE = (function(){
   function collect(rows, date){
     const db = _db(); if(!db || !date) return Promise.resolve(0);
     const bl = blocks(rows); if(!bl.length) return Promise.resolve(0);
-    return load().then(cache => {
-      if(!C) return 0;
-      const payload = {};
-      let n = 0;
-      bl.forEach(b => {
-        const pat = pattern(b.note), key = keyOf(pat), kinds = classify(b.note);
-        const r0 = b.rows[0], egk = date + '_' + (String(r0.plate || r0.no || 'x').replace(/[^A-Za-z0-9]/g, '') || 'x');
-        const eg = { d:date, c:String(r0.customer||''), t:String(r0.type||''), note:b.note,
-                     rows:b.rows.slice(0, 4).map(r => ({ no:String(r.no||''), p:String(r.plate||''), do:String(r.doNum||''), t:String(r.type||''), q:String(r.qty||'') })) };
-        const px = kinds.indexOf('split') >= 0 ? parseSplit(b.note) : null;
-        if(px) eg.px = px;
-        const rec = C[key];
-        if(!rec){
-          const nr = { pat, kinds:kinds.join(','), n:1, first:date, last:date, ex:b.note, eg:{ [egk]:eg } };
-          C[key] = nr; payload[FB + '/' + key] = nr; n++; return;
-        }
-        const egs = rec.eg || (rec.eg = {});
-        if(rec.last !== date && date > (rec.last || '')){ rec.n = (rec.n || 0) + 1; rec.last = date; payload[FB + '/' + key + '/n'] = rec.n; payload[FB + '/' + key + '/last'] = date; n++; }
-        if(!egs[egk] && Object.keys(egs).length < EG_MAX){ egs[egk] = eg; payload[FB + '/' + key + '/eg/' + egk] = eg; n++; }
-      });
-      if(!n) return 0;
-      return db.ref().update(payload).then(() => n).catch(e => { console.warn('[SNOTE] write', e); return 0; });
+    const payload = {};
+    bl.forEach(b => {
+      const pat = pattern(b.note), key = keyOf(pat), kinds = classify(b.note);
+      const r0 = b.rows[0], egk = date + '_' + (String(r0.plate || r0.no || 'x').replace(/[^A-Za-z0-9]/g, '') || 'x');
+      const eg = { d:date, c:String(r0.customer||''), t:String(r0.type||''), note:b.note,
+                   rows:b.rows.slice(0, 4).map(r => ({ no:String(r.no||''), p:String(r.plate||''), do:String(r.doNum||''), t:String(r.type||''), q:String(r.qty||'') })) };
+      const px = kinds.indexOf('split') >= 0 ? parseSplit(b.note) : null;
+      if(px) eg.px = px;
+      const P = FB + '/' + key + '/';
+      payload[P + 'pat'] = pat; payload[P + 'kinds'] = kinds.join(','); payload[P + 'ex'] = b.note;
+      payload[P + 'days/' + date] = true;
+      payload[P + 'eg/' + egk] = eg;
     });
+    return db.ref().update(payload).then(() => bl.length).catch(e => { console.warn('[SNOTE] write', e); return 0; });
   }
-  /* ── xem sổ (Today Plan ▸ 📝 Sale notes) ── */
-  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  let _el = null, _q = '', _open = {};
-  function open(){
-    if(!_el){
-      _el = document.createElement('div'); _el.className = 'sn-ov';
-      _el.innerHTML = '<div class="sn-box"><div class="sn-hd"><b>📝 Sale notes — collected from pasted plans</b>'+
-        '<input class="sn-q" placeholder="filter: cancel, split, customer…" oninput="SNOTE._filter(this.value)">'+
-        '<span style="flex:1"></span><button class="btn" onclick="SNOTE.close()">✕</button></div><div class="sn-bd" id="snBody">Loading…</div></div>';
-      document.body.appendChild(_el);
-      _el.addEventListener('mousedown', e => { if(e.target === _el) close(); });
-    }
-    _el.classList.add('on');
-    C = null; load().then(render);
-  }
-  function close(){ if(_el) _el.classList.remove('on'); }
-  function render(){
-    const b = document.getElementById('snBody'); if(!b) return;
-    const L = KINDS.reduce((o, k) => (o[k[0]] = k[2], o), { other:'Not classified yet' });
-    const order = KINDS.map(k => k[0]).concat(['other']);
-    const q = _q.toLowerCase();
-    const list = Object.keys(C || {}).map(k => Object.assign({ key:k }, C[k])).filter(r => !q ||
-      (r.pat + ' ' + r.kinds + ' ' + Object.values(r.eg || {}).map(e => e.c + ' ' + e.t).join(' ')).toLowerCase().indexOf(q) >= 0)
-      .sort((a, b) => order.indexOf(String(a.kinds).split(',')[0]) - order.indexOf(String(b.kinds).split(',')[0]) || (b.n || 0) - (a.n || 0));
-    if(!list.length){ b.innerHTML = '<i>No notes collected yet — they are gathered every time a plan is pasted.</i>'; return; }
-    b.innerHTML = '<div class="sn-cap">'+list.length+' note patterns · a pattern = same text with numbers replaced by #. Examples keep customer, cargo type, trucks and DOs of the merged cell.</div>'+
-      '<table class="sn-tbl"><tr><th>Kind</th><th>Note (latest wording)</th><th>Days</th><th>First → last</th><th>Examples</th></tr>'+
-      list.map(r => {
-        const eg = Object.values(r.eg || {}).sort((a, b) => a.d < b.d ? 1 : -1);
-        const on = !!_open[r.key];
-        return '<tr><td>'+String(r.kinds||'').split(',').map(k => '<span class="sn-k sn-'+esc(k)+'" title="'+esc(L[k]||k)+'">'+esc(k)+'</span>').join(' ')+'</td>'+
-          '<td>'+esc(r.ex || r.pat)+'</td><td style="text-align:center">'+(r.n||0)+'</td><td style="white-space:nowrap">'+esc(r.first)+' → '+esc(r.last)+'</td>'+
-          '<td><a href="#" onclick="SNOTE._tog(\''+r.key+'\');return false">'+eg.length+' ▾</a>'+(on ? eg.map(e =>
-            '<div class="sn-eg"><b>'+esc(e.d)+'</b> · '+esc(e.c)+' · '+esc(e.t)+'<br>'+(e.rows||[]).map(x => 'No '+esc(x.no)+' '+esc(x.p)+' DO '+esc(x.do||'—')+' '+esc(x.t)+' '+esc(x.q)+' MT').join('<br>')+
-            (e.px ? '<br><span class="sn-px">parsed: '+esc((e.px.fixed||[]).map(f => f.mt+' MT '+(f.type||'?')).join(' + '))+(e.px.rest ? ' · rest → '+esc(e.px.rest) : '')+'</span>' : '')+'</div>').join('') : '')+'</td></tr>';
-      }).join('')+'</table>';
-  }
-  function _filter(v){ _q = String(v||''); render(); }
-  function _tog(k){ _open[k] = !_open[k]; render(); }
-  return { collect, classify, parseSplit, pattern, keyOf, blocks, open, close, _filter, _tog, KINDS, _set:v => { C = v; } };
+  return { collect, classify, parseSplit, pattern, keyOf, blocks, KINDS };
 })();
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -4951,7 +4745,7 @@ const ADMSET = (function(){
   const NODES = [
     ['ai_log',     '🧠 Sale-note decisions', 'Every suggestion made from sales notes at paste time (cancel, alternate trucks, multi-DO) and what the user accepted, rejected or edited. Write-only — the app never reads it back.'],
     ['plan_cx',    '🕳 Trucks missing from Today Plan', 'Confirmed at Today Plan paste (counted as cancelled trips in the Daily report). Cleared automatically after the P2 mail is sent AND the Daily file is exported, or after 3 days.'],
-    ['sale_notes', '📝 Sale notes log',      'Sales notes (column M) grouped by pattern, with examples. Read when 📝 Sale notes is opened and at the first paste of a session.']
+    ['sale_notes', '📝 Sale notes log',      'Sales notes (column M) grouped by pattern, with examples. Written at every plan paste; the app never reads it back — download the JSON here to analyse.']
   ];
   function open(){
     if(!isAdmin()){ try{ toast('⚙ Settings — administrators only', 'er'); }catch(_){} return; }
@@ -4976,7 +4770,7 @@ const ADMSET = (function(){
     if(!isAdmin()) return;
     if(!confirm('Delete ALL data in "' + k + '"?\n\nDownload it first if you may need it — this cannot be undone.')) return;
     if(!confirm('Really delete every record of "' + k + '"?')) return;
-    AILOG.clear(k).then(() => { toast('🗑 ' + k + ' cleared', 'ok'); try{ if(k === 'sale_notes' && SNOTE._set) SNOTE._set(null); }catch(_){} })
+    AILOG.clear(k).then(() => { toast('🗑 ' + k + ' cleared', 'ok'); })
       .catch(e => toast('Delete failed: ' + e.message, 'er'));
   }
   return { open, close, dl, del, isAdmin };
@@ -4992,13 +4786,9 @@ function tpCloseDiff(){ TP.closeDiff(); }
 function tpConfirmDiff(){ TP.confirmDiff(); }
 function tpClearAll(){ TP.clearAll(); }
 function tpRequestDeleteRow(r){ TP.requestDeleteRow(r); }
-function tpExportCsv(){ TP.exportCsv(); }
 function tpCreateTemp(){ TP.createTempDO(); }
 /* v4.109 — 🔗 LINK ORDERS (Today Plan) */
 function tpOpenLink(){ TP.openLink(); }
-/* v4.139 — 🧹 don dong trung da nam tren Firebase */
-function tpDedup(){ TP.dedupOpen(); }
-function tmrDedup(){ TMR.dedupOpen(); }
 function tpToggleRowSync(oid){ TP.toggleRowSync(oid); }
 function tpChangePlanDate(iso){ TP.setPlanDate(iso); }
 function tpToggleDate(iso){ TP.toggleDateSel(iso); }
@@ -5015,7 +4805,6 @@ function tmrCloseDiff(){ TMR.closeDiff(); }
 function tmrConfirmDiff(){ TMR.confirmDiff(); }
 function tmrClearAll(){ TMR.clearAll(); }
 function tmrRequestDeleteRow(r){ TMR.requestDeleteRow(r); }
-function tmrExportCsv(){ TMR.exportCsv(); }
 function tmrCreateTemp(){ TMR.createTempDO(); }
 function tmrToggleRowSync(oid){ TMR.toggleRowSync(oid); }
 function tmrChangePlanDate(iso){ TMR.setPlanDate(iso); }

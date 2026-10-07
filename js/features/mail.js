@@ -1,5 +1,15 @@
 /* ============================================================
- * MAIL — mail.js  (v4.226)
+ * MAIL — mail.js  (v4.235)
+ * v4.235: 👥 Recipients ▸ ✉ By mail — người TRÙNG giữa các dòng (cùng email: đã ở TO mà nhóm CC cũng có,
+ *         hoặc ở hai nhóm) bị GẠCH tên + badge "⚠ N already in TO" / "ℹ N also in Gx". Thư vẫn chỉ ghi một
+ *         lần như trước (TO thắng CC, lọc theo email) — badge để user thấy và tự tắt cho gọn.
+ * v4.234: P1 theo chỉ đạo Mr. Kim (06/10/2026) — thư GỬI THÔNG TIN mixing cho lab (Ms. Anh), không
+ *         phải báo cáo gửi sếp, cũng KHÔNG phải thư yêu cầu (lúc gửi chưa có COQ, có COQ thì lab đã lấy
+ *         mẫu rồi). Câu văn theo mẫu thư "LPG Mixing Lot" cũ: "Kindly send you the LPG mixing information
+ *         of lot … as below:". Tiêu đề "[LPGT] LPG Mixing Lot …". Lời chào lấy theo người ở ô To (một
+ *         người ⇒ "Dear Ms. Anh,", nhiều người ⇒ "Dear Sir,"). Người nhận: user tự chọn ở 👥 Recipients.
+ *         (v4.233 bản "Request for LPG Analysis" đã bỏ.)
+ *         Hộp thư nhóm (title 'Group mailbox') không bị tô đỏ "không có trong danh bạ công ty".
  * v4.226: P3 biểu đồ — có file Excel dew point ⇒ MẶC ĐỊNH vẽ từ dữ liệu biểu đồ của file (cùng dòng, cùng khoảng ngày từ
  *         dòng đầu, nhãn 10 ngày, không vạch −45, ô trống đứt đường); file chưa có ngày báo cáo ⇒ nhắc ▶ Fill. Ô 📈 Chart
  *         vẫn chọn được "App history · 6M/1Y/16M/2Y" (lịch sử Firebase, cửa sổ kết thúc ở ngày báo cáo).
@@ -226,6 +236,8 @@ const MAIL = (function(){
       o.lvl3 = _v2L(o.fill3, K.r); o.lvl4 = _v2L(o.fill4, K.r);
     }
     o.temp = num(r[31]); o.pres = num(r[32]); o.dens = num(r[33]);
+    /* v4.236 — thể tích bồn đọc được lúc dừng C4 / C3 + thể tích đã bơm (cùng hàm với Tank Log) */
+    o.x = null; try{ if(typeof ENG !== 'undefined' && ENG.xferOf) o.x = ENG.xferOf(r); }catch(_){}
     o.r3 = rC3; o.r4 = rC4;
     if(rC3 !== null && Vf){
       o.liq3 = Vf * rC3; o.liq4 = Vf * rC4;
@@ -331,6 +343,9 @@ const MAIL = (function(){
     { k:'tv',  lbl:'Target volume',    where:'Tank Log', ok:(r,c) => !!c.TV },
     { k:'t3',  lbl:'Target C3%',       where:'Tank Log', ok:(r,c) => c.t3 != null },
     { k:'fv',  lbl:'Final volume',     where:'Tank Log', ok:(r,c) => c.Vf > 0 },
+    /* v4.236 — chỉ đạo giám đốc: ghi thể tích sau khi dừng từng sản phẩm */
+    { k:'xs',  lbl:'Volume after C4/C3 transfer finish', where:'🧮 Tank ▸ 📏 ACTUAL STOP / Tank Log',
+      ok:(r,c) => !c.x || c.x.v4 !== null || c.x.v3 !== null },
     { k:'gc',  lbl:'GC result',        where:'Tank Log', ok:(r,c) => !!c.gcSum },
     { k:'temp',lbl:'Temperature',      where:'here / Tank Log', ok:(r,c) => c.temp != null },
     { k:'pres',lbl:'Pressure',         where:'here / Tank Log', ok:(r,c) => c.pres != null },
@@ -377,6 +392,14 @@ const MAIL = (function(){
     row('Initial ratio C3 / C4', '%vol', c => pair(c.i3, c.i3 == null ? null : 1 - c.i3, 2));
     row('Target volume', 'm&sup3;', c => fmt(c.TV,0));
     row('Target ratio C3 / C4', '%vol', c => pair(c.t3, c.t3 == null ? null : 1 - c.t3, 0));
+    /* v4.236 — thể tích bồn sau khi KẾT THÚC từng lần bơm (đọc thật) + thể tích đã bơm.
+       Bơm một sản phẩm ⇒ dòng của sản phẩm kia in "-" (không phải thiếu số). */
+    sec('TRANSFER — TANK VOLUME AFTER EACH TRANSFER');
+    const xv = (c, k) => !c.x ? '' : c.x[k] !== null ? fmt(c.x[k],3) : (c.x.single ? '-' : '');
+    row('Volume after C4 transfer finish', 'm&sup3;', c => xv(c, 'v4'));
+    row('Volume after C3 transfer finish', 'm&sup3;', c => xv(c, 'v3'));
+    row('Pumped volume C3 / C4', 'm&sup3;', c => (!c.x || (c.x.p3 === null && c.x.p4 === null)) ? ''
+      : (c.x.p3 === null ? '-' : fmt(c.x.p3,3)) + ' / ' + (c.x.p4 === null ? '-' : fmt(c.x.p4,3)), 'font-weight:bold;');
     sec('RESULT — 1 HOUR AFTER MIXING');
     row('Final volume', 'm&sup3;', c => fmt(c.Vf,3));
     row('Temperature', '&deg;C', c => fmt(c.temp,2));
@@ -404,7 +427,8 @@ const MAIL = (function(){
     const sh = shiftOf(lots);
     const nums = lots.map(r => lotTail(r[1]));
     const lotLbl = lots.length ? 'LPG-' + (String(lots[0][1]).match(/\d{4}/) || [ST.date.slice(0,4)])[0] + '-' + nums.join(', ') : '(no lot)';
-    const subject = '[LPGT] Ball Tank Mixing Report – ' + lotLbl + ' – ' + ST.date + (sh ? ' (' + sh + ' shift)' : '');
+    /* v4.234 — thư gửi thông tin mixing cho lab, tiêu đề theo mẫu thư "LPG Mixing Lot" cũ */
+    const subject = '[LPGT] LPG Mixing Lot ' + lotLbl + ' – ' + ST.date + (sh ? ' (' + sh + ' shift)' : '');
     const warn = [];
     /* ⭐ bảng DỮ LIỆU BẮT BUỘC theo từng lot — hiện ở cổng xác nhận (lot × ô).
        REQ_P1[i].block = true ⇒ thiếu là KHÔNG cho mở/tải thư (để sẵn, hiện chưa bật). */
@@ -424,8 +448,9 @@ const MAIL = (function(){
     miss.forEach(m => REQ_P1.forEach(q => { if(!m.has[q.k]) warn.push(esc(m.lot)+': '+q.lbl+' missing.'); }));
     const block = [];
     miss.forEach(m => REQ_P1.forEach(q => { if(q.block && !m.has[q.k]) block.push(esc(m.lot)+': '+q.lbl+' is required.'); }));
-    let b = greet('Dear Sir,');
-    b += para('I would like to send the Ball Tank Mixing result on '+(sh ? sh+' shift ' : '')+'<span style="color:#1f4e79">'+longDate(ST.date)+'</span> as below.');
+    let b = greet(_dearTo('P1', 'Dear Sir,'));
+    b += para('Kindly send you the LPG mixing information of lot <span style="color:#1f4e79">'+esc(lotLbl)+'</span> on '+
+      (sh ? sh+' shift, ' : '')+'<span style="color:#1f4e79">'+longDate(ST.date)+'</span> as below:');
     b += bullet('LPG mixing lot information:');
     b += lotTable(lots);
     if(lots.length){ b += bullet('Mixing details:'); b += detailTable(lots); }
@@ -1498,7 +1523,7 @@ const MAIL = (function(){
   }
 
   const REPORTS = {
-    P1:{ ttl:'Ball Tank Mixing Report', sub:'E1 DCS + E2 Mixing Lot merged · Tank Log', build:buildP1 },
+    P1:{ ttl:'LPG Mixing Lot (Ball Tank)', sub:'Mixing information to the lab · Tank Log', build:buildP1 },
     P2:{ ttl:'Daily LPG Loading Report', sub:'TL Data · WMS ST · SAP · Today Plan + Daily Stock file', build:buildP2 },
     P3:{ ttl:'Propane Dew Point', sub:'Readings saved to dew point history', build:buildP3 },
     P4:{ ttl:'Terminal Weekly Report', sub:'TL Data + Tank Log of the week', build:buildP4 },
@@ -1591,6 +1616,19 @@ const MAIL = (function(){
     return { to:toF, cc:ccF, noMail };
   }
   function addr(id){ const p = P(id); return p.n + ' <' + p.e + '>'; }
+  /* v4.233/4.234 — lời chào theo người ở ô To: đúng MỘT người ⇒ "Dear Ms. Anh," (người Hàn lấy họ: "Dear Mr. Kim,");
+     nhiều người / hộp thư nhóm ⇒ dùng câu mặc định */
+  const _KR = /^(Kim|Hwang|Yoon|Yun|Jo|Cho|Woo|Cha|Jang|Lee|Park|Choi|Jung|Kang|Shin|Han|Oh|Seo|Kwon|Song|Ahn|Hong|Yoo|Ko|Moon|Yang|Son|Bae|Baek|Heo|Nam|Noh|Jeon)$/i;
+  function _dearTo(rep, dflt){
+    try{
+      const r = recipients(rep); if(r.to.length !== 1) return dflt;
+      const p = P(r.to[0]); if(!p || _isBox(p)) return dflt;
+      const w = String(p.n || '').trim().split(/\s+/).filter(Boolean); if(!w.length) return dflt;
+      const nm = _KR.test(w[0]) ? w[0] : w[w.length - 1];
+      const t = /^f/i.test(p.sex || '') ? 'Ms. ' : /^m/i.test(p.sex || '') ? 'Mr. ' : '';
+      return 'Dear ' + t + esc(nm) + ',';
+    }catch(_){ return dflt; }
+  }
   /* v4.181 — BỎ CHỮ KÝ: Outlook của mọi người đã cài chữ ký sẵn ⇒ thân thư không kèm chữ ký. */
 
   /* ═════════════════ XUẤT: .eml · clipboard · mailto ═════════════════ */
@@ -2134,10 +2172,10 @@ const MAIL = (function(){
     }
     list.forEach(({ p, i, ci }) => {
       /* dò người nghỉ việc: tính trong RAM từ danh bạ công ty (không đọc thêm Firebase) */
-      const flag = crow && p.e && !/^vc9d20@/i.test(p.e) && !ci ? ' ml-rc-miss' : '';
+      const flag = crow && p.e && !_isBox(p) && !ci ? ' ml-rc-miss' : '';
       const na = '<span class="ml-cap" title="'+(crow ? 'Not in the company contact list' : 'Company contact list not loaded')+'">—</span>';
       /* v4.182 — chưa có trong danh bạ công ty ⇒ nút 📇+ mở form thêm tay, điền sẵn tên/email/chức danh */
-      const addCt = can && crow && !ci && !/^vc9d20@/i.test(p.e||'') ? ' <a class="ml-rc-ic" title="Not in the company contact list — add this person to it by hand" onclick="MAIL.ctNewFrom('+i+')">📇+</a>' : '';
+      const addCt = can && crow && !ci && !_isBox(p) ? ' <a class="ml-rc-ic" title="Not in the company contact list — add this person to it by hand" onclick="MAIL.ctNewFrom('+i+')">📇+</a>' : '';
       h += '<tr class="'+flag+'"><td style="white-space:nowrap"><input value="'+esc(p.n)+'"'+dis+' onchange="MAIL.rcSet('+i+',\'n\',this.value)">'+addCt+'</td>'+
         (HD.dept ? '' : '<td class="ml-rc-ro" title="'+esc(ci && ci.dept || '')+'">'+(ci && ci.dept ? esc(ci.dept) : na)+'</td>')+
         (HD.pos ? '' : '<td class="ml-rc-ro" title="'+esc(ci && ci.pos || '')+'">'+(ci && ci.pos ? esc(ci.pos) : na)+'</td>')+
@@ -2176,7 +2214,9 @@ const MAIL = (function(){
     const ex = f => { const o = []; rt[f].forEach(r => (c.GROUPS[r] ? c.GROUPS[r].ids : [r]).forEach(id => { if(!seen[id] && _rcPerson(id)){ seen[id] = 1; o.push(id); } })); return o; };
     const to = ex('to'); return { to, cc:ex('cc') };
   }
-  function _rcMiss(p){ const CT = (typeof CONTACTS !== 'undefined') ? CONTACTS : null; return !!(CT && CT.rows() && p && p.e && !/^vc9d20@/i.test(p.e) && !_ctInfo(p)); }
+  /* v4.233 — hộp thư nhóm (lpg.cavern, vc9Q10, LPG.Domestic, vc9D20…) không có trong Contact List là bình thường */
+  function _isBox(p){ return !!p && (/group mailbox/i.test(p.title || '') || /^vc9d20@/i.test(p.e || '')); }
+  function _rcMiss(p){ const CT = (typeof CONTACTS !== 'undefined') ? CONTACTS : null; return !!(CT && CT.rows() && p && p.e && !_isBox(p) && !_ctInfo(p)); }
   function _rcPName(p, withMail){
     return '<a class="ml-rv-pn'+(_rcMiss(p) ? ' miss' : '')+'" title="See every group and mail of '+esc(p.n)+'" onclick="MAIL.rcFind(\''+esc(p.id)+'\')">'+esc(p.n || '(no name)')+'</a>'+
       (withMail ? ' <span class="ml-cap">'+(p.e ? esc(p.e) : '<span style="color:#b45309">no email</span>')+'</span>' : '');
@@ -2298,20 +2338,46 @@ const MAIL = (function(){
     const k = ST.rcSelM, rt = _rcRt(k), R0 = RP(k, c);
     h += '<div class="ml-rv-main"><div class="ml-rc-hd"><b class="ml-rv-ttl">'+k+' · '+esc(R0.ttl)+'</b><span style="flex:1"></span>'+
       (R0.custom && can ? '<button class="ml-mini" onclick="MAIL.rcMailRen(\''+k+'\')">✎ Rename</button> <button class="ml-mini" onclick="MAIL.rcMailDel(\''+k+'\')">✕ Delete mail</button>' : '')+'</div>';
+    /* v4.235 — NGƯỜI TRÙNG giữa các dòng (cùng email): người đã ở TO mà nhóm CC cũng có, hoặc có ở hai nhóm.
+       Thư vẫn chỉ ghi MỘT lần (recipients(): TO thắng CC, lọc trùng theo email) — ở đây GẠCH tên trùng và gắn
+       badge để user thấy, muốn gọn thì tắt nhóm/người đó. Hộp thư nhóm (lpg.cavern…) app không biết bên trong
+       có ai nên không dò được trùng với nó. */
+    const _first = {}, _dup = {};          /* email → { f, r } dòng đầu tiên có người này · khoá dòng → [{p, by}] */
+    const _mk = p => String(p.e || p.id).toLowerCase();
+    ['to','cc'].forEach(f => rt[f].forEach(r => {
+      const ps = c.GROUPS[r] ? c.GROUPS[r].ids.map(_rcPerson).filter(Boolean) : [_rcPerson(r)].filter(Boolean);
+      ps.forEach(p => { const e = _mk(p), at = _first[e];
+        if(at && !(at.f === f && at.r === r)) (_dup[f+':'+r] = _dup[f+':'+r] || []).push({ p, by:at });
+        else if(!at) _first[e] = { f, r }; });
+    }));
+    const _isDup = (f, r, p) => (_dup[f+':'+r] || []).some(d => d.p === p);
+    const _byLbl = by => by.f === 'to' ? 'TO' + (c.GROUPS[by.r] ? ' (' + by.r + ')' : '') : (c.GROUPS[by.r] ? by.r : 'direct CC');
+    const _dupBadge = (f, r) => {
+      const L = _dup[f+':'+r]; if(!L || !L.length) return '';
+      const inTo = L.filter(d => d.by.f === 'to'), other = L.filter(d => d.by.f !== 'to');
+      const B = (txt, tip, warn) => ' <span title="'+esc(tip)+'" style="display:inline-block;margin-left:4px;padding:0 6px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap;'+
+        (warn ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b' : 'background:#e0f2fe;color:#075985;border:1px solid #7dd3fc')+'">'+txt+'</span>';
+      return (inTo.length ? B('⚠ '+inTo.length+' already in TO', inTo.map(d => d.p.n).join(', ')+' — already in TO, so left out of CC: gets this mail ONCE. Remove the duplicate if you want a clean list.', 1) : '')+
+        (other.length ? B('ℹ '+other.length+' also in '+Array.from(new Set(other.map(d => _byLbl(d.by)))).join(', '), other.map(d => d.p.n+' (first in '+_byLbl(d.by)+')').join(', ')+' — listed once in the mail.', 0) : '');
+    };
+    const _nm = (f, r, p) => _isDup(f, r, p) ? '<s style="color:#9ca3af" title="Already in the mail through another row — sent once">'+esc(p.n)+'</s>' : esc(p.n);
     ['to','cc'].forEach(f => {
       h += '<div class="ml-rc-sec"><b class="ml-tag '+f+'">'+f.toUpperCase()+'</b></div>';
       if(!rt[f].length){ h += '<div class="ml-cap">— nobody —</div>'; return; }
       h += '<table class="ml-rc-tbl ml-rv-tbl">'+rt[f].map(r => {
         if(c.GROUPS[r]){
           const ids = c.GROUPS[r].ids.map(_rcPerson).filter(Boolean);
-          return '<tr><td style="white-space:nowrap"><a class="ml-rv-pn" onclick="MAIL.rcSel(\'G\',\''+r+'\');MAIL.rcTab(\'group\')" title="Open this group">👥 <b>'+r+'</b> '+esc(c.GROUPS[r].name)+'</a> <span class="ml-rc-n">('+ids.length+')</span></td>'+
-            '<td class="ml-cap">'+ids.map(p => esc(p.n)).join(', ')+'</td><td>'+_seg(k, r, f, can)+'</td></tr>';
+          return '<tr><td style="white-space:nowrap"><a class="ml-rv-pn" onclick="MAIL.rcSel(\'G\',\''+r+'\');MAIL.rcTab(\'group\')" title="Open this group">👥 <b>'+r+'</b> '+esc(c.GROUPS[r].name)+'</a> <span class="ml-rc-n">('+ids.length+')</span>'+_dupBadge(f, r)+'</td>'+
+            '<td class="ml-cap">'+ids.map(p => _nm(f, r, p)).join(', ')+'</td><td>'+_seg(k, r, f, can)+'</td></tr>';
         }
         const p = _rcPerson(r);
-        return '<tr><td style="white-space:nowrap">👤 '+(p ? _rcPName(p) : esc(r)+' <span class="ml-cap">(not in directory)</span>')+' <span class="ml-tag cc" title="Added to this mail directly, not through a group">direct</span></td>'+
+        return '<tr><td style="white-space:nowrap">👤 '+(p ? (_isDup(f, r, p) ? '<s style="color:#9ca3af">'+_rcPName(p)+'</s>' : _rcPName(p)) : esc(r)+' <span class="ml-cap">(not in directory)</span>')+' <span class="ml-tag cc" title="Added to this mail directly, not through a group">direct</span>'+_dupBadge(f, r)+'</td>'+
           '<td class="ml-cap">'+esc(p && p.e || '')+'</td><td>'+_seg(k, r, f, can)+'</td></tr>';
       }).join('')+'</table>';
     });
+    const _nDup = Object.keys(_dup).reduce((a, x) => a + _dup[x].length, 0);
+    if(_nDup) h += '<div class="ml-cap" style="margin:4px 0 6px">⚠ '+_nDup+' duplicate'+(_nDup > 1 ? 's' : '')+' across rows (struck through) — each person still gets this mail <b>once</b> (TO wins over CC). '+
+      'Group mailboxes (e.g. LPG Cavern) are expanded by Outlook, so the app cannot see who is inside them — turn off the single-person groups they already cover.</div>';
     if(can){
       const free = Object.keys(c.GROUPS).filter(g => !rt.to.includes(g) && !rt.cc.includes(g));
       if(free.length) h += '<div class="ml-rc-hd"><label class="ml-in">Add a group <select id="mlRvG">'+free.map(g => '<option value="'+g+'">'+g+' · '+esc(c.GROUPS[g].name)+'</option>').join('')+'</select></label>'+

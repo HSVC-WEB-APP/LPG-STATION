@@ -350,14 +350,15 @@ const SCX2 = (function(){
     let h = '<div class="scx2-brk-hd"><span>BY PRODUCT TYPE</span></div>'
           + '<div class="scx2-bt hd"><span>TYPE</span><span>PLAN</span><span>LOADED</span><span>REMAIN</span><span>TRIPS</span></div>';
     const tip = [];
+    const _tc = g => (g.tripCnt != null ? g.tripCnt : g.planCnt), _td = g => (g.tripDone != null ? g.tripDone : g.doneCnt);   /* v4.232 — số CHUYẾN XE */
     G.forEach(g => {
       const pL = g.planMT > 0 ? Math.min(1, g.loadedMT / g.planMT) : 0;
-      const t = g.type + ': plan ' + _f3(g.planMT) + ' · loaded ' + _f3(g.loadedMT) + ' · remain ' + _f3(g.remainMT) + ' MT · ' + g.doneCnt + '/' + g.planCnt + ' trips';
+      const t = g.type + ': plan ' + _f3(g.planMT) + ' · loaded ' + _f3(g.loadedMT) + ' · remain ' + _f3(g.remainMT) + ' MT · ' + _td(g) + '/' + _tc(g) + ' trips';
       tip.push(t);
       h += '<div class="scx2-br'+(g.special ? ' sp' : '')+(g.type === '50:50 ?' ? ' unk' : '')+'" title="'+_esc(t + (g.type === '50:50 ?' ? ' — Sale Plan has no type; printed as 50:50' : ''))+'">'
          +   '<div class="scx2-bt"><span class="ty">'+(g.special ? '⚠ ' : '')+_esc(g.type)+'</span>'
          +     '<span class="n">'+_f3(g.planMT)+'</span><span class="n ld">'+_f3(g.loadedMT)+'</span>'
-         +     '<span class="n rm">'+_f3(g.remainMT)+'</span><span class="n tr">'+g.doneCnt+'/'+g.planCnt+'</span></div>'
+         +     '<span class="n rm">'+_f3(g.remainMT)+'</span><span class="n tr">'+_td(g)+'/'+_tc(g)+'</span></div>'
          +   '<div class="scx2-bar"><i style="width:'+(g.planMT / max * 100).toFixed(1)+'%"><b style="width:'+(pL * 100).toFixed(1)+'%"></b></i></div>'
          + '</div>';
     });
@@ -368,12 +369,12 @@ const SCX2 = (function(){
          + '<div class="scx2-bt hd"><span>TRADE</span><span>PLAN</span><span>LOADED</span><span>REMAIN</span><span>TRIPS</span></div>';
       trades.forEach(g => {
         const pL = g.planMT > 0 ? Math.min(1, g.loadedMT / g.planMT) : 0;
-        const t = g.type + ': plan ' + _f3(g.planMT) + ' · loaded ' + _f3(g.loadedMT) + ' · remain ' + _f3(g.remainMT) + ' MT · ' + g.doneCnt + '/' + g.planCnt + ' trips';
+        const t = g.type + ': plan ' + _f3(g.planMT) + ' · loaded ' + _f3(g.loadedMT) + ' · remain ' + _f3(g.remainMT) + ' MT · ' + _td(g) + '/' + _tc(g) + ' trips';
         tip.push(t);
         h += '<div class="scx2-br tr-' + (g.dir === 'E' ? 'e' : 'd') + '" title="' + _esc(t) + '">'
            +   '<div class="scx2-bt"><span class="ty">' + _esc(g.type) + '</span>'
            +     '<span class="n">' + _f3(g.planMT) + '</span><span class="n ld">' + _f3(g.loadedMT) + '</span>'
-           +     '<span class="n rm">' + _f3(g.remainMT) + '</span><span class="n tr">' + g.doneCnt + '/' + g.planCnt + '</span></div>'
+           +     '<span class="n rm">' + _f3(g.remainMT) + '</span><span class="n tr">' + _td(g) + '/' + _tc(g) + '</span></div>'
            +   '<div class="scx2-bar"><i style="width:' + (g.planMT / tmax * 100).toFixed(1) + '%"><b style="width:' + (pL * 100).toFixed(1) + '%"></b></i></div>'
            + '</div>';
       });

@@ -5001,21 +5001,6 @@ table.tkc-exp tfoot td[id="tkcExpCnt"]{font-size:10px;letter-spacing:.5px;
 .nr-sum{font-size:10.5px;color:#92400e;margin-top:3px}.nr-warn{color:#b91c1c;font-size:10.5px}
 .adm-sec{border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;margin-bottom:8px}
 .adm-sec code{font-size:11px;color:#64748b}
-/* v4.183 — 📝 Sale notes (SNOTE) */
-.sn-ov{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:9000}
-.sn-ov.on{display:flex}
-.sn-box{width:min(1100px,95vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:10px;box-shadow:0 20px 50px rgba(0,0,0,.35);overflow:hidden}
-.sn-hd{display:flex;gap:10px;align-items:center;padding:10px 14px;background:#1f3864;color:#fff}
-.sn-q{width:260px;padding:3px 6px;border-radius:4px;border:0}
-.sn-bd{padding:10px 14px;overflow:auto;font-size:12px}
-.sn-cap{color:#64748b;margin-bottom:6px}
-.sn-tbl{border-collapse:collapse;width:100%}
-.sn-tbl th,.sn-tbl td{border:1px solid #e2e8f0;padding:3px 6px;vertical-align:top;text-align:left}
-.sn-tbl th{background:#f1f5f9}
-.sn-k{display:inline-block;font-size:10.5px;font-weight:700;border-radius:8px;padding:0 6px;background:#e2e8f0;color:#334155;margin:1px 0}
-.sn-k.sn-cancel{background:#fee2e2;color:#b91c1c}.sn-k.sn-split{background:#fef3c7;color:#92400e}.sn-k.sn-other{background:#ede9fe;color:#5b21b6}
-.sn-eg{border-top:1px dashed #e2e8f0;margin-top:3px;padding-top:3px;color:#334155}
-.sn-px{color:#92400e;font-weight:600}
 .ml-cx-w input,.ml-cx-w textarea{width:100%;box-sizing:border-box;font:12.5px/1.45 'Times New Roman',Times,serif}
 
 /* ============================================================
@@ -6038,3 +6023,75 @@ tr.dp-rdirty .dp-act .dp-sv,tr.dp-rdirty .dp-act .dp-dc{display:inline-block}
 .dp-xls .dx-top{stroke:#bfbfbf;stroke-width:1}
 .dp-xls .dx-hit:hover{fill:#1f2937}
 .dp-chartc .dp-rg+.dp-rg{margin-left:4px}
+
+/* ══ v4.236 — TANK LOG: cụm cột thu/mở (hàng tiêu đề cụm do ENG._cgApply dựng) ══ */
+.eng-tbl thead tr.eng-cgrow th{padding:3px 6px;font-size:9px;letter-spacing:.6px;font-weight:800;color:#475569;
+  background:#e6ebf1;border-bottom:1px solid #cfd8e3;border-right:2px solid #fff;white-space:nowrap;
+  text-align:left;cursor:pointer;user-select:none}
+.eng-tbl thead tr.eng-cgrow th.cg-h:hover{background:#d5dee9;color:#0f172a}
+.eng-tbl thead tr.eng-cgrow th.cg-base{cursor:default;background:var(--line-2);white-space:normal;padding:2px 4px}
+.eng-tbl .cg-acts{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.eng-tbl .cg-acts .cg-hint{font-weight:600;color:#94a3b8;letter-spacing:0;margin:0 2px}
+.eng-tbl .cg-acts button{font:inherit;font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 7px;border-radius:9px;
+  border:1px solid #cbd5e1;background:#fff;color:#475569;cursor:pointer;line-height:1.5}
+.eng-tbl .cg-acts button:hover{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
+.eng-tbl .cg-acts .cg-all{border-radius:4px;padding:0 5px;font-size:11px;line-height:1.3}
+.eng-tbl thead tr.eng-cgrow th.cg-xfer{background:#d9effc;color:#075985}
+.eng-tbl thead tr.eng-cgrow th.cg-fill{background:#fbe9d2;color:#8a4708}
+.eng-tbl thead tr.eng-cgrow th.cg-stx{background:#e3f1e8;color:#166534}
+.eng-tbl thead tr.eng-cgrow th.cg-coq{background:#efe4f7;color:#6b2382}
+.eng-tbl .cg-acts .cg-pill.cg-xfer{border-color:#7dd3fc;color:#075985}
+/* cụm TRANSFER VOL */
+.eng-tbl td.td-xf{background:#f0f9ff;font-variant-numeric:tabular-nums}
+.eng-tbl td.td-xf.k4,.eng-tbl td.td-xf-p.k4{color:var(--orange)}
+.eng-tbl td.td-xf.k3,.eng-tbl td.td-xf-p.k3{color:var(--blue)}
+.eng-tbl td.td-xf-ed{cursor:text}
+.eng-tbl td.td-xf-ed:hover{outline:1.5px solid #0ea5e9;outline-offset:-1.5px}
+.eng-tbl td.td-xf-ed input.eng-stx-inp{width:100%;box-sizing:border-box;height:18px;border:1.5px solid #0ea5e9;
+  border-radius:3px;padding:0 3px;margin:0;background:#fff;font-family:'JetBrains Mono',monospace;font-size:10px;
+  font-weight:700;text-align:right;color:#075985}
+.eng-tbl td.td-xf-ed input.eng-stx-inp:focus{outline:none;box-shadow:0 0 0 2px rgba(14,165,233,.2)}
+.eng-tbl td.td-xf-p{font-weight:700;background:#e9f6fd}
+.eng-tbl td.td-xf-p .xo{font-style:normal;font-size:8px;font-weight:600;color:#94a3b8;margin-left:2px}
+.eng-tbl td.td-xf-na{color:#c8d3de !important;text-align:center;font-weight:400}
+.eng-tbl td.td-xf-bad{background:#fef2f2 !important;color:#b91c1c !important}
+.eng-tbl .g-xf-l{border-left:2px solid #7dd3fc}
+.eng-tbl .g-xf-r{border-right:2px solid #7dd3fc}
+
+/* ══ v4.236 — 🧮 TANK: 📏 ACTUAL STOP (thể tích đọc lúc dừng C4 / C3) ══ */
+.mc-act{display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 10px;border:1.5px solid #bae6fd;
+  border-radius:6px;background:#f0f9ff}
+.mc-act.on{display:flex}
+.mc-act-ttl{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;font-weight:700;color:#075985;white-space:nowrap}
+.mc-act-flds{display:flex;gap:8px;align-items:center}
+.mc-act-f{display:flex;align-items:center;gap:4px;font-family:'Oswald',sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.5px;white-space:nowrap}
+.mc-act-f.c4{color:var(--orange)} .mc-act-f.c3{color:var(--blue)}
+.mc-act-f i{font-style:normal;font-family:inherit;font-size:9px;color:var(--ink-2);font-weight:500}
+.mc-act-f.dim{opacity:.35}
+.mc-act-inp{width:78px;font-family:monospace;font-size:13px;font-weight:700;text-align:right;padding:3px 6px;
+  border:1.5px solid #7dd3fc;border-radius:4px;background:#fff;color:#0f172a}
+.mc-act-f.c4 .mc-act-inp{border-color:#fdba74} .mc-act-f.c3 .mc-act-inp{border-color:#93c5fd}
+.mc-act-inp:focus{outline:none;box-shadow:0 0 0 2px rgba(14,165,233,.25)}
+.mc-act-inp.dirty{border-color:#f59e0b !important;background:#fffbeb}
+.mc-act-inp.mc-inp-bad{border-color:#dc2626 !important;background:#fef2f2}
+.mc-act-out{display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1;min-width:120px;font-size:11px}
+.mc-act-out .mc-x-hint{color:#64748b;font-size:10px}
+.mc-act-out .mc-x-p{padding:2px 8px;border-radius:4px;font-weight:600;white-space:nowrap}
+.mc-act-out .mc-x-p b{font-family:monospace;font-size:13px}
+.mc-act-out .mc-x-p.c4{background:var(--orange-soft);color:var(--orange)}
+.mc-act-out .mc-x-p.c3{background:var(--blue-soft);color:var(--blue)}
+.mc-act-out .mc-x-p.neg{background:#fee2e2;color:#b91c1c}
+.mc-act-out .mc-x-bad{color:#b91c1c;font-weight:700;font-size:10px}
+.mc-act-save{border:1.5px solid #7dd3fc;background:#fff;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:13px}
+.mc-act-save.dirty{border-color:#f59e0b;background:#fef3c7;box-shadow:0 0 0 2px rgba(245,158,11,.25)}
+.mc-act-save:hover{background:#e0f2fe}
+/* ══ v4.237 — ô ACTUAL nằm ngay trong thẻ STOP C4 / STOP C3; số dừng lấy từ FINAL VOL ══ */
+.mc-xhold{display:none}
+.mc-xslot{display:flex;align-items:center;flex:0 1 auto}
+.mc-xslot .mc-act-f{font-size:10px;letter-spacing:1px;color:var(--ink-2)}
+.mc-xslot .mc-act-inp{width:86px;font-size:15px;padding:4px 6px}
+.mc-xslot .mc-act-inp::placeholder{color:#94a3b8;font-size:11px;font-weight:600}
+.eng-tbl td.td-xf-fb{color:#94a3b8 !important;font-style:italic}
+/* số STOP tính toán giữ hàng trên, ô ACTUAL luôn nằm ngay dưới, căn phải — mọi cỡ màn hình như nhau */
+.mc-xslot{order:3;flex-basis:100%;justify-content:flex-end}

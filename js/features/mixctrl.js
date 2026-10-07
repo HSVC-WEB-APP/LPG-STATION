@@ -203,7 +203,9 @@ const MC = (function(){
      [69] gap C3 · [70] gap C4 · [71] adj ST C3 · [72] adj ST C4, đơn vị kg).
      PHẢI khớp ENG.ROW_W, nếu không mảng do MC dựng sẽ ngắn hơn và mọi ô
      đối chiếu đã lưu bị cắt mất khi MC ghi lại dòng. */
-  const ROW_W = 73;
+  /* v4.236 — 73 → 83 cho khớp ENG.ROW_W (thêm [81] Vol @ C4 stop · [82] Vol @ C3 stop).
+     Lệch số này thì mảng MC dựng ngắn hơn và các ô cuối phải nhờ upsertRow giữ hộ. */
+  const ROW_W = 83;
 
   /* v4.55 — COQ metadata captured on import (sampling time / analysis date) */
   const CQM = { '1':null, '2':null };
@@ -597,6 +599,7 @@ const MC = (function(){
       const el = _gid(id);
       if(el){ el.readOnly = locked; el.style.opacity = locked ? '.6' : '1'; }
     });
+    try{ _actRender(n); }catch(_){}   /* v4.236 */
   }
 
   function activate(n){
@@ -1404,6 +1407,7 @@ const MC = (function(){
     const dim2  = owDim === second ? _dim : '';
     const tag1  = owDim === first  ? ' <span style="font-size:9px;font-weight:800;color:var(--red)">NO PUMP</span>' : '';
     const tag2  = owDim === second ? ' <span style="font-size:9px;font-weight:800;color:var(--red)">NO PUMP</span>' : '';
+    const _xfoc = _actPark(n);   /* v4.237 — cất ô ACTUAL trước khi vẽ lại */
     resEl.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;margin-bottom:4px;border-bottom:1.5px solid rgba(0,0,0,.08);flex-wrap:wrap;gap:4px">'+
         '<span style="font-family:Oswald;font-size:14px;letter-spacing:1px;color:var(--ink-2)">'+
@@ -1425,15 +1429,18 @@ const MC = (function(){
         '<div style="display:flex;align-items:center;gap:4px;padding:3px 8px"><span style="font-family:Oswald;font-size:12px;color:var(--red);font-weight:700">LPG</span><span style="font-family:monospace;font-size:14px;font-weight:800;color:var(--red);margin-left:4px">'+_fmt(wC3 + wC4)+'</span><span style="font-size:9px;color:var(--ink-2)">ton</span></div>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">'+
-        '<div style="background:var(--panel);border-radius:6px;padding:8px 12px;border:2.5px dashed '+col1+';display:flex;align-items:center;justify-content:space-between'+dim1+'">'+
+        '<div style="background:var(--panel);border-radius:6px;padding:8px 12px;border:2.5px dashed '+col1+';display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 8px'+dim1+'">'+
           '<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+col1+'"></span><span style="font-family:Oswald;font-size:13px;letter-spacing:1.5px;color:var(--ink-2);font-weight:600">STOP '+first+tag1+'</span></div>'+
+          (dim1 ? '' : '<span class="mc-xslot" data-p="'+first+'"></span>')+
           '<div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:monospace;font-size:28px;font-weight:800;color:'+col1+'">'+_fmt(vAfter1,1)+'</span><span style="font-size:15px;color:var(--ink-2);font-weight:600">m³</span><span style="font-family:monospace;font-size:18px;font-weight:700;color:'+col1+';opacity:.6">'+_fmt(lvl1,0)+'</span><span style="font-size:12px;color:var(--ink-2)">mm</span></div>'+
         '</div>'+
-        '<div style="background:var(--panel);border-radius:6px;padding:8px 12px;border:2.5px dashed '+col2+';display:flex;align-items:center;justify-content:space-between'+dim2+'">'+
+        '<div style="background:var(--panel);border-radius:6px;padding:8px 12px;border:2.5px dashed '+col2+';display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 8px'+dim2+'">'+
           '<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+col2+'"></span><span style="font-family:Oswald;font-size:13px;letter-spacing:1.5px;color:var(--ink-2);font-weight:600">STOP '+second+tag2+'</span></div>'+
+          (dim2 ? '' : '<span class="mc-xslot" data-p="'+second+'"></span>')+
           '<div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:monospace;font-size:28px;font-weight:800;color:'+col2+'">'+_fmt(vAfter2,1)+'</span><span style="font-size:15px;color:var(--ink-2);font-weight:600">m³</span><span style="font-family:monospace;font-size:18px;font-weight:700;color:'+col2+';opacity:.6">'+_fmt(lvl2,0)+'</span><span style="font-size:12px;color:var(--ink-2)">mm</span></div>'+
         '</div>'+
       '</div>'+ owHTML + lpHTML;
+    _actMount(n, _xfoc);         /* v4.237 — gắn ô ACTUAL vào thẻ STOP */
     resEl.classList.add('on');
     CALC_SIG[n] = _calcSig(n);   /* v4.79 — chốt ảnh chụp đầu vào của kết quả này */
     /* Tank height hint (only update when in MANUAL mode — AUTO already shows "← TK-... Lot ...") */
@@ -1514,6 +1521,7 @@ const MC = (function(){
         const gcRes = _gid('mc-gcres'+n);
         if(gcRes) gcRes.classList.remove('on');
       }
+      try{ _actRender(n); }catch(_){}   /* v4.236 — thứ tự bơm / chế độ có thể vừa đổi */
     }, 350);
   }
 
@@ -1561,6 +1569,7 @@ const MC = (function(){
     _setFill(n, null);   /* v4.72: tắt chế độ chỉ bơm 1 sản phẩm */
     MIXING_LOT[n] = 0;
     GCR[n] = null;
+    _actClear(n);        /* v4.236 */
     updateLotNames();
     _renderStatus(n);
     toast('🗑 Reset '+tk,'ok');
@@ -1577,6 +1586,7 @@ const MC = (function(){
       fcirc: FILL_CIRC[n], fcpipe: _gv('mc-fcpipe'+n),   /* v4.74 */
       vpipe: _gv('mc-vpipe'+n), spvpipe: _gv('mc-spvpipe'+n), prec3: _gv('mc-prec3'+n),
       crMode: CR_MODE[n],
+      xc4: ACT_SAVED[n].c4, xc3: ACT_SAVED[n].c3,   /* v4.236 — chỉ số ĐÃ LƯU */
       by: (typeof CURRENT_USER !== 'undefined' ? CURRENT_USER.name : ''),
       _ts: Date.now()
     };
@@ -1607,6 +1617,8 @@ const MC = (function(){
     const v = snap.val();
     _remoteState[key] = v;
     const n = key === 'tk1' ? '1' : '2';
+    /* v4.236 — số dừng C4/C3 do máy khác lưu trong lúc đang mix */
+    if(v && typeof v === 'object' && (v.xc4 != null || v.xc3 != null)){ try{ _actFromRemote(n, v); }catch(_){} }
     if(v && typeof v === 'object' && v.lot){
       /* Another device says this tank is mixing — reflect locally
          only if WE aren't already mixing (don't clobber local input). */
@@ -1844,6 +1856,7 @@ const MC = (function(){
   }
 
   function autoGcRecalc(n){
+    try{ _actRender(n); }catch(_){}   /* v4.237 — FINAL VOL đổi ⇒ ô ACTUAL của sản phẩm bơm sau đổi theo */
     clearTimeout(_gcTimer[n]);
     _gcTimer[n] = setTimeout(()=>{
       const resEl = _gid('mc-gcres'+n);
@@ -2009,6 +2022,11 @@ const MC = (function(){
     if(formCrC3){ row[11] = formCrC3; row[12] = parseFloat((100 - formCrC3).toFixed(4)); }
     if(formTrC3) row[29] = formTrC3;
     if(formTV)   row[30] = formTV;
+    /* v4.236 — số đọc thể tích bồn lúc dừng C4 / C3 (ô 📏 ACTUAL STOP).
+       Ô trống ⇒ giữ số cũ của dòng (xoá thì bấm thẳng ô trên Tank Log). */
+    { const a = _xStr('mc-xc4'+n), b = _xStr('mc-xc3'+n);
+      if(a !== '' && _xOk(a)) row[XC.v4] = _xVal(a);
+      if(b !== '' && _xOk(b)) row[XC.v3] = _xVal(b); }
     if(quality === 'Pass' && gc.fLPG != null){
       row[6]  = gc.fvol;
       row[7]  = gc.qty;
@@ -2075,6 +2093,7 @@ const MC = (function(){
     catch(e){ console.warn('[MC] altWriteRow', e); }
     /* Push via ENG (one child write) — ENG handles rid generation/lookup */
     const rid = ENG.upsertRow(row, existing ? { rid: existing._rid } : null);
+    try{ _actMarkSaved(n); }catch(_){}
     _audit('tankmix:'+(quality==='Pass'?'save':'draft'), rid, 'quality', '', quality.toLowerCase(),
            'mc '+ (quality==='Pass'?'save pass':'save draft'));
     if(!silent) toast((quality==='Pass'?'💾 SAVED PASS':'💾 Draft saved')+' — '+lotStr+' '+tkName,'ok');
@@ -2156,8 +2175,18 @@ const MC = (function(){
     if(!c3h8) warns.push('• GC Propane = 0');
     if(!fvol) warns.push('• Final Volume not entered');
     if(!hasGc) warns.push('• 🧮 CALC not pressed on the GC section');
+    /* v4.236 — số đọc lúc dừng từng sản phẩm (bơm một sản phẩm thì chỉ cần ô đó) */
+    const _fm = FILL[n] || '';
+    /* v4.237 — chỉ bắt buộc số dừng của sản phẩm bơm TRƯỚC; sản phẩm bơm sau để trống ⇒ lấy FINAL VOL */
+    if(!_fm){ const _f1 = ORD[n] || 'C4';
+      if(!_xStr('mc-xc'+(_f1 === 'C4' ? '4' : '3')+n)) warns.push('• ACTUAL volume at STOP '+_f1+' (pumped first) not entered'); }
+    if(!_xOk(_xStr('mc-xc4'+n)) || !_xOk(_xStr('mc-xc3'+n))){
+      toast('❌ TK-'+tk+': 📏 ACTUAL STOP reading is not a number — fix it before ⏹FINISH','er'); return;
+    }
     if(warns.length){
-      if(!await UIDLG.ask('TK-'+tk+' — Finish without complete GC?\n\n'+warns.join('\n')+'\n\nRow will be saved as Quality = Pending.\n\nOK = save Pending  ·  Cancel = go back')) return;
+      if(!await UIDLG.ask('TK-'+tk+' — Finish with missing data?\n\n'+warns.join('\n')
+        +(hasGc ? '' : '\n\nRow will be saved as Quality = Pending.')
+        +'\n\nOK = save and finish  ·  Cancel = go back')) return;
     }
     /* v4.55 — verdict vs spec table decides Pass/Fail when GC is complete */
     let quality = 'Pending';
@@ -3924,6 +3953,142 @@ const MC = (function(){
   }
 
   /* ---------- public API ---------- */
+
+  /* ══ v4.236 — 📏 ACTUAL STOP: thể tích bồn đọc được lúc DỪNG C4 / DỪNG C3 ══
+     Chỉ đạo giám đốc (07/10/2026): mỗi mẻ phải ghi lại thể tích sau khi
+     dừng từng sản phẩm ⇒ biết thể tích C4 / C3 THỰC SỰ đã bơm vào bồn.
+     • Hai ô nằm trong HTML tĩnh (index.html, ngay dưới khối STOP) — KHÔNG
+       nằm trong vùng mc-r vẽ lại bằng innerHTML, nên gõ không mất focus.
+     • Thể tích đã bơm tính bằng ENG.xferCalc — cùng một hàm với Tank Log và
+       email P1.
+     • Số gõ KHÔNG tự lưu: ô viền vàng = chưa lưu. Lưu khi bấm 💾 của ô
+       (đang mix ⇒ giữ ở eng_mix_state/tkN cho máy khác thấy; lot đã có dòng
+       Tank Log ⇒ ghi thẳng 2 ô [81][82]) hoặc khi ⏹FINISH / 💾 SAVE. */
+  const XC = { v4:81, v3:82 };   /* PHẢI khớp ENG.X_COLS */
+  const ACT_SAVED = { '1':{ c4:'', c3:'' }, '2':{ c4:'', c3:'' } };
+  function _xStr(id){ return String(_gv(id) || '').trim(); }
+  function _xOk(s){ return s === '' || isFinite(Number(String(s).replace(/[\s,]/g,''))); }
+  function _xVal(s){ const t = String(s || '').replace(/[\s,]/g,''); return t === '' ? null : Math.round(Number(t) * 1000) / 1000; }
+  function _actRender(n){
+    const box = _gid('mc-act'+n); if(!box) return;
+    const e4 = _gid('mc-xc4'+n), e3 = _gid('mc-xc3'+n), out = _gid('mc-xout'+n);
+    const s4 = _xStr('mc-xc4'+n), s3 = _xStr('mc-xc3'+n);
+    box.classList.toggle('on', ST[n] === 'mixing' || !!_xStr('mc-l'+n) || !!s4 || !!s3);
+    const fill = FILL[n] || '';
+    const first = (ORD[n] || 'C4') === 'C4' ? 'C4' : 'C3', last = first === 'C4' ? 'C3' : 'C4';
+    /* v4.237 — sản phẩm bơm SAU dừng ở thể tích cuối ⇒ ô của nó để trống thì lấy FINAL VOL */
+    const fvS = fill ? '' : _xStr('gc'+n+'-fvol');
+    const eLast = last === 'C4' ? e4 : e3, eFirst = first === 'C4' ? e4 : e3;
+    if(eFirst){ eFirst.placeholder = ''; eFirst.title = 'Tank volume (m³) read right after the '+first+' transfer STOPPED (pumped first)'; }
+    if(eLast){
+      eLast.placeholder = fill ? '' : (fvS ? '= '+fvS : '= final vol');
+      eLast.title = 'Tank volume (m³) read right after the '+last+' transfer STOPPED (pumped last). Leave it empty to use FINAL VOL.';
+    }
+    const ok4 = _xOk(s4), ok3 = _xOk(s3);
+    if(e4){ e4.classList.toggle('dirty', s4 !== ACT_SAVED[n].c4); e4.classList.toggle('mc-inp-bad', !ok4); }
+    if(e3){ e3.classList.toggle('dirty', s3 !== ACT_SAVED[n].c3); e3.classList.toggle('mc-inp-bad', !ok3); }
+    const sv = _gid('mc-xsave'+n);
+    if(sv) sv.classList.toggle('dirty', s4 !== ACT_SAVED[n].c4 || s3 !== ACT_SAVED[n].c3);
+    if(!out) return;
+    if(typeof ENG === 'undefined' || typeof ENG.xferCalc !== 'function'){ out.innerHTML = ''; return; }
+    const x = ENG.xferCalc(_gv('mc-iv'+n), ok4 ? s4.replace(/[\s,]/g,'') : '', ok3 ? s3.replace(/[\s,]/g,'') : '', fvS);
+    if(x.v4 === null && x.v3 === null){
+      out.innerHTML = '<span class="mc-x-hint">Type the ACTUAL volume in STOP '+(fill || first)+' when the transfer stops</span>';
+      return;
+    }
+    const seg = (p, prod) => p === null ? '' :
+      '<span class="mc-x-p '+(prod === 'C4' ? 'c4' : 'c3')+(p < 0 ? ' neg' : '')+'" title="'+prod+' volume pumped into the tank (m³) = '
+      +'Vol @ '+prod+' stop − '+(x.first === prod ? 'INIT VOL' : 'Vol @ '+(prod === 'C4' ? 'C3' : 'C4')+' stop')+'">'
+      +prod+' pumped <b>'+_fmt(p, 3)+'</b> m³</span>';
+    const parts = (first === 'C4' ? [seg(x.p4,'C4'), seg(x.p3,'C3')] : [seg(x.p3,'C3'), seg(x.p4,'C4')]).filter(Boolean);
+    if(x.fb) parts.push('<span class="mc-x-hint">'+(x.fb === 'v4' ? 'C4' : 'C3')+' stop = FINAL VOL '+_fmt(x.fv, 3)+' m³</span>');
+    const warn = x.bad.slice();
+    if((x.p4 !== null && x.p4 < 0) || (x.p3 !== null && x.p3 < 0)) warn.push('negative volume — check the readings');
+    if(!fill && !(first === 'C4' ? s4 : s3) && (first === 'C4' ? s3 : s4)) warn.push('STOP '+first+' (pumped first) is empty');
+    else if(!fill && x.v4 !== null && x.v3 !== null && !x.fb && x.first !== first)
+      warn.push('readings say '+x.first+' was pumped first — the panel is set to '+first+' first');
+    out.innerHTML = parts.join('') + (warn.length ? '<span class="mc-x-bad">⚠ '+_escHtml(warn.join(' · '))+'</span>' : '');
+  }
+  /* v4.237 — ô nhập nằm NGAY TRONG thẻ STOP C4 / STOP C3 (vùng mc-r vẽ lại bằng innerHTML).
+     Trước mỗi lần vẽ lại: _actPark dời hai <label> về chỗ giữ (mc-xhold) — không thì
+     innerHTML xoá mất chính element đang giữ số gõ dở. Sau khi vẽ: _actMount gắn lại
+     vào ô .mc-xslot và trả lại con trỏ nếu đang gõ. Sản phẩm NO PUMP không có ô. */
+  function _actPark(n){
+    const h = _gid('mc-xhold'+n); if(!h) return null;
+    const act = document.activeElement; let foc = null;
+    ['4','3'].forEach(k => {
+      const f = _gid('mc-xf'+k+n);
+      if(!f || f.parentNode === h) return;
+      if(act && f.contains(act)){ try{ foc = { id:act.id, s:act.selectionStart, e:act.selectionEnd }; }catch(_){ foc = { id:act.id }; } }
+      h.appendChild(f);
+    });
+    return foc;
+  }
+  function _actMount(n, foc){
+    const r = _gid('mc-r'+n);
+    if(r) r.querySelectorAll('.mc-xslot').forEach(sl => {
+      const f = _gid('mc-xf'+(sl.getAttribute('data-p') === 'C4' ? '4' : '3')+n);
+      if(f) sl.appendChild(f);
+    });
+    if(foc){ const e = _gid(foc.id); if(e && r && r.contains(e)){ try{ e.focus(); if(foc.s != null) e.setSelectionRange(foc.s, foc.e); }catch(_){} } }
+    _actRender(n);
+  }
+  function actInput(n){ _actRender(n); }
+  function _actClear(n){
+    ['mc-xc4'+n, 'mc-xc3'+n].forEach(id => { const e = _gid(id); if(e) e.value = ''; });
+    ACT_SAVED[n] = { c4:'', c3:'' };
+    _actRender(n);
+  }
+  /* trạng thái mix từ máy khác mang số dừng đã lưu — chỉ đè lên ô KHÔNG đang gõ dở */
+  function _actFromRemote(n, v){
+    [['c4','mc-xc4'+n,'xc4'], ['c3','mc-xc3'+n,'xc3']].forEach(([k, id, f])=>{
+      if(v[f] == null) return;
+      const e = _gid(id); if(!e) return;
+      if(String(e.value || '').trim() === ACT_SAVED[n][k]){ e.value = String(v[f]); ACT_SAVED[n][k] = String(v[f]).trim(); }
+    });
+    _actRender(n);
+  }
+  /* sau khi dòng Tank Log đã nhận số dừng (FINISH / SAVE) */
+  function _actMarkSaved(n){
+    ACT_SAVED[n] = { c4:_xStr('mc-xc4'+n), c3:_xStr('mc-xc3'+n) };
+    _actRender(n);
+  }
+  async function actSave(n){
+    const tk = n === '1' ? '3501' : '3502', tkName = 'TK-'+tk;
+    const s4 = _xStr('mc-xc4'+n), s3 = _xStr('mc-xc3'+n);
+    if(!_xOk(s4) || !_xOk(s3)){
+      toast('❌ TK-'+tk+': '+(!_xOk(s4) ? 'C4 stop' : 'C3 stop')+' is not a number — nothing was saved','er'); return;
+    }
+    const lotNum = parseInt(_gv('mc-l'+n)) || 0;
+    if(!lotNum){ toast('❌ TK-'+tk+': no lot yet — press ▶START first','er'); return; }
+    const lotStr = _lotName(lotNum);
+    const x = (typeof ENG !== 'undefined' && ENG.xferCalc) ? ENG.xferCalc(_gv('mc-iv'+n), _xVal(s4), _xVal(s3), FILL[n] ? '' : _xStr('gc'+n+'-fvol')) : { bad:[], p4:null, p3:null };
+    const issues = x.bad.slice();
+    if(x.p4 !== null && x.p4 < 0) issues.push('C4 pumped = '+_fmt(x.p4,3)+' m³ (negative)');
+    if(x.p3 !== null && x.p3 < 0) issues.push('C3 pumped = '+_fmt(x.p3,3)+' m³ (negative)');
+    if(issues.length && !await UIDLG.ask('⚠ TK-'+tk+' — CHECK THE STOP READINGS\n\n'
+        + issues.map(s => '• '+s).join('\n') + '\n\nOK = save anyway · Cancel = go back')) return;
+    const v4 = s4 === '' ? '' : String(_xVal(s4)), v3 = s3 === '' ? '' : String(_xVal(s3));
+    const row = (typeof ENG !== 'undefined' && ENG.findRowByLotTank) ? ENG.findRowByLotTank(lotStr, tkName) : null;
+    if(row && ENG.setXferVol){
+      ENG.setXferVol(lotStr, tkName, v4, v3, (ok)=>{ if(ok){ ACT_SAVED[n] = { c4:s4, c3:s3 }; _actRender(n); } });
+      return;
+    }
+    if(ST[n] === 'mixing' && _fbRef){
+      _suppressEcho++;
+      _fbRef.child('tk'+n).update({ xc4:v4, xc3:v3 })
+        .then(()=>{
+          ACT_SAVED[n] = { c4:s4, c3:s3 }; _actRender(n);
+          toast('✓ TK-'+tk+' stop readings saved — they go into the Tank Log at ⏹FINISH','ok');
+        })
+        .catch(e=>{ console.warn('[MC] xstop push', e); toast('❌ TK-'+tk+': could not save (network/Firebase error) — try again','er'); })
+        .finally(()=> setTimeout(()=>{ _suppressEcho = Math.max(0, _suppressEcho - 1); }, 400));
+      _mlog('XSTOP', n, 'C4stop='+(v4 || '-')+' C3stop='+(v3 || '-'));
+      return;
+    }
+    toast('⚠ TK-'+tk+': lot '+lotStr+' is not in the Tank Log yet — press ⏹FINISH to save it with the readings','warn');
+  }
+
   return {
     init, refresh,
     /* v4.86 — phương pháp ② COQ (bảng density đã gỡ) */
@@ -3935,6 +4100,7 @@ const MC = (function(){
     ALT_COLS: { A_MID, A_T3, A_P3, A_T4, A_P4, A_DC3, A_DC4,
                 A_IDEN, A_IW3, A_ISRC, A_QC3, A_QC4, A_MTH },
     activate, calcOne, autoCalc, resetCalc,
+    actInput, actSave,   /* v4.236 — 📏 ACTUAL STOP */
     warnGo, warnAll, renderWarnbar: _renderWarnbar,   /* v4.215 */
     chkInp,           /* v4.79 (R2/R3) — kiểm tra & kẹp giá trị tại ô nhập */
     parseNum: _pnum,  /* v4.79 (R3) — parser chuẩn Excel US, dùng lại nơi khác */

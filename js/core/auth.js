@@ -81,7 +81,7 @@ window.AUTH = (function () {
      ghi Firebase nên cổng đường dẫn ở trên không chạm tới được — phải thay thân
      hàm. Tên viết dạng "TEN_TOAN_CUC" hoặc "OBJ.method". */
   var LOCK_FNS = [
-    'exportCsv', 'tpExportCsv', 'tmrExportCsv', 'tlExportCsv', 'wgExportCsv',
+    'exportCsv', 'tlExportCsv', 'wgExportCsv',
     'wsExportCsv', 'spExportCsv', 'ctExportCsv', 'ppExportCsv', 'vsExport',
     'rptExecuteExport', 'ENG.exportXlsx', 'BOND.exportXlsx', 'MTHR.exportXlsx',
     'PLOG.exportXlsx', 'VLOG.exportXlsx', 'VLOG.exportCsv',
